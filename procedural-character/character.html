@@ -1,0 +1,445 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Procedural Tiefling</title>
+<style>html,body{margin:0;background:#fff}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script id="fs" type="x-shader/x-fragment">#version 300 es
+// Procedural tiefling character: everything below is signed distance functions,
+// no textures, meshes or images. Units are metres, y up, character faces +z.
+precision highp float;
+uniform vec2 uRes;
+uniform int uView;      // 0 = full body, 1 = face close-up
+uniform vec2 uTile;     // tile offset in pixels (lets us render in chunks)
+out vec4 fragColor;
+
+#define MAT_FLOOR 0.
+#define MAT_SKIN  1.
+#define MAT_TOP   2.
+#define MAT_PANTS 3.
+#define MAT_HAIR  4.
+#define MAT_HORN  5.
+#define MAT_EYE   6.
+#define MAT_LIPS  7.
+#define MAT_GOLD  8.
+#define MAT_STRAP 9.
+
+// ---------- SDF primitives (after Inigo Quilez) ----------
+float sdSphere(vec3 p, float r){ return length(p)-r; }
+float sdEllipsoid(vec3 p, vec3 r){
+  float k0 = length(p/r), k1 = length(p/(r*r));
+  return k0*(k0-1.0)/k1;
+}
+float sdRoundCone(vec3 p, vec3 a, vec3 b, float r1, float r2){
+  vec3 ba = b-a; float l2 = dot(ba,ba), rr = r1-r2, a2 = l2-rr*rr, il2 = 1.0/l2;
+  vec3 pa = p-a; float y = dot(pa,ba), z = y-l2;
+  vec3 xv = pa*l2-ba*y; float x2 = dot(xv,xv), y2 = y*y*l2, z2 = z*z*l2;
+  float k = sign(rr)*rr*rr*x2;
+  if(sign(z)*a2*z2 > k) return sqrt(x2+z2)*il2-r2;
+  if(sign(y)*a2*y2 < k) return sqrt(x2+y2)*il2-r1;
+  return (sqrt(x2*a2*il2)+y*rr)*il2-r1;
+}
+float sdCapsule(vec3 p, vec3 a, vec3 b, float r){
+  vec3 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);
+  return length(pa-ba*h)-r;
+}
+float sdTorus(vec3 p, vec2 t){ vec2 q=vec2(length(p.xz)-t.x,p.y); return length(q)-t.y; }
+float smin(float a, float b, float k){
+  float h = max(k-abs(a-b),0.0)/k; return min(a,b)-h*h*k*0.25;
+}
+float smax(float a, float b, float k){ return -smin(-a,-b,k); }
+float hash(vec3 p){ p=fract(p*0.3183099+.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+float noise(vec3 x){
+  vec3 i=floor(x), f=fract(x); f=f*f*(3.-2.*f);
+  return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),
+             mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);
+}
+
+// ---------- body parts ----------
+const vec3 HEAD_PIVOT = vec3(0,1.48,0);
+const float HEAD_SCALE = 1.1;
+vec3 headSpace(vec3 p){ return HEAD_PIVOT + (p-HEAD_PIVOT)/HEAD_SCALE; }
+vec2 opU(vec2 a, vec2 b){ return a.x<b.x ? a : b; }
+
+float sdHead(vec3 p){
+  vec3 q = p-vec3(0,1.625,0);
+  float d = sdEllipsoid(q-vec3(0,0.012,-0.01), vec3(0.08,0.092,0.095));       // cranium
+  d = smin(d, sdEllipsoid(q-vec3(0,-0.04,0.022), vec3(0.066,0.062,0.072)), 0.04);  // jaw
+  d = smin(d, sdEllipsoid(q-vec3(0,-0.088,0.055), vec3(0.026,0.02,0.024)), 0.03);// chin
+  vec3 c = vec3(abs(q.x),q.yz);
+  d = smin(d, sdEllipsoid(c-vec3(0.044,-0.018,0.062), vec3(0.032,0.026,0.026)), 0.03); // cheekbones
+  // eye sockets
+  d = smax(d, -sdEllipsoid(c-vec3(0.033,0.006,0.083), vec3(0.021,0.012,0.014)), 0.012);
+  // brow ridge
+  d = smin(d, sdEllipsoid(c-vec3(0.033,0.026,0.078), vec3(0.026,0.007,0.012)), 0.012);
+  // nose
+  d = smin(d, sdRoundCone(q, vec3(0,0.008,0.09), vec3(0,-0.028,0.108), 0.0055, 0.011), 0.01);
+  d = smin(d, sdEllipsoid(c-vec3(0.011,-0.033,0.094), vec3(0.008,0.006,0.007)), 0.006);
+  return d;
+}
+
+float sdLips(vec3 p){
+  vec3 q = p-vec3(0,1.625,0);
+  vec3 c = vec3(abs(q.x),q.yz);
+  // slight smirk: corners pulled up on one side
+  float smile = 10.0*q.x*q.x + 0.003*smoothstep(0.0,0.02,q.x);
+  float up = sdEllipsoid(c-vec3(0.0,-0.05+smile,0.091), vec3(0.022,0.006,0.01));
+  float lo = sdEllipsoid(c-vec3(0.0,-0.061+smile,0.088), vec3(0.02,0.0075,0.01));
+  return min(up,lo);
+}
+
+float sdEyes(vec3 p){
+  vec3 q = p-vec3(0,1.625,0);
+  vec3 c = vec3(abs(q.x),q.yz);
+  return sdEllipsoid(c-vec3(0.033,0.006,0.08), vec3(0.0115,0.0052,0.0065));
+}
+
+float sdEars(vec3 p){
+  vec3 c = vec3(abs(p.x),p.yz);
+  vec3 a = vec3(0.074,1.62,-0.005), b = vec3(0.14,1.672,-0.04);
+  vec3 q = c;
+  float d = sdRoundCone(q, a, b, 0.017, 0.002);
+  // flatten the ear along its outward normal
+  return max(d, abs(dot(c-a, normalize(vec3(0.55,-0.1,0.83))))-0.006);
+}
+
+float sdHorns(vec3 p){
+  vec3 c = vec3(abs(p.x),p.yz);
+  // curved horn as a chain of tapering cones sweeping up, out and back
+  vec3 h0=vec3(0.035,1.695,0.055), h1=vec3(0.048,1.75,0.05), h2=vec3(0.062,1.79,0.015),
+       h3=vec3(0.072,1.81,-0.04), h4=vec3(0.075,1.80,-0.1);
+  float d = sdRoundCone(c,h0,h1,0.014,0.0115);
+  d = smin(d, sdRoundCone(c,h1,h2,0.0115,0.009),0.004);
+  d = smin(d, sdRoundCone(c,h2,h3,0.009,0.006),0.003);
+  d = smin(d, sdRoundCone(c,h3,h4,0.006,0.0015),0.003);
+  return d;
+}
+
+float sdHair(vec3 p){
+  vec3 q = p-vec3(0,1.625,0);
+  // cap over the cranium, cut away at the hairline
+  float cap = sdEllipsoid(q-vec3(0,0.03,-0.02), vec3(0.092,0.108,0.108));
+  float hairline = dot(q-vec3(0,0.045,0.07), normalize(vec3(0,-0.45,1.0)));
+  cap = smax(cap, hairline, 0.02);
+  // long fall down the back and over the shoulders
+  float back = sdEllipsoid(p-vec3(0,1.42,-0.085), vec3(0.15,0.24,0.07));
+  back = max(back, -(p.z+0.06) + 0.06*smoothstep(1.5,1.25,p.y));   // stays behind the shoulders
+  vec3 c = vec3(abs(p.x),p.yz);
+  float sides = sdRoundCone(c, vec3(0.075,1.6,-0.02), vec3(0.13,1.3,0.02), 0.04, 0.035);
+  // big side-swept bang across one side of the forehead (the red streak)
+  float bang = sdRoundCone(p, vec3(-0.02,1.725,0.07), vec3(0.085,1.6,0.075), 0.022, 0.03);
+  float d = smin(cap, back, 0.06);
+  d = smin(d, sides, 0.04);
+  d = smin(d, bang, 0.025);
+  // keep hair off the face
+  float face = sdEllipsoid(q-vec3(-0.01,-0.03,0.05), vec3(0.068,0.1,0.08));
+  d = smax(d, -face, 0.012);
+  // strands
+  float s = 0.0012*sin(atan(q.x,q.z)*90.0 + 4.0*noise(p*20.0)) + 0.0015*noise(p*80.0);
+  return d + s;
+}
+
+float sdTorso(vec3 p){
+  vec3 c = vec3(abs(p.x),p.yz);
+  float d = sdRoundCone(p, vec3(0,1.46,-0.015), vec3(0,1.55,-0.01), 0.04, 0.035);       // neck
+  d = smin(d, sdEllipsoid(p-vec3(0,1.33,-0.01), vec3(0.155,0.11,0.085)), 0.06);           // ribcage
+  d = smin(d, sdCapsule(c, vec3(0.04,1.42,-0.01), vec3(0.17,1.415,-0.02), 0.042), 0.05); // shoulders
+  d = smin(d, sdEllipsoid(p-vec3(0,1.12,0.0), vec3(0.105,0.11,0.075)), 0.07);            // narrow waist
+  d = smin(d, sdEllipsoid(p-vec3(0,0.93,-0.01), vec3(0.205,0.12,0.12)), 0.11);           // wide hips
+  d = smin(d, sdSphere(c-vec3(0.072,0.92,-0.07), 0.095), 0.06);                          // glutes
+  d = smin(d, sdSphere(c-vec3(0.07,1.28,0.045), 0.062), 0.035);                          // bust
+  return d;
+}
+
+// Legs are wrapped in flared lounge pants that reach the floor.
+float sdLegs(vec3 p){
+  vec3 c = vec3(abs(p.x),p.yz);
+  float d = sdRoundCone(c, vec3(0.105,0.86,0.0), vec3(0.09,0.5,0.005), 0.115, 0.066);   // thick thighs
+  d = smin(d, sdRoundCone(c, vec3(0.09,0.5,0.005), vec3(0.1,0.03,0.01), 0.064, 0.09), 0.04); // flare
+  d = max(d, -p.y+0.022);
+  return d;
+}
+
+float sdFeet(vec3 p){
+  vec3 c = vec3(abs(p.x),p.yz);
+  return sdEllipsoid(c-vec3(0.1,0.022,0.075), vec3(0.036,0.022,0.07));
+}
+
+float sdArms(vec3 p){
+  vec3 c = vec3(abs(p.x),p.yz);
+  vec3 sh=vec3(0.195,1.4,-0.02), el=vec3(0.215,1.13,-0.06), wr=vec3(0.14,0.95,-0.15);
+  float d = sdRoundCone(c, sh, el, 0.045, 0.034);
+  d = smin(d, sdRoundCone(c, el, wr, 0.032, 0.024), 0.02);
+  d = smin(d, sdSphere(c-vec3(0.1,0.93,-0.17), 0.035), 0.03);    // hands clasped behind
+  return d;
+}
+
+float sdStraps(vec3 p){
+  vec3 c = vec3(abs(p.x),p.yz);
+  // thin cami straps running over the shoulders
+  float f = sdCapsule(c, vec3(0.085,1.31,0.075), vec3(0.11,1.44,0.02), 0.0035);
+  float b = sdCapsule(c, vec3(0.11,1.44,0.02), vec3(0.1,1.34,-0.085), 0.0035);
+  return min(f,b);
+}
+
+float sdEarrings(vec3 p){
+  vec3 c = vec3(abs(p.x),p.yz);
+  vec3 q = c-vec3(0.088,1.555,0.008);
+  return sdTorus(q.xzy, vec2(0.018,0.0022));
+}
+
+vec2 map(vec3 p){
+  vec2 r = vec2(p.y, MAT_FLOOR);
+  if(length(p-vec3(0,1.0,0)) > 1.25) return r;      // bounding sphere for the figure
+
+  vec3 hp = headSpace(p);
+  float torso = sdTorso(p);
+  float head  = sdHead(hp)*HEAD_SCALE;
+  float ears  = sdEars(hp)*HEAD_SCALE;
+  float body  = smin(torso, head, 0.015);
+  body = smin(body, ears, 0.008);
+  float arms  = sdArms(p);
+  float legs  = sdLegs(p);
+
+  // cami gets a hair of thickness so its hem sits proud of the skin
+  float topZone = smoothstep(1.105,1.115,p.y) * (1.0 - smoothstep(1.2,1.22,p.y)*step(p.y,1.6));
+  float skin = smin(body, arms, 0.025);
+  float bodyD = smin(skin, legs, 0.05);
+  float mat = MAT_SKIN;
+  if(p.y < 1.04 && arms > bodyD + 0.004 && p.y > 0.03) mat = MAT_PANTS;
+  // cami: from the hem up to a lace-trimmed neckline across the bust
+  float neck = 1.315 + 0.02*smoothstep(0.0,0.1,abs(p.x)) - 0.03*exp(-p.x*p.x/0.0008);
+  if(p.y > 1.11 && p.y < neck && arms > bodyD + 0.004) mat = MAT_TOP;
+  if(p.y > 1.11 && p.y < 1.45 && p.z < -0.02 && arms > bodyD + 0.004) mat = (p.y < 1.36 ? MAT_TOP : mat);
+  r = opU(r, vec2(bodyD, mat));
+  r = opU(r, vec2(sdFeet(p), MAT_SKIN));
+  r = opU(r, vec2(sdHair(hp)*HEAD_SCALE, MAT_HAIR));
+  r = opU(r, vec2(sdHorns(hp)*HEAD_SCALE, MAT_HORN));
+  r = opU(r, vec2(sdEyes(hp)*HEAD_SCALE, MAT_EYE));
+  r = opU(r, vec2(sdLips(hp)*HEAD_SCALE, MAT_LIPS));
+  r = opU(r, vec2(sdEarrings(hp)*HEAD_SCALE, MAT_GOLD));
+  r = opU(r, vec2(sdStraps(p), MAT_STRAP));
+  return r;
+}
+
+vec3 calcNormal(vec3 p){
+  const float e = 0.0004;
+  vec2 k = vec2(1,-1);
+  return normalize(k.xyy*map(p+k.xyy*e).x + k.yyx*map(p+k.yyx*e).x +
+                   k.yxy*map(p+k.yxy*e).x + k.xxx*map(p+k.xxx*e).x);
+}
+
+vec3 eyeGlow;   // accumulated emission from the glowing eyes along the primary ray
+
+vec2 march(vec3 ro, vec3 rd){
+  float t = 0.0; eyeGlow = vec3(0);
+  for(int i=0;i<300;i++){
+    vec3 p = ro+rd*t;
+    vec2 h = map(p);
+    float de = sdEyes(headSpace(p))*HEAD_SCALE;
+    eyeGlow += vec3(1.0,0.75,0.15) * 0.0004/(0.0008+de*de*900.0) * step(0.0,de);
+    if(abs(h.x) < 0.00015*t) return vec2(t,h.y);
+    t += h.x*0.7;
+    if(t > 20.0) break;
+  }
+  return vec2(-1.0);
+}
+
+float softShadow(vec3 ro, vec3 rd){
+  float res = 1.0, t = 0.01;
+  for(int i=0;i<64;i++){
+    float h = map(ro+rd*t).x;
+    res = min(res, 10.0*h/t);
+    t += clamp(h, 0.005, 0.15);
+    if(res < 0.001 || t > 4.0) break;
+  }
+  return clamp(res,0.0,1.0);
+}
+
+float ambientOcclusion(vec3 p, vec3 n){
+  float occ = 0.0, sca = 1.0;
+  for(int i=0;i<6;i++){
+    float h = 0.005 + 0.03*float(i);
+    occ += (h - map(p+n*h).x)*sca;
+    sca *= 0.8;
+  }
+  return clamp(1.0 - 2.5*occ, 0.0, 1.0);
+}
+
+// lace: scalloped floral band near a hem height
+float lace(vec3 p, float y0, float w){
+  float band = 1.0 - smoothstep(w*0.8, w, abs(p.y-y0));
+  float scallop = 0.5+0.5*sin(atan(p.x,p.z)*60.0);
+  float holes = smoothstep(0.35,0.6, noise(p*420.0)) ;
+  return band * mix(0.55, 1.0, scallop*holes);
+}
+
+vec3 shade(vec3 ro, vec3 rd, vec2 hit){
+  vec3 p = ro + rd*hit.x;
+  vec3 n = calcNormal(p);
+  float m = hit.y;
+
+  vec3 alb; float spec = 0.2, rough = 0.5, sss = 0.0; vec3 emit = vec3(0);
+  if(m == MAT_FLOOR){
+    alb = vec3(0.95); spec = 0.0;
+  } else if(m == MAT_SKIN){
+    // deep crimson skin with faint freckles across the cheeks and nose
+    alb = vec3(0.36,0.075,0.065);
+    vec3 hq = headSpace(p);
+    float fr = smoothstep(0.7,0.78,noise(hq*900.0)) * exp(-pow((hq.y-1.605)/0.022,2.0)) * step(0.06,hq.z);
+    alb = mix(alb, vec3(0.2,0.03,0.03), fr*0.55);
+    vec3 c = vec3(abs(hq.x),hq.yz)-vec3(0.033,1.631,0.085);
+    // purple eyeshadow above the lid
+    alb = mix(alb, vec3(0.16,0.04,0.16), 0.75*exp(-dot(c.xy,c.xy)/0.0002)*step(0.0,c.y));
+    // dark liner hugging the eye
+    float e = length(c.xy/vec2(0.0165,0.0085));
+    alb = mix(alb, vec3(0.02,0.0,0.01), smoothstep(1.5,1.15,e)*0.95);
+    // arched brows
+    float bx = c.x+0.002, by = c.y - 0.026 + 14.0*(bx-0.004)*(bx-0.004) - 0.05*bx;
+    float brow = smoothstep(0.0034,0.0016,abs(by))*smoothstep(0.022,0.014,abs(bx-0.002));
+    alb = mix(alb, vec3(0.03,0.01,0.01), brow);
+    sss = 1.0; spec = 0.35; rough = 0.35;
+  } else if(m == MAT_TOP || m == MAT_STRAP){
+    alb = vec3(0.33,0.52,0.8);
+    // ribbed knit
+    alb *= 0.93 + 0.07*sin(p.x*900.0);
+    if(m == MAT_TOP){
+      float neck = 1.315 + 0.02*smoothstep(0.0,0.1,abs(p.x)) - 0.03*exp(-p.x*p.x/0.0008);
+      float l = max(lace(p, neck-0.005, 0.007), lace(p, 1.116, 0.007));
+      alb = mix(alb, vec3(0.93,0.94,0.96), l);
+    }
+    spec = 0.08; rough = 0.8;
+  } else if(m == MAT_PANTS){
+    alb = vec3(0.33,0.52,0.8);
+    alb *= 0.94 + 0.06*sin(p.x*800.0 + p.z*300.0);
+    alb = mix(alb, vec3(0.93,0.94,0.96), lace(p, 1.028, 0.01));
+    spec = 0.06; rough = 0.85;
+  } else if(m == MAT_HAIR){
+    alb = vec3(0.018,0.016,0.02);
+    // crimson streak through the side-swept bang
+    vec3 hq = headSpace(p);
+    float streak = smoothstep(0.012,0.0,abs(hq.x-0.05+0.25*(hq.y-1.65))-0.022) * smoothstep(1.52,1.6,hq.y) * step(0.0,hq.z+0.02);
+    alb = mix(alb, vec3(0.13,0.008,0.016), streak);
+    spec = 0.9; rough = 0.25;
+  } else if(m == MAT_HORN){
+    vec3 hq = headSpace(p);
+    float ridges = 0.5+0.5*sin(length(hq-vec3(sign(hq.x)*0.035,1.70,0.06))*260.0);
+    alb = mix(vec3(0.12,0.015,0.02), vec3(0.22,0.03,0.03), ridges)*mix(1.0,0.45,smoothstep(1.76,1.82,hq.y));
+    spec = 0.5; rough = 0.35;
+  } else if(m == MAT_EYE){
+    alb = vec3(0); spec = 0.6; rough = 0.1;
+    emit = vec3(1.0,0.82,0.2)*2.2;
+  } else if(m == MAT_LIPS){
+    alb = vec3(0.06,0.015,0.1); spec = 0.8; rough = 0.2;
+  } else {
+    alb = vec3(0.9,0.62,0.22); spec = 1.0; rough = 0.15;   // gold
+  }
+
+  // white studio: big soft key light from front-left, fill from right, rim from behind
+  vec3 key = normalize(vec3(-0.7,0.6,0.6));
+  vec3 fill = normalize(vec3(0.7,0.3,0.6));
+  vec3 rim = normalize(vec3(0.2,0.5,-1.0));
+  float ao = ambientOcclusion(p,n);
+  float sh = softShadow(p+n*0.002, key);
+
+  float dk = dot(n,key);
+  float diff = clamp(dk,0.0,1.0);
+  // cheap subsurface: wrap lighting tinted red
+  vec3 wrap = sss*vec3(0.6,0.12,0.08)*clamp((dk+0.5)/1.5,0.0,1.0)*0.5;
+  vec3 col = alb*(diff*sh*vec3(1.0,0.97,0.93)*1.25 + wrap*mix(0.4,1.0,sh));
+  col += alb*clamp(dot(n,fill),0.0,1.0)*vec3(0.9,0.95,1.0)*0.35*ao;
+  col += alb*(0.5+0.5*n.y)*vec3(0.95)*0.3*ao;                    // sky/studio bounce
+  col += alb*clamp(-n.y,0.,1.)*0.25*ao;                           // floor bounce
+  float fres = pow(1.0-clamp(dot(n,-rd),0.0,1.0),4.0);
+  col += vec3(1.0)*pow(clamp(dot(n,rim),0.0,1.0),2.0)*0.3*(m==MAT_FLOOR?0.0:1.0)*ao;
+  vec3 h = normalize(key-rd);
+  float sp = pow(clamp(dot(n,h),0.0,1.0), mix(8.0,120.0,1.0-rough));
+  vec3 specCol = (m == MAT_GOLD) ? alb : vec3(1);
+  col += specCol*spec*sp*sh*(0.04+0.96*fres+0.3)*1.2;
+  col += vec3(1)*spec*fres*0.12*ao*(m==MAT_FLOOR?0.0:1.0);
+  col += emit;
+
+  if(m == MAT_FLOOR){
+    // seamless cyclorama: floor fades into the white backdrop with a soft contact shadow
+    col = vec3(0.96)*mix(0.55,1.0,sh)*mix(0.5,1.0,ao);
+    col = mix(col, vec3(0.97), smoothstep(2.0,6.0,hit.x));
+  }
+  return col;
+}
+
+mat3 lookAt(vec3 ro, vec3 ta){
+  vec3 f = normalize(ta-ro), r = normalize(cross(f,vec3(0,1,0))), u = cross(r,f);
+  return mat3(r,u,f);
+}
+
+void main(){
+  vec3 ro, ta; float focal;
+  if(uView == 0){ ro = vec3(0.0,0.98,4.6); ta = vec3(0,0.95,0); focal = 4.4; }
+  else          { ro = vec3(0.04,1.65,0.62); ta = vec3(0.0,1.645,0.0); focal = 2.8; }
+  mat3 cam = lookAt(ro,ta);
+  vec3 tot = vec3(0);
+  const int AA = 2;
+  for(int j=0;j<AA;j++) for(int i=0;i<AA;i++){
+    vec2 px = gl_FragCoord.xy + uTile + (vec2(i,j)+0.5)/float(AA) - 0.5;
+    vec2 uv = (2.0*px - uRes)/uRes.y;
+    vec3 rd = cam*normalize(vec3(uv,focal));
+    vec2 hit = march(ro,rd);
+    vec3 col = hit.x > 0.0 ? shade(ro,rd,hit) : vec3(0.97);
+    col += eyeGlow*0.6;
+    tot += col;
+  }
+  tot /= float(AA*AA);
+  // filmic tone map + gamma
+  tot = tot*(2.51*tot+0.03)/(tot*(2.43*tot+0.59)+0.14);
+  tot = pow(clamp(tot,0.0,1.0), vec3(1.0/2.2));
+  vec2 q = (gl_FragCoord.xy+uTile)/uRes;
+  tot *= 0.92 + 0.08*pow(16.0*q.x*q.y*(1.0-q.x)*(1.0-q.y),0.15);   // gentle vignette
+  fragColor = vec4(tot,1);
+}
+</script>
+<script>
+// Renders the shader in tiles (keeps each draw call short on a software GPU),
+// then exposes the finished image as a PNG data URL on window.result.
+const params = new URLSearchParams(location.search);
+const view = +(params.get('view')||0);
+const W = +(params.get('w')||(view?1024:768)), H = +(params.get('h')||(view?1024:1152));
+const TILE = 128;
+const out = document.getElementById('c'); out.width=W; out.height=H;
+const octx = out.getContext('2d');
+const gc = document.createElement('canvas'); gc.width=TILE; gc.height=TILE;
+const gl = gc.getContext('webgl2',{preserveDrawingBuffer:true});
+const vs = `#version 300 es
+in vec2 p; void main(){ gl_Position=vec4(p,0,1); }`;
+function sh(type,src){ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, document.getElementById('fs').textContent));
+gl.linkProgram(prog); gl.useProgram(prog);
+const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog,'p'); gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+gl.uniform2f(gl.getUniformLocation(prog,'uRes'), W, H);
+gl.uniform1i(gl.getUniformLocation(prog,'uView'), view);
+const uTile = gl.getUniformLocation(prog,'uTile');
+const tiles=[]; for(let y=0;y<H;y+=TILE) for(let x=0;x<W;x+=TILE) tiles.push([x,y]);
+let k=0;
+function step(){
+  if(k>=tiles.length){ window.result = out.toDataURL('image/png'); return; }
+  const [x,y]=tiles[k++];
+  gl.uniform2f(uTile, x, y);
+  gl.viewport(0,0,TILE,TILE);
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+  // GL origin is bottom-left; canvas origin is top-left
+  octx.drawImage(gc, x, H-y-TILE);
+  window.progress = k/tiles.length;
+  setTimeout(step,0);
+}
+step();
+</script>
+</body>
+</html>
