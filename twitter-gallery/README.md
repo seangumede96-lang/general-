@@ -89,3 +89,11 @@ extension, not on X):
   tile for pictures X won't serve.
 - Tapping a post opens the feed with it in the middle of the screen; Collections
   and each collection reopen where you left them.
+
+## Sorting bookmarks into folders
+
+⋯ → **Export all bookmarks for sorting** saves every loaded bookmark (link,
+author, the post's text, pictures, dates) as `x-bookmarks-all-<date>.json`.
+Once the posts are sorted, ⋯ → **Import sorted folders** reads the result (a
+normal collections backup) and adds each folder as a collection. Existing
+collections are kept; a folder with the same id gets the new posts added.

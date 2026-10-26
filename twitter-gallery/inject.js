@@ -70,6 +70,13 @@
     return m ? Date.parse(`${m[1]} ${m[2]}, ${m[4]} ${m[3]} UTC`) || null : null;
   }
 
+  // What the post says (long posts keep their full text elsewhere), without t.co links.
+  function postText(tweet) {
+    const long = tweet.note_tweet && tweet.note_tweet.note_tweet_results && tweet.note_tweet.note_tweet_results.result;
+    const text = (long && long.text) || (tweet.legacy && tweet.legacy.full_text) || "";
+    return text.replace(/https:\/\/t\.co\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 600) || null;
+  }
+
   function toItem(media, tweet, sortIndex) {
     const thumb = media.media_url_https;
     if (!thumb) return null;
@@ -80,6 +87,7 @@
       thumb: sized(thumb, "small"),
       posted,
       saved: sortIndex ? bookmarkTime(sortIndex, posted) : null,
+      text: postText(tweet),
       w: (media.original_info && media.original_info.width) || null,
       h: (media.original_info && media.original_info.height) || null,
     };

@@ -68,6 +68,7 @@
       out[f] = typeof item[f] === "string" && SAFE_MEDIA.test(item[f]) ? item[f] : null;
     }
     for (const f of ["saved", "posted", "w", "h"]) out[f] = Number.isFinite(item[f]) && item[f] > 0 ? item[f] : null;
+    out.text = typeof item.text === "string" && item.text ? item.text.slice(0, 600) : null;
     return out.thumb ? out : null;
   }
 
@@ -204,6 +205,36 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
     toast("Backup saved to your downloads");
+  }
+
+  // Every bookmark with what it says and who posted it, so the posts can be
+  // sorted into folders elsewhere; the folders come back as a normal backup file.
+  function exportForSorting() {
+    const items = allItems();
+    if (!items.length) return toast("Open your bookmarks first so they can load");
+    const posts = items.map((it) => ({
+      key: it.key,
+      tweet: it.tweet,
+      user: ((it.tweet || "").match(/^https:\/\/x\.com\/([^/]+)\/status\//) || [])[1] || null,
+      text: it.text,
+      type: it.type,
+      posted: it.posted,
+      saved: it.saved,
+      thumb: it.thumb,
+      full: it.full,
+      video: it.video,
+      w: it.w,
+      h: it.h,
+    }));
+    const data = JSON.stringify({ app: "x-bookmarks-gallery", kind: "all-bookmarks", version: 1, exported: Date.now(), collections, posts });
+    const name = `x-bookmarks-all-${new Date().toISOString().slice(0, 10)}.json`;
+    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+    const a = el("a", { href: url, download: name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast(`Exported ${plural(posts.length, "item")} to your downloads`);
   }
 
   function restore() {
@@ -447,6 +478,8 @@
           settings.theme = settings.theme === "light" ? "dark" : "light";
           applyTheme();
         }),
+        el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); exportForSorting(); } }, "Export all bookmarks for sorting"),
+        el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); restore(); } }, "Import sorted folders"),
         el("button", { class: "xbg-primary", onclick: () => closeSheet() }, "Done")
       )
     );
