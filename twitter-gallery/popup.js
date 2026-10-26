@@ -45,3 +45,14 @@ document.getElementById("goto").addEventListener("click", async () => {
   }
   window.close();
 });
+
+// Floating button setting (shared with the gallery through extension storage).
+const fabBox = document.getElementById("fab");
+ext.storage.local.get("xbg_settings").then((data) => {
+  fabBox.checked = !data.xbg_settings || data.xbg_settings.fab !== false;
+  fabBox.dataset.ready = "1";
+});
+fabBox.addEventListener("change", async () => {
+  const data = await ext.storage.local.get("xbg_settings");
+  await ext.storage.local.set({ xbg_settings: { ...(data.xbg_settings || {}), fab: fabBox.checked } });
+});

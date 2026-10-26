@@ -1,36 +1,49 @@
 // Shows the media from your X bookmarks in a full-screen grid, with
-// Instagram-style collections you can sort posts into.
+// Instagram-style collections, sorting, and month/year views.
 // inject.js loads every page of bookmarks in the background and sends the media
 // here. If X refuses those requests, this falls back to scrolling the bookmarks
 // page behind the gallery (and reading posts off the screen) while it is open.
+// The last full load is kept as a saved copy, so the gallery opens instantly.
 (() => {
   const ext = globalThis.browser || chrome;
-  const items = new Map(); // key -> item, in the order bookmarks were loaded
-  const savedItems = new Map(); // key -> item, for every post in a collection (kept in storage)
+  const store = ext.storage.local;
+
+  const fresh = new Map(); // key -> item loaded during this visit, in bookmark order
+  const cached = new Map(); // key -> item from the saved copy, shown until loading finishes
+  const savedItems = new Map(); // key -> item, for every post in a collection
   let collections = []; // [{ id, name, keys: [newest first] }]
+  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid" };
+  let cacheTime = 0;
+
   let view = "all"; // "all" | "collections" | "collection"
   let openId = null; // collection shown when view === "collection"
   let filter = "all";
-  let current = []; // items shown in the grid right now
-  let lbIndex = -1;
+  let entries = []; // what the grid shows: { item } or { header, label, count }
+  let current = []; // the items in `entries`, in order (for the full-screen viewer)
+  let totalCount = 0;
+  let shown = 0; // how many entries are in the page so far
+  const headerEls = new Map();
+  let lbKey = null;
   let ui = null;
-  let gotData = false; // inject.js has delivered media
+  let ball = null;
+  let gotData = false; // inject.js has delivered media during this visit
   let loadState = { state: "idle" };
   let scrollTimer = null;
   let selectMode = false;
   const selected = new Set();
-  const rendered = new Set(); // keys already in the grid
 
+  const PAGE = 60; // tiles added at a time as you scroll
   const SAFE_MEDIA = /^https:\/\/(pbs|video)\.twimg\.com\//;
   const SAFE_TWEET = /^https:\/\/x\.com\/[^\s"'<>]+$/;
-  const STORE_COLLECTIONS = "xbg_collections";
-  const STORE_ITEMS = "xbg_items";
+  const K = { collections: "xbg_collections", items: "xbg_items", settings: "xbg_settings", cache: "xbg_cache" };
 
   const isBookmarks = () => location.pathname.startsWith("/i/bookmarks");
+  const isMainBookmarks = () => location.pathname.replace(/\/$/, "") === "/i/bookmarks";
   const galleryOpen = () => ui && !ui.overlay.classList.contains("xbg-hidden");
-  const getItem = (key) => items.get(key) || savedItems.get(key);
+  const getItem = (key) => fresh.get(key) || cached.get(key) || savedItems.get(key);
   const getCollection = (id) => collections.find((c) => c.id === id);
   const isSaved = (key) => collections.some((c) => c.keys.includes(key));
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   function keyOf(url) {
     return url.split("?")[0].replace(/^https?:\/\/[^/]+\//, "").replace(/\.[a-z0-9]+$/i, "");
@@ -51,24 +64,35 @@
     for (const f of ["thumb", "full", "video"]) {
       out[f] = typeof item[f] === "string" && SAFE_MEDIA.test(item[f]) ? item[f] : null;
     }
+    for (const f of ["saved", "posted"]) out[f] = Number.isFinite(item[f]) ? item[f] : null;
     return out.thumb ? out : null;
+  }
+
+  function fill(target, src) {
+    for (const f in src) if (src[f] != null && target[f] == null) target[f] = src[f];
+    return target;
   }
 
   function addItem(raw) {
     const item = clean(raw);
     if (!item) return;
-    const old = items.get(item.key);
-    if (old) {
-      for (const f in item) if (item[f] && !old[f]) old[f] = item[f];
-    } else {
-      items.set(item.key, item);
-    }
+    const old = fresh.get(item.key);
+    if (old) fill(old, item);
+    else fresh.set(item.key, fill(item, cached.get(item.key) || {}));
     const saved = savedItems.get(item.key);
-    if (saved) for (const f in item) if (item[f] && !saved[f]) saved[f] = item[f];
-    scheduleRender();
+    if (saved) fill(saved, item);
+    scheduleRefresh();
   }
 
-  // --- Collections storage -------------------------------------------------
+  // Everything to show in "All posts": this visit's items first, then anything
+  // from the saved copy that hasn't been reloaded yet.
+  function allItems() {
+    const out = [...fresh.values()];
+    for (const [k, it] of cached) if (!fresh.has(k)) out.push(it);
+    return out;
+  }
+
+  // --- Storage -------------------------------------------------------------
 
   function cleanCollection(c) {
     if (!c || typeof c.name !== "string" || !Array.isArray(c.keys)) return null;
@@ -83,18 +107,43 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   }
 
-  async function loadCollections() {
+  async function loadStored() {
     try {
-      const data = await ext.storage.local.get([STORE_COLLECTIONS, STORE_ITEMS]);
-      collections = (data[STORE_COLLECTIONS] || []).map(cleanCollection).filter(Boolean);
-      for (const raw of Object.values(data[STORE_ITEMS] || {})) {
+      const data = await store.get(Object.values(K));
+      const s = data[K.settings] || {};
+      settings = { ...settings, ...s, ball: { ...settings.ball, ...(s.ball || {}) } };
+      collections = (data[K.collections] || []).map(cleanCollection).filter(Boolean);
+      for (const raw of Object.values(data[K.items] || {})) {
         const item = clean(raw);
         if (item) savedItems.set(item.key, item);
       }
+      const cache = data[K.cache];
+      if (cache && Array.isArray(cache.items) && !(gotData && loadState.state === "done")) {
+        cacheTime = Number(cache.at) || 0;
+        for (const raw of cache.items) {
+          const item = clean(raw);
+          if (item && !fresh.has(item.key)) cached.set(item.key, item);
+        }
+      }
     } catch (e) {
-      collections = [];
+      /* start empty */
     }
-    if (galleryOpen()) rebuild();
+    updateBall();
+    syncControls();
+    if (galleryOpen()) rebuild(false);
+  }
+
+  function saveSettings() {
+    store.set({ [K.settings]: settings }).catch(() => {});
+  }
+
+  // Keep the finished list as the saved copy for next time.
+  function saveCache() {
+    if (!fresh.size || !isMainBookmarks()) return;
+    cacheTime = Date.now();
+    cached.clear();
+    store.set({ [K.cache]: { at: cacheTime, items: [...fresh.values()] } }).catch(() => {});
+    scheduleRefresh();
   }
 
   function saveCollections() {
@@ -104,10 +153,16 @@
       if (item) savedItems.set(key, { ...item });
     }
     for (const key of [...savedItems.keys()]) if (!used.has(key)) savedItems.delete(key);
-    ext.storage.local
-      .set({ [STORE_COLLECTIONS]: collections, [STORE_ITEMS]: Object.fromEntries(savedItems) })
+    store
+      .set({ [K.collections]: collections, [K.items]: Object.fromEntries(savedItems) })
       .catch(() => toast("Couldn’t save your collections"));
   }
+
+  ext.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[K.settings] || !changes[K.settings].newValue) return;
+    settings.fab = changes[K.settings].newValue.fab !== false;
+    updateBall();
+  });
 
   function createCollection(name) {
     const c = { id: newId(), name: name.trim().slice(0, 60), keys: [] };
@@ -158,7 +213,7 @@
         }
         saveCollections();
         rebuild();
-        toast(`Restored ${added} collection${added === 1 ? "" : "s"}`);
+        toast(`Restored ${plural(added, "collection")}`);
       } catch (e) {
         toast("That file isn’t a collections backup");
       }
@@ -177,7 +232,10 @@
     if (e.data.status && typeof e.data.status.state === "string") {
       loadState = e.data.status;
       if (loadState.state === "failed" && galleryOpen()) startScrollLoading();
-      if (loadState.state === "done") stopScrollLoading();
+      if (loadState.state === "done") {
+        stopScrollLoading();
+        saveCache();
+      }
       updateHeader();
     }
   });
@@ -192,51 +250,66 @@
       const link = time && time.closest("a");
       if (!link) continue;
       const tweet = new URL(link.getAttribute("href"), "https://x.com").href.replace(/\/(photo|video|analytics)(\/\d+)?$/, "");
+      const posted = Date.parse(time.getAttribute("datetime") || "") || null;
       for (const img of article.querySelectorAll('img[src*="pbs.twimg.com/media/"]')) {
-        addItem({ key: keyOf(img.src), type: "photo", tweet, thumb: sized(img.src, "small"), full: sized(img.src, "large") });
+        addItem({ key: keyOf(img.src), type: "photo", tweet, posted, thumb: sized(img.src, "small"), full: sized(img.src, "large") });
       }
       for (const img of article.querySelectorAll('img[src*="video_thumb"]')) {
         const type = img.src.includes("tweet_video_thumb") ? "gif" : "video";
-        addItem({ key: keyOf(img.src), type, tweet, thumb: sized(img.src, "small"), full: sized(img.src, "large") });
+        addItem({ key: keyOf(img.src), type, tweet, posted, thumb: sized(img.src, "small"), full: sized(img.src, "large") });
       }
       for (const v of article.querySelectorAll("video[poster]")) {
         const src = v.currentSrc || v.src || "";
         const video = /^https:\/\/video\.twimg\.com\/.+\.mp4/.test(src) ? src : null;
         const type = v.poster.includes("tweet_video_thumb") ? "gif" : "video";
-        addItem({ key: keyOf(v.poster), type, tweet, thumb: sized(v.poster, "small"), full: sized(v.poster, "large"), video });
+        addItem({ key: keyOf(v.poster), type, tweet, posted, thumb: sized(v.poster, "small"), full: sized(v.poster, "large"), video });
       }
     }
   }
 
-  // Only scan the page when the background loader hasn't delivered anything,
-  // or while the scroll fallback is running; X's page changes constantly and
-  // scanning it all the time is slow.
+  // The page is only watched on the bookmarks page, and only until the
+  // background loader delivers (or while the scroll fallback runs).
+  let pageObserver = null;
   let scanQueued = false;
+  function watchPage() {
+    const want = isBookmarks() && (!gotData || scrollTimer);
+    if (want && !pageObserver && document.body) {
+      pageObserver = new MutationObserver(queueScan);
+      pageObserver.observe(document.body, { childList: true, subtree: true });
+    } else if (!want && pageObserver) {
+      pageObserver.disconnect();
+      pageObserver = null;
+    }
+  }
+
   function queueScan() {
-    if (scanQueued || (gotData && !scrollTimer) || !isBookmarks()) return;
+    if (scanQueued) return;
     scanQueued = true;
     setTimeout(() => {
       scanQueued = false;
       scanPage();
+      watchPage();
     }, 800);
   }
 
   function startScrollLoading() {
     if (scrollTimer || !isBookmarks()) return;
-    let lastSize = items.size;
+    let lastSize = fresh.size;
     let idle = 0;
     scrollTimer = setInterval(() => {
       window.scrollTo(0, document.documentElement.scrollHeight);
       scanPage();
-      if (items.size > lastSize) {
-        lastSize = items.size;
+      if (fresh.size > lastSize) {
+        lastSize = fresh.size;
         idle = 0;
       } else if (++idle >= 12) {
         stopScrollLoading();
         loadState = { state: "done" };
+        saveCache();
       }
       updateHeader();
     }, 1200);
+    watchPage();
     updateHeader();
   }
 
@@ -244,6 +317,7 @@
     if (!scrollTimer) return;
     clearInterval(scrollTimer);
     scrollTimer = null;
+    watchPage();
     updateHeader();
   }
 
@@ -260,12 +334,14 @@
     return node;
   }
 
-  function cover(c, cls) {
-    const thumbs = c.keys.map(getItem).filter(Boolean).slice(0, 4);
+  function mosaic(list, cls) {
+    const thumbs = list.filter(Boolean).slice(0, 4);
     const box = el("div", { class: `${cls} xbg-mosaic`, "data-n": String(thumbs.length) });
     for (const it of thumbs) box.append(el("img", { src: it.thumb, loading: "lazy", decoding: "async", alt: "", referrerpolicy: "no-referrer" }));
     return box;
   }
+
+  const cover = (c, cls) => mosaic(c.keys.slice(0, 4).map(getItem), cls);
 
   let toastTimer = null;
   function toast(text) {
@@ -274,6 +350,15 @@
     ui.toast.classList.remove("xbg-hidden");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => ui.toast.classList.add("xbg-hidden"), 2500);
+  }
+
+  function ago(t) {
+    const m = Math.round((Date.now() - t) / 60000);
+    if (m < 2) return "just now";
+    if (m < 60) return `${m} min ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return plural(Math.round(h / 24), "day") + " ago";
   }
 
   // A bottom sheet, like Instagram's menus.
@@ -347,7 +432,7 @@
             "button",
             { class: "xbg-pick" + (inIt ? " xbg-on" : ""), onclick: () => { setMembership(c, keys, !inIt); draw(); } },
             cover(c, "xbg-pick-cover"),
-            el("span", { class: "xbg-pick-name" }, c.name, el("small", {}, `${c.keys.length} posts`)),
+            el("span", { class: "xbg-pick-name" }, c.name, el("small", {}, plural(c.keys.length, "post"))),
             el("span", { class: "xbg-pick-check" }, inIt ? "✓" : "")
           )
         );
@@ -358,6 +443,29 @@
     openSheet(title, el("div", { class: "xbg-sheet-body" }, list, el("button", { class: "xbg-primary", onclick: () => closeSheet() }, "Done")), onDone);
   }
 
+  function sortMenu() {
+    const option = (label, on, pick) =>
+      el(
+        "button",
+        { class: "xbg-pick" + (on ? " xbg-on" : ""), onclick: () => { pick(); saveSettings(); closeSheet(); syncControls(); rebuild(); } },
+        el("span", { class: "xbg-pick-name" }, label),
+        el("span", { class: "xbg-pick-check" }, on ? "✓" : "")
+      );
+    openSheet(
+      "Sort",
+      el(
+        "div",
+        { class: "xbg-sheet-body" },
+        el("div", { class: "xbg-sheet-label" }, "Order"),
+        option("Newest first", settings.sort === "newest", () => (settings.sort = "newest")),
+        option("Oldest first", settings.sort === "oldest", () => (settings.sort = "oldest")),
+        el("div", { class: "xbg-sheet-label" }, "Use the date"),
+        option("I bookmarked it", settings.dateMode === "saved", () => (settings.dateMode = "saved")),
+        option("It was posted", settings.dateMode === "posted", () => (settings.dateMode = "posted"))
+      )
+    );
+  }
+
   // --- Gallery UI ----------------------------------------------------------
 
   function buildUi() {
@@ -366,7 +474,9 @@
     const close = el("button", { class: "xbg-close", "aria-label": "Close gallery", onclick: closeGallery }, "✕");
     const titleName = el("span", {}, "Bookmarks");
     const count = el("span", { class: "xbg-count" }, "0");
-    const statusText = el("div", { class: "xbg-status" });
+    const statusText = el("span");
+    const refreshBtn = el("button", { class: "xbg-link xbg-hidden", onclick: () => goToBookmarks() }, "Refresh");
+    const status = el("div", { class: "xbg-status" }, statusText, refreshBtn);
     const selectBtn = el("button", { class: "xbg-text-btn", onclick: () => setSelectMode(!selectMode) }, "Select");
     const menuBtn = el("button", { class: "xbg-close", "aria-label": "Collection options", onclick: collectionMenu }, "⋯");
 
@@ -374,41 +484,32 @@
     for (const [value, label] of [["all", "▦  All posts"], ["collections", "▢  Collections"]]) {
       tabs.append(el("button", { class: "xbg-tab", "data-view": value, onclick: () => setView(value) }, label));
     }
-    const filters = el("div", { class: "xbg-filters" });
+    const filters = el("div", { class: "xbg-chips" });
     for (const [value, label] of [["all", "All"], ["photo", "Photos"], ["video", "Videos"]]) {
-      filters.append(el("button", { class: "xbg-chip" + (value === filter ? " xbg-on" : ""), "data-filter": value, onclick: () => setFilter(value) }, label));
+      filters.append(el("button", { class: "xbg-chip", "data-filter": value, onclick: () => setFilter(value) }, label));
     }
+    const sortBtn = el("button", { class: "xbg-chip xbg-sort", onclick: sortMenu });
+    const layouts = el("div", { class: "xbg-seg" });
+    for (const [value, label] of [["grid", "Grid"], ["months", "Months"], ["years", "Years"]]) {
+      layouts.append(el("button", { "data-layout": value, onclick: () => setLayout(value) }, label));
+    }
+    const controls = el("div", { class: "xbg-controls" }, el("div", { class: "xbg-row" }, filters, sortBtn), layouts);
 
     const grid = el("div", { class: "xbg-grid" });
-    grid.addEventListener("click", (e) => {
-      const tile = e.target.closest(".xbg-tile");
-      if (!tile) return;
-      const key = tile.dataset.key;
-      if (selectMode) {
-        if (selected.has(key)) selected.delete(key);
-        else selected.add(key);
-        tile.classList.toggle("xbg-selected", selected.has(key));
-        updateSelectBar();
-      } else {
-        openLightbox(current.findIndex((it) => it.key === key));
-      }
-    });
-    const collGrid = el("div", { class: "xbg-collections xbg-hidden" });
+    const years = el("div", { class: "xbg-cards xbg-hidden" });
+    const collGrid = el("div", { class: "xbg-cards xbg-hidden" });
     const empty = el("p", { class: "xbg-empty" });
-    const scroller = el("div", { class: "xbg-scroll" }, grid, collGrid, empty);
+    const sentinel = el("div", { class: "xbg-sentinel" });
+    const scroller = el("div", { class: "xbg-scroll" }, grid, years, collGrid, empty, sentinel);
 
     const selectInfo = el("span", { class: "xbg-select-info" });
-    const addBtn = el("button", { class: "xbg-primary", onclick: () => openPicker([...selected], () => { setSelectMode(false); rebuild(); }) }, "Add to collection");
+    const addBtn = el("button", { class: "xbg-primary", onclick: () => openPicker([...selected], () => { setSelectMode(false); rebuild(false); }) }, "Add to collection");
     const removeBtn = el("button", { class: "xbg-secondary", onclick: removeSelected }, "Remove");
     const selectBar = el("div", { class: "xbg-select-bar xbg-hidden" }, selectInfo, removeBtn, addBtn);
 
     const stage = el("div", { class: "xbg-stage" });
     const openLink = el("a", { class: "xbg-open", target: "_blank", rel: "noopener noreferrer" }, "Open post ↗");
-    const saveBtn = el("button", { class: "xbg-save", onclick: () => {
-      if (lbIndex < 0) return;
-      const key = current[lbIndex].key;
-      openPicker([key], () => updateSaveBtn(key));
-    } });
+    const saveBtn = el("button", { class: "xbg-save", onclick: () => lbKey && openPicker([lbKey], () => updateSaveBtn(lbKey)) });
     const counter = el("span", { class: "xbg-counter" });
     const lightbox = el(
       "div",
@@ -420,6 +521,144 @@
       el("div", { class: "xbg-lb-bar" }, counter, el("div", { class: "xbg-lb-actions" }, saveBtn, openLink))
     );
 
+    const bar = el(
+      "header",
+      { class: "xbg-bar" },
+      el("div", { class: "xbg-row" }, back, close, el("div", { class: "xbg-title" }, titleName, " ", count, status), selectBtn, menuBtn),
+      tabs,
+      controls
+    );
+    const toastEl = el("div", { class: "xbg-toast xbg-hidden" });
+    const overlay = el("div", { id: "xbg-overlay", class: "xbg-hidden" }, scroller, bar, selectBar, lightbox, toastEl);
+    document.body.append(overlay);
+
+    ui = {
+      overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn,
+      layouts, controls, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
+      lightbox, stage, openLink, saveBtn, counter, toast: toastEl, sheet: null,
+    };
+
+    wireGrid();
+    wireScroller();
+    wireLightbox();
+    document.addEventListener("keydown", onKey);
+    new ResizeObserver(() => (scroller.style.paddingTop = bar.offsetHeight + "px")).observe(bar);
+    syncControls();
+    updateHeader();
+  }
+
+  function onKey(e) {
+    if (!galleryOpen() || (e.key !== "Escape" && !e.key.startsWith("Arrow"))) return;
+    if (ui.sheet) {
+      if (e.key === "Escape") closeSheet();
+    } else if (!ui.lightbox.classList.contains("xbg-hidden")) {
+      if (e.key === "Escape") closeLightbox();
+      else if (e.key === "ArrowRight") step(1);
+      else if (e.key === "ArrowLeft") step(-1);
+    } else if (e.key === "Escape") {
+      if (selectMode) setSelectMode(false);
+      else if (view === "collection") setView("collections");
+      else closeGallery();
+    }
+  }
+
+  // Tap a tile to open it; long-press to start selecting (like Instagram).
+  function wireGrid() {
+    const { grid } = ui;
+    let press = null;
+    let swallowKey = null; // the tile whose long-press already selected it
+    const cancel = () => {
+      if (press) clearTimeout(press.timer);
+      press = null;
+    };
+    grid.addEventListener("touchstart", (e) => {
+      const tile = e.target.closest(".xbg-tile");
+      if (!tile || e.touches.length !== 1) return cancel();
+      const t = e.touches[0];
+      press = {
+        key: tile.dataset.key,
+        x: t.clientX,
+        y: t.clientY,
+        timer: setTimeout(() => {
+          if (!press) return;
+          press.fired = true;
+          if (navigator.vibrate) navigator.vibrate(25);
+          if (!selectMode) setSelectMode(true);
+          toggleSelect(tile.dataset.key, true);
+        }, 450),
+      };
+    }, { passive: true });
+    grid.addEventListener("touchmove", (e) => {
+      if (!press) return;
+      const t = e.touches[0];
+      if (Math.abs(t.clientX - press.x) > 10 || Math.abs(t.clientY - press.y) > 10) cancel();
+    }, { passive: true });
+    grid.addEventListener("touchend", (e) => {
+      if (press && press.fired) {
+        e.preventDefault();
+        swallowKey = press.key;
+        setTimeout(() => (swallowKey = null), 600);
+      }
+      cancel();
+    });
+    grid.addEventListener("touchcancel", cancel);
+    grid.addEventListener("contextmenu", (e) => e.preventDefault());
+    grid.addEventListener("click", (e) => {
+      const tile = e.target.closest(".xbg-tile");
+      if (!tile || tile.dataset.key === swallowKey) return;
+      if (selectMode) toggleSelect(tile.dataset.key);
+      else openLightbox(tile.dataset.key);
+    });
+  }
+
+  // Header hides while scrolling down and comes back when scrolling up;
+  // swiping sideways switches between "All posts" and "Collections".
+  function wireScroller() {
+    const { scroller, bar } = ui;
+    let lastY = 0;
+    let ticking = false;
+    scroller.addEventListener("scroll", () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const y = scroller.scrollTop;
+        if (ui.jumped) {
+          // We scrolled on purpose (e.g. jumping to a year): keep the header showing.
+          ui.jumped = false;
+          lastY = y;
+          fillPage();
+          return;
+        }
+        const dy = y - lastY;
+        if (y < bar.offsetHeight) bar.classList.remove("xbg-bar-hidden");
+        else if (dy > 6) bar.classList.add("xbg-bar-hidden");
+        else if (dy < -6) bar.classList.remove("xbg-bar-hidden");
+        if (Math.abs(dy) > 6 || y < bar.offsetHeight) lastY = y;
+        fillPage();
+      });
+    }, { passive: true });
+
+    let swipe = null;
+    scroller.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      swipe = e.touches.length === 1 ? { x: t.clientX, y: t.clientY, at: Date.now() } : null;
+    }, { passive: true });
+    scroller.addEventListener("touchend", (e) => {
+      if (!swipe || selectMode || ui.sheet) return (swipe = null);
+      const dx = e.changedTouches[0].clientX - swipe.x;
+      const dy = e.changedTouches[0].clientY - swipe.y;
+      const quick = Date.now() - swipe.at < 700;
+      swipe = null;
+      if (!quick || Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 2) return;
+      if (dx < 0 && view === "all") setView("collections", null, "left");
+      else if (dx > 0 && view === "collections") setView("all", null, "right");
+      else if (dx > 0 && view === "collection") setView("collections", null, "right");
+    });
+  }
+
+  function wireLightbox() {
+    const { lightbox } = ui;
     // Swipe left/right to move, swipe down to close. Swipes that start on the
     // video's control bar are left alone so seeking still works.
     let touch = null;
@@ -436,48 +675,13 @@
       if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
       else if (dy > 100 && dy > Math.abs(dx) * 1.5) closeLightbox();
     });
+  }
 
-    const toastEl = el("div", { class: "xbg-toast xbg-hidden" });
-    const overlay = el(
-      "div",
-      { id: "xbg-overlay", class: "xbg-hidden" },
-      el(
-        "header",
-        { class: "xbg-bar" },
-        el("div", { class: "xbg-row" }, back, close, el("div", { class: "xbg-title" }, titleName, " ", count, statusText), selectBtn, menuBtn),
-        tabs,
-        filters
-      ),
-      scroller,
-      selectBar,
-      lightbox,
-      toastEl
-    );
-    const fab = el("button", { id: "xbg-fab", class: "xbg-hidden", "aria-label": "Open gallery", onclick: openGallery }, "▦");
-    document.body.append(overlay, fab);
-
-    document.addEventListener("keydown", (e) => {
-      if (!galleryOpen() || e.key !== "Escape" && !e.key.startsWith("Arrow")) return;
-      if (ui.sheet) {
-        if (e.key === "Escape") closeSheet();
-      } else if (!lightbox.classList.contains("xbg-hidden")) {
-        if (e.key === "Escape") closeLightbox();
-        else if (e.key === "ArrowRight") step(1);
-        else if (e.key === "ArrowLeft") step(-1);
-      } else if (e.key === "Escape") {
-        if (selectMode) setSelectMode(false);
-        else if (view === "collection") setView("collections");
-        else closeGallery();
-      }
-    });
-
-    ui = {
-      overlay, fab, back, close, titleName, count, statusText, selectBtn, menuBtn, tabs, filters,
-      grid, collGrid, empty, scroller, selectBar, selectInfo, addBtn, removeBtn,
-      lightbox, stage, openLink, saveBtn, counter, toast: toastEl, sheet: null,
-    };
-    updateFab();
-    updateHeader();
+  function syncControls() {
+    if (!ui) return;
+    ui.filters.querySelectorAll(".xbg-chip").forEach((b) => b.classList.toggle("xbg-on", b.dataset.filter === filter));
+    ui.layouts.querySelectorAll("button").forEach((b) => b.classList.toggle("xbg-on", b.dataset.layout === settings.layout));
+    ui.sortBtn.textContent = settings.sort === "oldest" ? "⇅ Oldest" : "⇅ Newest";
   }
 
   function updateHeader() {
@@ -487,39 +691,53 @@
     ui.close.classList.toggle("xbg-hidden", !!c);
     ui.menuBtn.classList.toggle("xbg-hidden", !c);
     ui.tabs.classList.toggle("xbg-hidden", !!c);
-    ui.filters.classList.toggle("xbg-hidden", view === "collections");
-    ui.selectBtn.classList.toggle("xbg-hidden", view === "collections");
+    ui.controls.classList.toggle("xbg-hidden", view === "collections");
+    ui.selectBtn.classList.toggle("xbg-hidden", view === "collections" || settings.layout === "years");
     ui.selectBtn.textContent = selectMode ? "Cancel" : "Select";
     ui.titleName.textContent = c ? c.name : "Bookmarks";
-    ui.count.textContent = String(c ? c.keys.length : items.size);
+    ui.count.textContent = String(c ? c.keys.length : view === "collections" ? collections.length : totalCount || allItems().length);
     ui.tabs.querySelectorAll(".xbg-tab").forEach((t) => t.classList.toggle("xbg-on", t.dataset.view === view));
 
     let text = "";
+    let canRefresh = false;
     if (view === "all") {
       const s = loadState;
-      if (scrollTimer) text = "Loading more…";
-      else if (s.state === "loading") text = "Loading all bookmarks…";
+      if (!isBookmarks()) {
+        text = cached.size || fresh.size ? `Saved copy · ${ago(cacheTime)}` : "";
+        canRefresh = true;
+      } else if (scrollTimer) text = "Loading more…";
+      else if (s.state === "loading") text = cached.size ? "Updating…" : "Loading all bookmarks…";
       else if (s.state === "waiting") text = `X asked us to slow down, continuing in ${s.seconds}s…`;
       else if (s.state === "done") text = "All loaded";
       else if (s.state === "failed") text = "Couldn’t load everything";
     }
     ui.statusText.textContent = text;
+    ui.refreshBtn.classList.toggle("xbg-hidden", !canRefresh);
   }
 
-  function setView(value, id = null) {
+  function setView(value, id = null, slide = null) {
     view = value;
     openId = id;
-    selectMode = false;
-    selected.clear();
-    updateSelectBar();
-    ui.scroller.scrollTop = 0;
+    if (selectMode) setSelectMode(false);
     rebuild();
+    if (slide) {
+      ui.scroller.classList.remove("xbg-slide-left", "xbg-slide-right");
+      void ui.scroller.offsetWidth;
+      ui.scroller.classList.add(`xbg-slide-${slide}`);
+    }
   }
 
   function setFilter(value) {
     filter = value;
-    ui.filters.querySelectorAll(".xbg-chip").forEach((b) => b.classList.toggle("xbg-on", b.dataset.filter === value));
-    ui.scroller.scrollTop = 0;
+    syncControls();
+    rebuild();
+  }
+
+  function setLayout(value) {
+    settings.layout = value;
+    saveSettings();
+    if (selectMode && value === "years") setSelectMode(false);
+    syncControls();
     rebuild();
   }
 
@@ -530,6 +748,14 @@
     ui.overlay.classList.toggle("xbg-selecting", on);
     updateSelectBar();
     updateHeader();
+  }
+
+  function toggleSelect(key, forceOn = false) {
+    if (forceOn || !selected.has(key)) selected.add(key);
+    else selected.delete(key);
+    const tile = ui.grid.querySelector(`.xbg-tile[data-key="${CSS.escape(key)}"]`);
+    if (tile) tile.classList.toggle("xbg-selected", selected.has(key));
+    updateSelectBar();
   }
 
   function updateSelectBar() {
@@ -547,8 +773,8 @@
     const n = selected.size;
     setMembership(c, [...selected], false);
     setSelectMode(false);
-    rebuild();
-    toast(`Removed ${n} post${n === 1 ? "" : "s"}`);
+    rebuild(false);
+    toast(`Removed ${plural(n, "post")}`);
   }
 
   function collectionMenu() {
@@ -574,9 +800,48 @@
     );
   }
 
+  // --- Building what the grid shows ----------------------------------------
+
   function matches(item) {
     return filter === "all" || (filter === "photo" ? item.type === "photo" : item.type !== "photo");
   }
+
+  function dateOf(item) {
+    return (settings.dateMode === "posted" ? item.posted || item.saved : item.saved || item.posted) || 0;
+  }
+
+  const monthKey = (d) => (d ? new Date(d).toISOString().slice(0, 7) : "unknown");
+  const monthLabel = (d) => (d ? new Date(d).toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "Date unknown");
+  const yearOf = (d) => (d ? String(new Date(d).getFullYear()) : "unknown");
+
+  function computeEntries() {
+    const c = view === "collection" ? getCollection(openId) : null;
+    const base = c ? c.keys.map(getItem).filter(Boolean) : allItems();
+    totalCount = c ? c.keys.length : base.length;
+    const dir = settings.sort === "oldest" ? -1 : 1;
+    // Dated posts first, by date; ties and undated posts keep their bookmark order.
+    const list = base.filter(matches).map((item, i) => ({ item, i, d: dateOf(item) }));
+    list.sort((a, b) => (!a.d !== !b.d ? (a.d ? -1 : 1) : dir * (b.d - a.d || a.i - b.i)));
+    current = list.map((x) => x.item);
+    const out = [];
+    if (settings.layout === "months") {
+      let header = null;
+      for (const x of list) {
+        const key = monthKey(x.d);
+        if (!header || header.header !== key) {
+          header = { header: key, label: monthLabel(x.d), count: 0 };
+          out.push(header);
+        }
+        header.count++;
+        out.push({ item: x.item });
+      }
+    } else {
+      for (const x of list) out.push({ item: x.item });
+    }
+    return out;
+  }
+
+  const sig = (e) => (e ? (e.header ? "h:" + e.header : e.item.key) : "");
 
   // Grid tiles are plain thumbnails (videos too) so scrolling stays smooth;
   // videos play in the full-screen viewer.
@@ -587,62 +852,154 @@
     return tile;
   }
 
-  let renderQueued = false;
-  function scheduleRender() {
-    if (renderQueued || !galleryOpen()) {
-      if (ui && view === "all") ui.count.textContent = String(items.size);
-      return;
-    }
-    renderQueued = true;
-    requestAnimationFrame(() => {
-      renderQueued = false;
-      render();
-    });
+  function makeEntry(e) {
+    if (!e.header) return makeTile(e.item);
+    const countEl = el("span", { class: "xbg-section-count" }, plural(e.count, "post"));
+    headerEls.set(e.header, countEl);
+    return el("div", { class: "xbg-section", "data-key": e.header }, el("span", {}, e.label), countEl);
   }
 
-  function rebuild() {
-    if (!ui) return;
+  // Tiles are added a page at a time as you scroll, instead of all at once,
+  // so opening the gallery stays quick even with thousands of bookmarks.
+  function appendUpTo(n) {
+    const end = Math.min(n, entries.length);
+    if (shown >= end) return;
+    const frag = document.createDocumentFragment();
+    for (; shown < end; shown++) frag.append(makeEntry(entries[shown]));
+    ui.grid.append(frag);
+  }
+
+  function renderPrefix(n) {
     ui.grid.replaceChildren();
-    rendered.clear();
-    render();
+    headerEls.clear();
+    shown = 0;
+    appendUpTo(n);
   }
 
-  function render() {
-    if (!ui) return;
-    updateHeader();
-    const showCollections = view === "collections";
-    ui.grid.classList.toggle("xbg-hidden", showCollections);
-    ui.collGrid.classList.toggle("xbg-hidden", !showCollections);
-    if (showCollections) return renderCollections();
-
-    const c = view === "collection" ? getCollection(openId) : null;
-    const source = c ? c.keys.map(getItem).filter(Boolean) : items.values();
-    current = [];
-    for (const item of source) if (matches(item)) current.push(item);
-
-    // "All posts" only ever grows, so new tiles are appended; collections are
-    // rebuilt whenever they change.
-    const batch = document.createDocumentFragment();
-    for (const item of current) {
-      if (rendered.has(item.key)) continue;
-      rendered.add(item.key);
-      batch.append(makeTile(item));
+  function fillPage() {
+    if (!ui || !entries.length) return;
+    for (let i = 0; i < 20 && shown < entries.length; i++) {
+      if (ui.sentinel.getBoundingClientRect().top > window.innerHeight + 1500) break;
+      appendUpTo(shown + PAGE);
     }
-    if (batch.childNodes.length) ui.grid.append(batch);
+  }
 
+  function rebuild(resetScroll = true) {
+    if (!ui) return;
+    if (resetScroll) {
+      ui.scroller.scrollTop = 0;
+      ui.bar.classList.remove("xbg-bar-hidden");
+    }
+    const mode = view === "collections" ? "collections" : settings.layout === "years" ? "years" : "grid";
+    ui.grid.classList.toggle("xbg-hidden", mode !== "grid");
+    ui.years.classList.toggle("xbg-hidden", mode !== "years");
+    ui.collGrid.classList.toggle("xbg-hidden", mode !== "collections");
+    if (mode === "collections") {
+      entries = [];
+      renderCollections();
+    } else {
+      entries = computeEntries();
+      if (mode === "years") {
+        renderYears();
+        entries = [];
+      }
+      renderPrefix(resetScroll ? PAGE : Math.max(shown, PAGE));
+      fillPage();
+    }
+    updateHeader();
+    updateEmpty();
+  }
+
+  // New bookmarks arrived: keep what's on screen if it's still in the same
+  // order, otherwise redraw in place without jumping to the top.
+  let refreshTimer = null;
+  function scheduleRefresh() {
+    if (!galleryOpen()) return;
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      refresh();
+    }, entries.length ? 700 : 60);
+  }
+
+  function refresh() {
+    if (!galleryOpen()) return;
+    if (view === "collections") return updateHeader();
+    if (settings.layout === "years") return rebuild(false);
+    const next = computeEntries();
+    let same = shown <= next.length;
+    for (let i = 0; same && i < shown; i++) if (sig(next[i]) !== sig(entries[i])) same = false;
+    entries = next;
+    if (same) {
+      for (const e of entries) if (e.header && headerEls.has(e.header)) headerEls.get(e.header).textContent = plural(e.count, "post");
+      appendUpTo(Math.max(shown, PAGE));
+    } else {
+      renderPrefix(Math.max(shown, PAGE));
+    }
+    fillPage();
+    updateHeader();
+    updateEmpty();
+  }
+
+  function updateEmpty() {
+    const c = view === "collection" ? getCollection(openId) : null;
+    if (view === "collections") return;
     if (current.length) ui.empty.textContent = "";
-    else if (c) ui.empty.textContent = c.keys.length ? "Nothing here for this filter." : "No posts yet. Go to All posts, tap Select, pick some posts, then tap “Add to collection”.";
-    else if (!isBookmarks() && !items.size) {
-      ui.empty.replaceChildren("Open your bookmarks to fill the gallery. ", el("a", { href: "https://x.com/i/bookmarks" }, "Go to bookmarks"));
-    } else if (!items.size) ui.empty.textContent = "Loading your bookmarks…";
+    else if (c) ui.empty.textContent = c.keys.length ? "Nothing here for this filter." : "No posts yet. Go to All posts, long-press a post, pick some more, then tap “Add to collection”.";
+    else if (!isBookmarks() && !totalCount) {
+      ui.empty.replaceChildren("Open your bookmarks to fill the gallery. ", el("button", { class: "xbg-link", onclick: () => goToBookmarks() }, "Go to bookmarks"));
+    } else if (!totalCount) ui.empty.textContent = "Loading your bookmarks…";
     else ui.empty.textContent = "Nothing here for this filter.";
+  }
+
+  function renderYears() {
+    const groups = [];
+    const byYear = new Map();
+    for (const item of current) {
+      const year = yearOf(dateOf(item));
+      let g = byYear.get(year);
+      if (!g) {
+        g = { year, items: [] };
+        byYear.set(year, g);
+        groups.push(g);
+      }
+      g.items.push(item);
+    }
+    // Skip redrawing (and re-loading the covers) when nothing changed.
+    const signature = groups.map((g) => `${g.year}:${g.items.length}:${g.items.slice(0, 4).map((i) => i.key).join(",")}`).join("|");
+    if (ui.years.dataset.sig === signature) return;
+    ui.years.dataset.sig = signature;
+    ui.years.replaceChildren(
+      ...groups.map((g) =>
+        el(
+          "button",
+          { class: "xbg-card", onclick: () => openYear(g.year) },
+          mosaic(g.items, "xbg-card-cover"),
+          el("div", { class: "xbg-card-name" }, g.year === "unknown" ? "Date unknown" : g.year),
+          el("div", { class: "xbg-card-count" }, plural(g.items.length, "post"))
+        )
+      )
+    );
+  }
+
+  // Tapping a year shows the month view, starting at that year.
+  function openYear(year) {
+    setLayout("months");
+    const idx = entries.findIndex((e) => e.header && (year === "unknown" ? e.header === "unknown" : e.header.startsWith(year + "-")));
+    if (idx < 0) return;
+    appendUpTo(idx + PAGE);
+    const h = ui.grid.querySelector(`.xbg-section[data-key="${CSS.escape(entries[idx].header)}"]`);
+    if (h) {
+      ui.jumped = true;
+      ui.scroller.scrollTop = h.offsetTop - ui.bar.offsetHeight;
+    }
   }
 
   function renderCollections() {
     const cards = [
       el(
         "button",
-        { class: "xbg-card", onclick: () => askName("New collection", "", (name) => { createCollection(name); render(); }) },
+        { class: "xbg-card", onclick: () => askName("New collection", "", (name) => { createCollection(name); rebuild(false); }) },
         el("div", { class: "xbg-card-cover xbg-plus" }, "＋"),
         el("div", { class: "xbg-card-name" }, "New collection")
       ),
@@ -651,29 +1008,34 @@
       cards.push(
         el(
           "button",
-          { class: "xbg-card", onclick: () => setView("collection", c.id) },
+          { class: "xbg-card", onclick: () => setView("collection", c.id, "left") },
           cover(c, "xbg-card-cover"),
           el("div", { class: "xbg-card-name" }, c.name),
-          el("div", { class: "xbg-card-count" }, `${c.keys.length} post${c.keys.length === 1 ? "" : "s"}`)
+          el("div", { class: "xbg-card-count" }, plural(c.keys.length, "post"))
         )
       );
     }
     ui.collGrid.replaceChildren(...cards);
     ui.empty.replaceChildren(
       collections.length ? "" : "Group your favourite posts into collections, like on Instagram.",
-      el("span", { class: "xbg-backup" },
+      el(
+        "span",
+        { class: "xbg-backup" },
         el("button", { class: "xbg-link", onclick: backup }, "Back up collections"),
         " · ",
-        el("button", { class: "xbg-link", onclick: restore }, "Restore from backup"))
+        el("button", { class: "xbg-link", onclick: restore }, "Restore from backup")
+      )
     );
   }
+
+  // --- Opening and closing -------------------------------------------------
 
   function openGallery() {
     buildUi();
     if (!ui) return;
-    if (!gotData) scanPage();
+    if (!gotData && isBookmarks()) scanPage();
     ui.overlay.classList.remove("xbg-hidden");
-    ui.fab.classList.add("xbg-hidden");
+    updateBall();
     rebuild();
     if (isBookmarks() && (loadState.state === "failed" || (!gotData && loadState.state === "idle"))) {
       // Background loading isn't working (or hasn't started): scroll the page instead.
@@ -689,26 +1051,39 @@
     stopScrollLoading();
     if (selectMode) setSelectMode(false);
     ui.overlay.classList.add("xbg-hidden");
-    updateFab();
+    updateBall();
   }
+
+  // Open the bookmarks page and pop the gallery open once it has loaded.
+  function goToBookmarks() {
+    try {
+      sessionStorage.setItem("xbg_open", "1");
+    } catch (e) {
+      /* fine */
+    }
+    location.href = "https://x.com/i/bookmarks";
+  }
+
+  // --- Full-screen viewer --------------------------------------------------
 
   function updateSaveBtn(key) {
     // Taking the post out of the collection being viewed removes it from this view.
     const c = view === "collection" ? getCollection(openId) : null;
     if (c && !c.keys.includes(key)) {
       closeLightbox();
-      rebuild();
+      rebuild(false);
       return;
     }
-    if (c) rebuild();
+    if (c) rebuild(false);
     const saved = isSaved(key);
     ui.saveBtn.textContent = saved ? "✓ Saved" : "＋ Save";
     ui.saveBtn.classList.toggle("xbg-on", saved);
   }
 
-  function openLightbox(index) {
-    if (index < 0 || index >= current.length) return;
-    lbIndex = index;
+  function openLightbox(key) {
+    const index = current.findIndex((it) => it.key === key);
+    if (index < 0) return;
+    lbKey = key;
     const item = current[index];
     ui.stage.querySelectorAll("video").forEach((v) => v.pause());
     ui.stage.replaceChildren();
@@ -747,41 +1122,121 @@
     ui.stage.querySelectorAll("video").forEach((v) => v.pause());
     ui.stage.replaceChildren();
     ui.lightbox.classList.add("xbg-hidden");
-    lbIndex = -1;
+    lbKey = null;
   }
 
   function step(delta) {
-    if (lbIndex < 0 || !current.length) return;
-    openLightbox((lbIndex + delta + current.length) % current.length);
+    if (!lbKey || !current.length) return;
+    const i = current.findIndex((it) => it.key === lbKey);
+    openLightbox(current[(i + delta + current.length) % current.length].key);
   }
 
-  function updateFab() {
-    if (!ui) return;
-    ui.fab.classList.toggle("xbg-hidden", galleryOpen() || !isBookmarks());
+  // --- Floating ball (shown everywhere on X) -------------------------------
+
+  function buildBall() {
+    if (ball || !document.body) return;
+    ball = el("button", { id: "xbg-ball", class: "xbg-hidden", "aria-label": "Open bookmarks gallery" }, el("span", {}, "▦"));
+    document.body.append(ball);
+    const size = () => ball.offsetWidth || 52;
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+    let drag = null;
+    let idleTimer = null;
+
+    const wake = () => {
+      ball.classList.add("xbg-awake");
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => ball.classList.remove("xbg-awake"), 2500);
+    };
+
+    ball.addEventListener("pointerdown", (e) => {
+      drag = { sx: e.clientX, sy: e.clientY, ox: ball.offsetLeft, oy: ball.offsetTop, moved: false };
+      ball.setPointerCapture(e.pointerId);
+      wake();
+    });
+    ball.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.sx;
+      const dy = e.clientY - drag.sy;
+      if (!drag.moved && Math.hypot(dx, dy) < 8) return;
+      drag.moved = true;
+      ball.classList.add("xbg-dragging");
+      ball.style.left = clamp(drag.ox + dx, 0, window.innerWidth - size()) + "px";
+      ball.style.top = clamp(drag.oy + dy, 0, window.innerHeight - size()) + "px";
+    });
+    ball.addEventListener("pointerup", () => {
+      if (!drag) return;
+      const moved = drag.moved;
+      drag = null;
+      ball.classList.remove("xbg-dragging");
+      wake();
+      if (!moved) return onBallTap();
+      // Snap to the nearest side, like Android's floating accessibility button.
+      settings.ball = {
+        side: ball.offsetLeft + size() / 2 < window.innerWidth / 2 ? "left" : "right",
+        y: ball.offsetTop / window.innerHeight,
+      };
+      placeBall();
+      saveSettings();
+    });
+    ball.addEventListener("pointercancel", () => {
+      drag = null;
+      ball.classList.remove("xbg-dragging");
+      placeBall();
+    });
+    window.addEventListener("resize", placeBall);
+    placeBall();
+    wake();
+  }
+
+  function placeBall() {
+    if (!ball) return;
+    const s = ball.offsetWidth || 52;
+    const top = Math.min(Math.max(settings.ball.y * window.innerHeight, 70), window.innerHeight - s - 70);
+    ball.style.top = top + "px";
+    ball.style.left = (settings.ball.side === "left" ? 6 : window.innerWidth - s - 6) + "px";
+  }
+
+  function updateBall() {
+    buildBall();
+    if (!ball) return;
+    ball.classList.toggle("xbg-hidden", !settings.fab || galleryOpen());
+    placeBall();
+  }
+
+  function onBallTap() {
+    if (isBookmarks() || fresh.size || cached.size) openGallery();
+    else goToBookmarks();
   }
 
   // --- Wiring --------------------------------------------------------------
 
   ext.runtime.onMessage.addListener((msg, _sender, respond) => {
     if (msg && msg.type === "xbg-open") {
-      openGallery();
-      respond({ ok: true, count: items.size, onBookmarks: isBookmarks() });
+      onBallTap();
+      respond({ ok: true, onBookmarks: isBookmarks() });
     }
   });
 
-  function start() {
+  async function start() {
     buildUi();
-    loadCollections();
-    new MutationObserver(queueScan).observe(document.body, { childList: true, subtree: true });
+    updateBall();
+    watchPage();
+    await loadStored();
     let lastPath = location.pathname;
     setInterval(() => {
-      if (location.pathname !== lastPath) {
-        lastPath = location.pathname;
-        updateFab();
-        queueScan();
-      }
+      if (location.pathname === lastPath) return;
+      lastPath = location.pathname;
+      watchPage();
+      updateHeader();
     }, 1000);
-    queueScan();
+    let autoOpen = false;
+    try {
+      autoOpen = sessionStorage.getItem("xbg_open") === "1";
+      sessionStorage.removeItem("xbg_open");
+    } catch (e) {
+      /* fine */
+    }
+    if (autoOpen && isBookmarks()) openGallery();
   }
 
   if (document.body) start();

@@ -44,10 +44,39 @@
     return m ? `https://x.com/${m[1]}` : `https://x.com/i/status/${tweet.rest_id}`;
   }
 
-  function toItem(media, tweet) {
+  // Bookmark entries carry a sortIndex that is a Twitter-style ID, which encodes
+  // the moment the post was bookmarked. Only trust it if the result is sensible.
+  function bookmarkTime(sortIndex, posted) {
+    try {
+      const t = Number((BigInt(sortIndex) >> 22n) + 1288834974657n);
+      if (t > Date.now() + 86400000 || t < Date.UTC(2006, 0, 1)) return null;
+      if (posted && t < posted - 60000) return null;
+      return t;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // X dates look like "Wed Oct 10 20:19:24 +0000 2018"; not every browser parses that.
+  function parseTwitterDate(text) {
+    if (typeof text !== "string") return null;
+    const direct = Date.parse(text);
+    if (!Number.isNaN(direct)) return direct;
+    const m = text.match(/^\w+ (\w+) (\d+) (\d+:\d+:\d+) \+0000 (\d+)$/);
+    return m ? Date.parse(`${m[1]} ${m[2]}, ${m[4]} ${m[3]} UTC`) || null : null;
+  }
+
+  function toItem(media, tweet, sortIndex) {
     const thumb = media.media_url_https;
     if (!thumb) return null;
-    const base = { key: keyOf(thumb), tweet: tweetUrl(media, tweet), thumb: sized(thumb, "small") };
+    const posted = parseTwitterDate(tweet.legacy && tweet.legacy.created_at);
+    const base = {
+      key: keyOf(thumb),
+      tweet: tweetUrl(media, tweet),
+      thumb: sized(thumb, "small"),
+      posted,
+      saved: sortIndex ? bookmarkTime(sortIndex, posted) : null,
+    };
     if (media.type === "photo") return { ...base, type: "photo", full: sized(thumb, "large") };
     const mp4s = ((media.video_info && media.video_info.variants) || [])
       .filter((v) => v.content_type === "video/mp4" && v.url)
@@ -67,27 +96,30 @@
     const seen = new Set();
     let cursor = null;
     let posts = 0;
-    const walk = (node, depth) => {
+    const walk = (node, depth, sortIndex) => {
       if (!node || typeof node !== "object" || depth > 80) return;
       if (Array.isArray(node)) {
-        for (const child of node) walk(child, depth + 1);
+        for (const child of node) walk(child, depth + 1, sortIndex);
         return;
       }
-      if (typeof node.entryId === "string" && node.entryId.startsWith("tweet-")) posts++;
+      if (typeof node.entryId === "string" && node.entryId.startsWith("tweet-")) {
+        posts++;
+        if (typeof node.sortIndex === "string") sortIndex = node.sortIndex;
+      }
       if (node.cursorType === "Bottom" && typeof node.value === "string") cursor = node.value;
       const media = node.legacy && node.legacy.extended_entities && node.legacy.extended_entities.media;
       if (node.rest_id && Array.isArray(media)) {
         for (const m of media) {
-          const item = toItem(m, node);
+          const item = toItem(m, node, sortIndex);
           if (item && !seen.has(item.key)) {
             seen.add(item.key);
             items.push(item);
           }
         }
       }
-      for (const k in node) walk(node[k], depth + 1);
+      for (const k in node) walk(node[k], depth + 1, sortIndex);
     };
-    walk(root, 0);
+    walk(root, 0, null);
     return { items, cursor, posts };
   }
 

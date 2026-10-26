@@ -20,9 +20,23 @@ scrolls the bookmarks page for you while it's open.
 ## Use
 
 1. Open <https://x.com/i/bookmarks> and log in.
-2. Tap the blue **▦** button (bottom left), or open the extension from the menu
+2. Tap the floating blue **▦** ball, or open the extension from the menu
    and tap **Open gallery**. The header shows "Loading all bookmarks…" until
    everything is in, then "All loaded".
+
+## Browsing
+
+- **Floating ball**: a blue ball appears on every X page. Drag it anywhere (it
+  snaps to the side); tap it to open the gallery. Away from your bookmarks it
+  shows the saved copy from last time (tap **Refresh** to update). Turn it
+  off in the extension's popup.
+- **Swipe** left/right to switch between **All posts** and **Collections**.
+- The header hides as you scroll down and comes back when you scroll up.
+- **⇅ Newest / Oldest** sorts posts, by when you bookmarked them or when they
+  were posted.
+- **Grid / Months / Years**: Months groups posts under month headings; Years
+  shows a card per year — tap one to jump to its months.
+- **Long-press** a post to start selecting; tap more to add them.
 
 ## Collections
 
