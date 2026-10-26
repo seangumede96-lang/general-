@@ -12,8 +12,9 @@
   const cached = new Map(); // key -> item from the saved copy, shown until loading finishes
   const savedItems = new Map(); // key -> item, for every post in a collection
   let collections = []; // [{ id, name, keys: [newest first] }]
-  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid" };
+  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid", theme: "dark" };
   let cacheTime = 0;
+  let lastTotal = 0; // how many bookmarks the last full load found, to show progress next time
 
   let view = "all"; // "all" | "collections" | "collection"
   let openId = null; // collection shown when view === "collection"
@@ -24,7 +25,6 @@
   let entries = []; // what the grid shows: { item } or { header, label, count }
   let current = []; // the items in `entries`, in order (for the full-screen viewer)
   let totalCount = 0;
-  let shown = 0; // how many entries are in the page so far
   const headerEls = new Map();
   let feedStart = 0; // the feed shows current[feedStart .. feedEnd)
   let feedEnd = 0;
@@ -36,7 +36,6 @@
   let selectMode = false;
   const selected = new Set();
 
-  const PAGE = 60; // tiles added at a time as you scroll
   const SAFE_MEDIA = /^https:\/\/(pbs|video)\.twimg\.com\//;
   const SAFE_TWEET = /^https:\/\/x\.com\/[^\s"'<>]+$/;
   const K = { collections: "xbg_collections", items: "xbg_items", settings: "xbg_settings", cache: "xbg_cache" };
@@ -124,6 +123,7 @@
       const cache = data[K.cache];
       if (cache && Array.isArray(cache.items) && !(gotData && loadState.state === "done")) {
         cacheTime = Number(cache.at) || 0;
+        lastTotal = Number(cache.posts) || 0;
         for (const raw of cache.items) {
           const item = clean(raw);
           if (item && !fresh.has(item.key)) cached.set(item.key, item);
@@ -133,6 +133,7 @@
       /* start empty */
     }
     updateBall();
+    applyTheme();
     syncControls();
     if (galleryOpen()) rebuild(false);
   }
@@ -146,7 +147,8 @@
     if (!fresh.size || !isMainBookmarks()) return;
     cacheTime = Date.now();
     cached.clear();
-    store.set({ [K.cache]: { at: cacheTime, items: [...fresh.values()] } }).catch(() => {});
+    if (loadState.posts) lastTotal = loadState.posts;
+    store.set({ [K.cache]: { at: cacheTime, posts: lastTotal, items: [...fresh.values()] } }).catch(() => {});
     scheduleRefresh();
   }
 
@@ -408,17 +410,46 @@
     setTimeout(() => input.focus(), 50);
   }
 
-  function confirmSheet(title, text, action, onConfirm) {
+  // An iPhone-style action sheet at the bottom: the message, then the red action, then Cancel.
+  function confirmSheet(title, message, action, onConfirm) {
+    const close = () => backdrop.remove();
+    const box = el(
+      "div",
+      { class: "xbg-alert xbg-action-sheet", role: "alertdialog" },
+      el("div", { class: "xbg-alert-text" }, el("div", { class: "xbg-alert-title" }, title), el("div", { class: "xbg-alert-message" }, message)),
+      el("button", { class: "xbg-alert-action", onclick: () => { close(); onConfirm(); } }, action),
+      el("button", { class: "xbg-alert-cancel", onclick: close }, "Cancel")
+    );
+    const backdrop = el("div", { class: "xbg-alert-backdrop xbg-sheet-style", onclick: (e) => e.target === backdrop && close() }, box);
+    ui.overlay.append(backdrop);
+    ui.alert = backdrop;
+  }
+
+  // ⋯ on the main pages: light or dark look.
+  function settingsMenu() {
+    const toggle = (label, note, on, flip) =>
+      el(
+        "button",
+        { class: "xbg-pick xbg-setting", onclick: () => { flip(); saveSettings(); settingsMenu(); } },
+        el("span", { class: "xbg-pick-name" }, label, note ? el("small", {}, note) : ""),
+        el("span", { class: "xbg-switch" + (on ? " xbg-on" : "") })
+      );
     openSheet(
-      title,
+      "Settings",
       el(
         "div",
         { class: "xbg-sheet-body" },
-        el("p", { class: "xbg-sheet-text" }, text),
-        el("button", { class: "xbg-primary xbg-danger", onclick: () => { closeSheet(); onConfirm(); } }, action),
-        el("button", { class: "xbg-secondary", onclick: () => closeSheet() }, "Cancel")
+        toggle("Dark mode", "", settings.theme !== "light", () => {
+          settings.theme = settings.theme === "light" ? "dark" : "light";
+          applyTheme();
+        }),
+        el("button", { class: "xbg-primary", onclick: () => closeSheet() }, "Done")
       )
     );
+  }
+
+  function applyTheme() {
+    if (ui) ui.overlay.classList.toggle("xbg-light", settings.theme === "light");
   }
 
   // "Save to collection" picker for one or more posts.
@@ -487,10 +518,10 @@
     const refreshBtn = el("button", { class: "xbg-link xbg-hidden", onclick: () => goToBookmarks() }, "Refresh");
     const status = el("div", { class: "xbg-status" }, statusText, refreshBtn);
     const selectBtn = el("button", { class: "xbg-text-btn", onclick: () => setSelectMode(!selectMode) }, "Select");
-    const menuBtn = el("button", { class: "xbg-close", "aria-label": "Collection options", onclick: collectionMenu }, "⋯");
+    const menuBtn = el("button", { class: "xbg-close", "aria-label": "Options", onclick: () => (view === "collection" ? collectionMenu() : settingsMenu()) }, "⋯");
 
     const tabs = el("div", { class: "xbg-tabs" });
-    for (const [value, label] of [["all", "▦  All posts"], ["collections", "▢  Collections"]]) {
+    for (const [value, label] of [["all", "All posts"], ["collections", "Collections"]]) {
       tabs.append(el("button", { class: "xbg-tab", "data-view": value, onclick: () => setView(value) }, label));
     }
     const filters = el("div", { class: "xbg-chips" });
@@ -540,6 +571,9 @@
       tabs,
       controls
     );
+    const progressFill = el("span");
+    const progress = el("div", { class: "xbg-progress xbg-hidden" }, progressFill);
+    bar.append(progress);
     const toastEl = el("div", { class: "xbg-toast xbg-hidden" });
     const overlay = el("div", { id: "xbg-overlay", class: "xbg-hidden" }, scroller, bar, selectBar, lightbox, toastEl);
     document.body.append(overlay);
@@ -547,14 +581,16 @@
     ui = {
       overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn,
       layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
-      lightbox, feed, toast: toastEl, sheet: null,
+      lightbox, feed, toast: toastEl, sheet: null, progress, progressFill,
     };
 
     wireGrid();
     wireScroller();
     wireLightbox();
+    buildScrubber();
     document.addEventListener("keydown", onKey);
     new ResizeObserver(() => (scroller.style.paddingTop = bar.offsetHeight + "px")).observe(bar);
+    applyTheme();
     syncControls();
     updateHeader();
   }
@@ -613,6 +649,7 @@
     });
     grid.addEventListener("touchcancel", cancel);
     grid.addEventListener("contextmenu", (e) => e.preventDefault());
+    window.addEventListener("resize", () => fillPage());
     grid.addEventListener("click", (e) => {
       const tile = e.target.closest(".xbg-tile");
       if (!tile || tile.dataset.key === swallowKey) return;
@@ -646,6 +683,7 @@
         else if (dy < -6) bar.classList.remove("xbg-bar-hidden");
         if (Math.abs(dy) > 6 || y < bar.offsetHeight) lastY = y;
         fillPage();
+        showScrubber();
       });
     }, { passive: true });
 
@@ -764,7 +802,11 @@
     }
     if (!backSteps.pushed) return;
     backSteps.pushed--;
-    if (ui.sheet) {
+    if (ui.alert && ui.alert.isConnected) {
+      // A confirmation was open: back just closes it.
+      ui.alert.remove();
+      if (feedOpen() || selectMode) addBackStep();
+    } else if (ui.sheet) {
       // A menu was open: back just closes the menu. While selecting, keep the
       // selection (the menu's "done" step would otherwise end it).
       if (selectMode && !feedOpen()) {
@@ -790,7 +832,6 @@
     const c = view === "collection" ? getCollection(openId) : null;
     ui.back.classList.toggle("xbg-hidden", !c);
     ui.close.classList.toggle("xbg-hidden", !!c);
-    ui.menuBtn.classList.toggle("xbg-hidden", !c);
     ui.tabs.classList.toggle("xbg-hidden", !!c);
     ui.controls.classList.toggle("xbg-hidden", view === "collections");
     ui.selectBtn.classList.toggle("xbg-hidden", view === "collections" || settings.layout === "years");
@@ -807,20 +848,56 @@
         text = cached.size || fresh.size ? `Saved copy · ${ago(cacheTime)}` : "";
         canRefresh = true;
       } else if (scrollTimer) text = "Loading more…";
-      else if (s.state === "loading") text = cached.size ? "Updating…" : "Loading all bookmarks…";
+      else if (s.state === "loading") text = loadingText(s.posts);
       else if (s.state === "waiting") text = `X asked us to slow down, continuing in ${s.seconds}s…`;
-      else if (s.state === "done") text = "All loaded";
+      else if (s.state === "done") text = s.posts ? `All ${s.posts.toLocaleString()} bookmarks loaded` : "All loaded";
       else if (s.state === "failed") text = "Couldn’t load everything";
     }
     ui.statusText.textContent = text;
     ui.refreshBtn.classList.toggle("xbg-hidden", !canRefresh);
+
+    // A thin bar under the header fills up as bookmarks arrive, measured
+    // against how many the last full load found.
+    const loading = view === "all" && isBookmarks() && (loadState.state === "loading" || loadState.state === "waiting");
+    ui.progress.classList.toggle("xbg-hidden", !loading);
+    if (loading) {
+      const n = loadState.posts || 0;
+      ui.progress.classList.toggle("xbg-progress-unknown", !lastTotal);
+      ui.progressFill.style.width = lastTotal ? Math.min(98, Math.max(3, (n / lastTotal) * 100)) + "%" : "";
+    }
   }
 
+  // X doesn't say how many bookmarks you have, so count them as they arrive
+  // and compare with the total from the last full load.
+  function loadingText(n) {
+    if (!n) return cached.size ? "Updating…" : "Loading all bookmarks…";
+    const done = n.toLocaleString();
+    return lastTotal && lastTotal > n ? `Loading ${done} of about ${lastTotal.toLocaleString()} bookmarks…` : `Loading… ${done} bookmarks so far`;
+  }
+
+  // Where you were on the Collections page and inside each collection, so going
+  // back to either one returns you exactly there.
+  let collectionsSpot = null;
+  const collectionSpots = new Map(); // collection id -> spot
+
   function setView(value, id = null, slide = null) {
+    const from = view;
+    const here = { top: ui.scroller.scrollTop, barHidden: ui.bar.classList.contains("xbg-bar-hidden") };
+    if (from === "collections" && value !== "collections") collectionsSpot = here;
+    if (from === "collection") collectionSpots.set(openId, here);
     view = value;
     openId = id;
     if (selectMode) setSelectMode(false);
     rebuild();
+    const spot = value === "collections" && from === "collection" ? collectionsSpot : value === "collection" ? collectionSpots.get(id) : null;
+    if (spot) {
+      ui.jumped = true; // our own scroll: leave the header as it was
+      ui.bar.classList.toggle("xbg-bar-hidden", spot.barHidden && spot.top > 0);
+      // Room for the header now (it can be a different height here), not a frame later.
+      ui.scroller.style.paddingTop = ui.bar.offsetHeight + "px";
+      ui.scroller.scrollTop = spot.top;
+      fillPage();
+    }
     if (slide) {
       ui.scroller.classList.remove("xbg-slide-left", "xbg-slide-right");
       void ui.scroller.offsetWidth;
@@ -1043,8 +1120,9 @@
   // videos play in the full-screen viewer.
   function makeTile(item) {
     const tile = el("button", { class: "xbg-tile" + (selected.has(item.key) ? " xbg-selected" : ""), "data-key": item.key, "aria-label": item.type === "photo" ? "Photo" : "Video" });
-    tile.append(el("img", { src: item.thumb, loading: "lazy", decoding: "async", alt: "", referrerpolicy: "no-referrer" }));
-    if (item.type !== "photo") tile.append(el("span", { class: "xbg-badge" }, item.type === "gif" ? "GIF" : "▶"));
+    // The picture is asked for once the tile is on screen and the scrolling has slowed (see loadThumbs).
+    tile.append(el("img", { "data-src": item.thumb, decoding: "async", alt: "", referrerpolicy: "no-referrer" }));
+    if (item.type !== "photo") tile.append(el("span", { class: "xbg-badge xbg-badge-time" }, item.type === "gif" ? "GIF" : "▶"));
     return tile;
   }
 
@@ -1055,29 +1133,150 @@
     return el("div", { class: "xbg-section", "data-key": e.header }, el("span", {}, e.label), countEl);
   }
 
-  // Tiles are added a page at a time as you scroll, instead of all at once,
-  // so opening the gallery stays quick even with thousands of bookmarks.
-  function appendUpTo(n) {
-    const end = Math.min(n, entries.length);
-    if (shown >= end) return;
-    const frag = document.createDocumentFragment();
-    for (; shown < end; shown++) frag.append(makeEntry(entries[shown]));
-    ui.grid.append(frag);
+  // Only the rows near the screen exist in the page (like the iPhone's Photos
+  // app). Every tile's spot is worked out up front, so tens of thousands of
+  // photos scroll and fast-scroll smoothly.
+  const COLS = 3;
+  const GAP = 3;
+  const HEADER_H = 50;
+  const BUFFER = 900; // px drawn above and below the screen
+  let tops = [];
+  let lefts = []; // -1 for a month header (full width)
+  let tileSize = 0;
+  let laidWidth = 0;
+  let rendered = new Map(); // sig -> element on the page
+  const spare = new Map(); // recently scrolled-past tiles, kept so scrolling back is instant
+  const SPARE_MAX = 600;
+  let lastScroll = { y: 0, t: 0 };
+  let thumbTimer = null;
+
+  function layoutGrid() {
+    const width = ui.grid.clientWidth || ui.scroller.clientWidth || window.innerWidth;
+    laidWidth = width;
+    tileSize = (width - GAP * (COLS - 1)) / COLS;
+    tops = new Array(entries.length);
+    lefts = new Array(entries.length);
+    let y = 0;
+    let col = 0;
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i].header) {
+        if (col) (y += tileSize + GAP), (col = 0);
+        tops[i] = y;
+        lefts[i] = -1;
+        y += HEADER_H;
+      } else {
+        tops[i] = y;
+        lefts[i] = col * (tileSize + GAP);
+        if (++col === COLS) (col = 0), (y += tileSize + GAP);
+      }
+    }
+    if (col) y += tileSize;
+    ui.grid.style.height = Math.ceil(y) + "px";
   }
 
-  function renderPrefix(n) {
+  // The first entry whose bottom edge is below `y` (grid coordinates).
+  function indexAt(y) {
+    let lo = 0;
+    let hi = entries.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (tops[mid] + (lefts[mid] < 0 ? HEADER_H : tileSize) <= y) lo = mid + 1;
+      else hi = mid;
+    }
+    return Math.max(lo, 0);
+  }
+
+  const gridTop = () => ui.grid.getBoundingClientRect().top - ui.scroller.getBoundingClientRect().top + ui.scroller.scrollTop;
+
+  function renderVisible() {
+    if (!ui || ui.grid.classList.contains("xbg-hidden")) return;
+    if (ui.grid.clientWidth && ui.grid.clientWidth !== laidWidth) layoutGrid();
+    const y = ui.scroller.scrollTop - gridTop();
+    const bottom = y + ui.scroller.clientHeight + BUFFER;
+    const next = new Map();
+    const frag = document.createDocumentFragment();
+    for (let i = entries.length ? indexAt(y - BUFFER) : 0; i < entries.length && tops[i] < bottom; i++) {
+      const e = entries[i];
+      const key = sig(e);
+      let node = rendered.get(key);
+      if (node) rendered.delete(key);
+      else {
+        node = spare.get(key);
+        if (node) {
+          spare.delete(key);
+          node.classList.toggle("xbg-selected", selected.has(key));
+        } else node = makeEntry(e);
+        frag.append(node);
+      }
+      const pos = lefts[i] < 0 ? `${tops[i]}|h` : `${tops[i]}|${lefts[i]}|${tileSize}`;
+      if (node._pos !== pos) {
+        node._pos = pos;
+        const st = node.style;
+        st.top = tops[i] + "px";
+        if (lefts[i] < 0) {
+          st.left = "0";
+          st.width = "100%";
+          st.height = HEADER_H + "px";
+        } else {
+          st.left = lefts[i] + "px";
+          st.width = st.height = tileSize + "px";
+        }
+      }
+      next.set(key, node);
+    }
+    for (const [key, node] of rendered) {
+      node.remove();
+      if (node.classList.contains("xbg-tile")) spare.set(key, node);
+    }
+    for (const key of spare.keys()) {
+      if (spare.size <= SPARE_MAX) break;
+      spare.delete(key);
+    }
+    rendered = next;
+    if (frag.childNodes.length) ui.grid.append(frag);
+
+    // Flinging fast: wait until it slows before asking for pictures, so the
+    // phone isn't busy making thumbnails for photos that have already flown past.
+    const now = performance.now();
+    const speed = Math.abs(ui.scroller.scrollTop - lastScroll.y) / Math.max(now - lastScroll.t, 1);
+    lastScroll = { y: ui.scroller.scrollTop, t: now };
+    clearTimeout(thumbTimer);
+    if (speed < 2.5 && !scrubbing) loadThumbs();
+    else thumbTimer = setTimeout(loadThumbs, 90);
+  }
+
+  function loadThumbs() {
+    const y = ui.scroller.scrollTop - gridTop();
+    const lo = y - 300;
+    const hi = y + ui.scroller.clientHeight + 600;
+    for (const node of rendered.values()) {
+      const img = node.firstChild;
+      if (!img || img.tagName !== "IMG" || !img.dataset.src) continue;
+      const top = parseFloat(node.style.top);
+      if (top + tileSize < lo || top > hi) continue;
+      img.src = img.dataset.src;
+      delete img.dataset.src;
+    }
+  }
+
+  // Start the grid afresh (new view, filter or sort).
+  function renderPrefix() {
     ui.grid.replaceChildren();
+    rendered.clear();
+    spare.clear();
     headerEls.clear();
-    shown = 0;
-    appendUpTo(n);
+    layoutGrid();
+    renderVisible();
+  }
+
+  // Same view, updated list: keep the tiles that are still there.
+  function appendUpTo() {
+    layoutGrid();
+    renderVisible();
   }
 
   function fillPage() {
-    if (!ui || !entries.length) return;
-    for (let i = 0; i < 20 && shown < entries.length; i++) {
-      if (ui.sentinel.getBoundingClientRect().top > window.innerHeight + 1500) break;
-      appendUpTo(shown + PAGE);
-    }
+    if (ui && entries.length) renderVisible();
   }
 
   function rebuild(resetScroll = true) {
@@ -1101,7 +1300,7 @@
         renderYears();
         entries = [];
       }
-      renderPrefix(resetScroll ? PAGE : Math.max(shown, PAGE));
+      renderPrefix();
       fillPage();
     }
     updateHeader();
@@ -1126,15 +1325,10 @@
     if (settings.layout === "years") return rebuild(false);
     const next = computeEntries();
     renderPeriodBar();
-    let same = shown <= next.length;
-    for (let i = 0; same && i < shown; i++) if (sig(next[i]) !== sig(entries[i])) same = false;
     entries = next;
-    if (same) {
-      for (const e of entries) if (e.header && headerEls.has(e.header)) headerEls.get(e.header).textContent = plural(e.count, "post");
-      appendUpTo(Math.max(shown, PAGE));
-    } else {
-      renderPrefix(Math.max(shown, PAGE));
-    }
+    // Tiles that are still in the list stay on the page, so nothing flickers.
+    for (const e of entries) if (e.header && headerEls.has(e.header)) headerEls.get(e.header).textContent = plural(e.count, "post");
+    appendUpTo();
     fillPage();
     updateHeader();
     updateEmpty();
@@ -1373,9 +1567,24 @@
     ui.lightbox.style.transform = "";
     ui.lightbox.classList.remove("xbg-hidden");
     const target = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(key)}"]`);
-    ui.feed.scrollTop = target ? target.offsetTop : 0;
+    centrePost(target);
     extendFeed();
     if (!wasOpen) addBackStep();
+  }
+
+  // Put the tapped post in the exact middle of the screen, whatever its shape.
+  // The feed gets room above the first post and below the last, so even
+  // those can sit in the middle.
+  function centrePost(post) {
+    const feed = ui.feed;
+    feed.style.paddingBottom = "50vh";
+    const first = feedStart === 0 && feed.querySelector(".xbg-post");
+    feed.style.paddingTop = first ? Math.max(0, (window.innerHeight - first.offsetHeight) / 2) + "px" : "";
+    if (!post) return (feed.scrollTop = 0);
+    feed.scrollTop = 0;
+    const r = post.getBoundingClientRect();
+    const fits = r.height <= window.innerHeight;
+    feed.scrollTop = fits ? r.top + r.height / 2 - window.innerHeight / 2 : r.top - feed.getBoundingClientRect().top;
   }
 
   function clearFeed() {
@@ -1412,6 +1621,181 @@
     feedStart = current.findIndex((it) => it.key === keys[0]);
     feedEnd = current.findIndex((it) => it.key === keys[keys.length - 1]) + 1;
   }
+
+  // --- Fast-scroll bar (like the iPhone's Photos app) -------------------------
+  // A slim handle on the right appears while you scroll and fades once you
+  // stop. Drag it to race through the photos; a date label follows it and the
+  // phone ticks at each new month.
+
+  const SCRUB_MIN_ITEMS = 120;
+  let scrubTimer = null;
+  let scrubbing = false;
+
+  function buildScrubber() {
+    const thumb = el("div", { class: "xbg-scrub-thumb" });
+    const label = el("div", { class: "xbg-scrub-label" });
+    const track = el("div", { class: "xbg-scrubber" }, label, thumb);
+    // Two small round buttons at the ends of the handle's path: ↑ jumps to the
+    // very top (shown in the lower half), ↓ to the very bottom (upper half).
+    const arrow = (d) => {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", d);
+      svg.append(path);
+      return svg;
+    };
+    const jumpUp = el("button", { class: "xbg-jump", "aria-label": "Go to the top", onclick: () => jumpToEnd(false) }, arrow("M12 19V5M6 11l6-6 6 6"));
+    const jumpDown = el("button", { class: "xbg-jump", "aria-label": "Go to the bottom", onclick: () => jumpToEnd(true) }, arrow("M12 5v14M6 13l6 6 6-6"));
+    ui.overlay.append(track, jumpUp, jumpDown);
+    Object.assign(ui, { scrub: track, scrubThumb: thumb, scrubLabel: label, jumpUp, jumpDown });
+
+    let lastLabel = "";
+    const dragTo = (clientY) => {
+      const { top, height } = scrubArea();
+      const f = Math.min(Math.max((clientY - top) / height, 0), 1);
+      placeThumb(f);
+      placeJumps(f);
+      if (!entries.length) return;
+      // Jump to the photo at that point of the list (loading tiles up to it).
+      const index = Math.round(f * (entries.length - 1));
+      ui.jumped = true;
+      ui.scroller.scrollTop = f >= 1 ? ui.scroller.scrollHeight : gridTop() + tops[index] - ui.bar.offsetHeight;
+      renderVisible();
+      const text = labelFor(index);
+      ui.scrubLabel.textContent = text;
+      if (text !== lastLabel && lastLabel && navigator.vibrate) navigator.vibrate(4);
+      lastLabel = text;
+    };
+    let frame = null;
+    thumb.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      thumb.setPointerCapture(e.pointerId);
+      scrubbing = true;
+      lastLabel = "";
+      track.classList.add("xbg-on", "xbg-dragging");
+      clearTimeout(scrubTimer);
+      dragTo(e.clientY);
+    });
+    thumb.addEventListener("pointermove", (e) => {
+      if (!scrubbing) return;
+      const y = e.clientY;
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => dragTo(y));
+    });
+    const end = () => {
+      if (!scrubbing) return;
+      scrubbing = false;
+      track.classList.remove("xbg-dragging");
+      fillPage();
+      hideScrubberSoon();
+    };
+    thumb.addEventListener("pointerup", end);
+    thumb.addEventListener("pointercancel", end);
+  }
+
+  const JUMP_SIZE = 34;
+
+  // The part of the screen the handle moves along: below the header, between the two jump buttons.
+  function scrubEnds() {
+    const top = ui.bar.getBoundingClientRect().bottom + 12;
+    const bottom = window.innerHeight - (selectMode ? ui.selectBar.offsetHeight : 0) - 70;
+    return { top, bottom };
+  }
+
+  function scrubArea() {
+    const { top, bottom } = scrubEnds();
+    const room = JUMP_SIZE + 26;
+    return { top: top + room, height: Math.max(bottom - top - 2 * room, 1) };
+  }
+
+  function placeJumps(f) {
+    const { top, bottom } = scrubEnds();
+    ui.jumpUp.style.top = top + "px";
+    ui.jumpDown.style.top = bottom - JUMP_SIZE + "px";
+    ui.jumpUp.classList.toggle("xbg-on", f >= 0.5);
+    ui.jumpDown.classList.toggle("xbg-on", f < 0.5);
+  }
+
+  function hideJumps() {
+    ui.jumpUp.classList.remove("xbg-on");
+    ui.jumpDown.classList.remove("xbg-on");
+  }
+
+  function jumpToEnd(bottom) {
+    ui.jumped = true;
+    if (!bottom) ui.bar.classList.remove("xbg-bar-hidden");
+    ui.scroller.scrollTop = bottom ? ui.scroller.scrollHeight : 0;
+    renderVisible();
+    if (navigator.vibrate) navigator.vibrate(8);
+    placeThumb(bottom ? 1 : 0);
+    ui.scrubLabel.textContent = labelFor(bottom ? entries.length - 1 : 0);
+    placeJumps(bottom ? 1 : 0);
+    hideScrubberSoon();
+  }
+
+  function placeThumb(f) {
+    const { top, height } = scrubArea();
+    ui.scrub.style.top = top + f * height + "px";
+  }
+
+  function labelFor(index) {
+    const e = entries[Math.max(0, Math.min(index, entries.length - 1))];
+    if (!e) return "";
+    if (e.header) return e.label;
+    const d = dateOf(e.item);
+    return d ? new Date(d).toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "";
+  }
+
+  function showScrubber() {
+    if (!ui || !ui.scrub || scrubbing) return;
+    const usable = view !== "collections" && settings.layout !== "years" && entries.length >= SCRUB_MIN_ITEMS && !feedOpen();
+    if (!usable) {
+      hideJumps();
+      return ui.scrub.classList.remove("xbg-on");
+    }
+    // Where we are in the whole list, from the first tile on screen.
+    const y = ui.bar.getBoundingClientRect().bottom + 4;
+    let index = indexAt(y - ui.grid.getBoundingClientRect().top);
+    if (ui.scroller.scrollTop + ui.scroller.clientHeight >= ui.scroller.scrollHeight - 4) index = entries.length - 1;
+    const f = index / Math.max(entries.length - 1, 1);
+    placeThumb(f);
+    placeJumps(f);
+    ui.scrubLabel.textContent = labelFor(index);
+    ui.scrub.classList.add("xbg-on");
+    hideScrubberSoon();
+  }
+
+  function hideScrubberSoon() {
+    clearTimeout(scrubTimer);
+    scrubTimer = setTimeout(() => {
+      if (scrubbing) return;
+      ui.scrub.classList.remove("xbg-on");
+      hideJumps();
+    }, 1400);
+  }
+
+  // Photos fade in once they've loaded, so fast scrolling looks smooth instead of popping.
+  document.addEventListener(
+    "load",
+    (e) => {
+      const img = e.target;
+      if (img instanceof HTMLImageElement && img.parentNode && img.parentNode.matches(".xbg-tile, .xbg-post-media")) img.classList.add("xbg-in");
+    },
+    true
+  );
+
+  // A picture X won't serve shows a dark tile with a cracked-Polaroid icon.
+  document.addEventListener(
+    "error",
+    (e) => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement) || !img.closest("#xbg-overlay") || img.classList.contains("xbg-gave-up")) return;
+      img.classList.add("xbg-gave-up");
+      img.replaceWith(el("div", { class: "xbg-broken" }));
+    },
+    true
+  );
 
   // --- Floating ball (shown everywhere on X) -------------------------------
 

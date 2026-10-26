@@ -8,7 +8,11 @@
   window.__xbgHooked = true;
 
   const BOOKMARK_API = /\/graphql\/[^/?]+\/(Bookmarks|BookmarkFolderTimeline|BookmarkSearchTimeline)\b/;
-  const PAGE_DELAY_MS = 500;
+  // Ask for 100 bookmarks per request instead of the page's usual 20 (falls
+  // back to the page's own size if X refuses), and pace requests by X's own
+  // rate-limit headers instead of a fixed wait.
+  const BIG_PAGE = 100;
+  const MIN_DELAY_MS = 120;
   const origFetch = window.fetch;
 
   let template = null; // the page's own first bookmarks request: { key, url, method, headers, body }
@@ -147,32 +151,48 @@
     return u.pathname.split("/").pop() + "|" + (u.searchParams.get("variables") || "").replace(/"cursor":"[^"]*",?/, "");
   }
 
-  function withCursor(tpl, cursor) {
+  function withCursor(tpl, cursor, count) {
     const u = new URL(tpl.url, location.origin);
     let body = tpl.body;
-    if (u.searchParams.has("variables")) {
-      const vars = JSON.parse(u.searchParams.get("variables"));
+    const set = (vars) => {
       vars.cursor = cursor;
-      u.searchParams.set("variables", JSON.stringify(vars));
+      if (count) vars.count = count;
+      return vars;
+    };
+    if (u.searchParams.has("variables")) {
+      u.searchParams.set("variables", JSON.stringify(set(JSON.parse(u.searchParams.get("variables")))));
     } else if (typeof body === "string") {
       const parsed = JSON.parse(body);
-      parsed.variables = { ...(parsed.variables || {}), cursor };
+      parsed.variables = set({ ...(parsed.variables || {}) });
       body = JSON.stringify(parsed);
     }
     return { url: u.toString(), body };
   }
 
-  async function loadAll(tpl, cursor) {
+  // How long to wait before the next request, from X's rate-limit headers:
+  // quick while plenty of requests are left, spread out as they run low.
+  function nextDelay(res) {
+    const left = Number(res.headers.get("x-rate-limit-remaining"));
+    const reset = Number(res.headers.get("x-rate-limit-reset")) * 1000;
+    if (!Number.isFinite(left) || !reset || res.headers.get("x-rate-limit-remaining") === null) return 400;
+    if (left > 20) return MIN_DELAY_MS;
+    const untilReset = Math.max(reset - Date.now(), 0);
+    return Math.min(Math.max(untilReset / Math.max(left, 1), MIN_DELAY_MS), 60000);
+  }
+
+  async function loadAll(tpl, cursor, firstPosts) {
     if (pagingKey === tpl.key) return;
     pagingKey = tpl.key;
     const used = new Set();
     let pages = 1;
+    let posts = firstPosts || 0;
     let retries = 0;
-    status({ state: "loading", pages });
+    let big = true; // using BIG_PAGE until X refuses it
+    status({ state: "loading", pages, posts });
     try {
       while (cursor && !used.has(cursor) && template === tpl) {
         used.add(cursor);
-        const req = withCursor(tpl, cursor);
+        const req = withCursor(tpl, cursor, big ? BIG_PAGE : 0);
         const res = await origFetch(req.url, {
           method: tpl.method,
           headers: tpl.headers,
@@ -185,25 +205,32 @@
           used.delete(cursor);
           const reset = Number(res.headers.get("x-rate-limit-reset")) * 1000;
           const wait = reset ? Math.min(Math.max(reset - Date.now(), 5000), 120000) : 30000;
-          status({ state: "waiting", pages, seconds: Math.round(wait / 1000) });
+          status({ state: "waiting", pages, posts, seconds: Math.round(wait / 1000) });
           await sleep(wait);
+          continue;
+        }
+        if (!res.ok && big && res.status >= 400 && res.status < 500) {
+          // X didn't like the bigger page: carry on at the page's own size.
+          big = false;
+          used.delete(cursor);
           continue;
         }
         if (!res.ok) throw new Error(`X answered ${res.status}`);
         const page = publish(await res.json());
         pages++;
+        posts += page.posts;
         retries = 0;
-        status({ state: "loading", pages });
+        status({ state: "loading", pages, posts });
         if (!page.posts) break;
         cursor = page.cursor;
-        await sleep(PAGE_DELAY_MS);
+        await sleep(nextDelay(res));
       }
       if (template === tpl) {
         doneKeys.add(tpl.key);
-        status({ state: "done", pages });
+        status({ state: "done", pages, posts });
       }
     } catch (e) {
-      status({ state: "failed", error: String((e && e.message) || e) });
+      status({ state: "failed", posts, error: String((e && e.message) || e) });
     } finally {
       if (pagingKey === tpl.key) pagingKey = null;
     }
@@ -216,8 +243,8 @@
     const isFirstPage = !/"cursor":/.test(new URL(req.url, location.origin).searchParams.get("variables") || req.body || "");
     if (!isFirstPage || pagingKey === key || doneKeys.has(key)) return;
     template = { ...req, key };
-    if (page.cursor && page.posts) loadAll(template, page.cursor);
-    else status({ state: "done", pages: 1 });
+    if (page.cursor && page.posts) loadAll(template, page.cursor, page.posts);
+    else status({ state: "done", pages: 1, posts: page.posts });
   }
 
   // --- Hooks on the page's network calls ----------------------------------

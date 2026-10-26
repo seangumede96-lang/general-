@@ -21,13 +21,15 @@ scrolls the bookmarks page for you while it's open.
 ## Use
 
 1. Open <https://x.com/i/bookmarks> and log in.
-2. Tap the floating blue **▦** ball, or open the extension from the menu
-   and tap **Open gallery**. The header shows "Loading all bookmarks…" until
-   everything is in, then "All loaded".
+2. Tap the floating round bookmark ball, or open the extension from the menu
+   and tap **Open gallery**. The header counts bookmarks as they
+   arrive ("Loading 1,240 of about 5,300 bookmarks…", with a thin progress bar;
+   the "about" total is from your last full load, since X doesn't say how many
+   you have), then "All 5,300 bookmarks loaded".
 
 ## Browsing
 
-- **Floating ball**: a blue ball appears on every X page. Drag it anywhere (it
+- **Floating ball**: a round ball appears on every X page. Drag it anywhere (it
   snaps to the side); tap it to open the gallery. Away from your bookmarks it
   shows the saved copy from last time (tap **Refresh** to update). Turn it
   off in the extension's popup.
@@ -64,3 +66,23 @@ extension, not on X):
 
 `manifest.json`, `inject.js` (reads X's bookmark data), `content.js` (gallery),
 `styles.css`, `popup.html` + `popup.js` (menu popup).
+
+## Speed with big libraries
+
+- Bookmarks are fetched 100 at a time (X's page usually asks for 20), falling
+  back to X's own size if it refuses, and paced by X's rate-limit headers
+  rather than a fixed wait.
+- The grid only draws the rows near the screen and works out every tile's
+  position up front, so tens of thousands of posts scroll smoothly.
+- Thumbnails are requested once a fast fling slows down; recently passed tiles
+  are kept so scrolling back is instant. Photos fade in over a grey placeholder.
+- An iPhone-style fast-scroll handle on the right (with a month label and
+  ↑ / ↓ buttons to jump to the very top or bottom).
+
+## Look
+
+- White accents in dark mode, red in light mode (⋯ → Settings → Dark mode).
+- iPhone-style selection tick, bottom confirmation sheet, and a cracked-Polaroid
+  tile for pictures X won't serve.
+- Tapping a post opens the feed with it in the middle of the screen; Collections
+  and each collection reopen where you left them.
