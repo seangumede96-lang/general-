@@ -25,6 +25,7 @@ the X Bookmarks Gallery (`../twitter-gallery`):
 - A floating AssistiveTouch-style button hides/shows the header.
 - Returning to the app only reloads when photos actually changed (Android's
   media change counter), and then updates in place.
+- iPhone-style fast-scroll handle on the right with a date label.
 - Swipe between tabs; the phone's back button closes menus, the feed,
   selection, then albums, then the app.
 - Albums can be backed up to Downloads and restored.

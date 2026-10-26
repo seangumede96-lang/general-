@@ -1663,3 +1663,88 @@ html,
 @keyframes xbg-alert-pop {
   from { transform: scale(1.12); opacity: 0; }
 }
+
+/* --- Fast-scroll bar (iPhone Photos style) --------------------------------- */
+
+#xbg-overlay .xbg-scrubber {
+  position: fixed;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 0; /* positioned by its centre line */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+#xbg-overlay .xbg-scrubber.xbg-on {
+  opacity: 1;
+}
+
+/* A wide, invisible grab area around the slim capsule */
+#xbg-overlay .xbg-scrub-thumb {
+  position: relative;
+  width: 36px;
+  height: 56px;
+  pointer-events: none;
+  touch-action: none;
+}
+
+#xbg-overlay .xbg-scrubber.xbg-on .xbg-scrub-thumb {
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-scrub-thumb::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 5px;
+  width: 6px;
+  height: 40px;
+  border-radius: 3px;
+  background: rgba(235, 235, 245, 0.75);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: width 0.15s ease, right 0.15s ease, background 0.15s ease;
+}
+
+#xbg-overlay .xbg-scrubber.xbg-dragging .xbg-scrub-thumb::after {
+  right: 4px;
+  width: 8px;
+  background: #fff;
+}
+
+/* The date shown beside the handle while dragging */
+#xbg-overlay .xbg-scrub-label {
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(30, 30, 32, 0.88);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+#xbg-overlay .xbg-scrubber.xbg-dragging .xbg-scrub-label {
+  opacity: 1;
+  transform: none;
+}
+
+#xbg-overlay.xbg-light .xbg-scrub-thumb::after {
+  background: rgba(60, 60, 67, 0.55);
+}
+
+#xbg-overlay.xbg-light .xbg-scrubber.xbg-dragging .xbg-scrub-thumb::after {
+  background: rgba(60, 60, 67, 0.8);
+}
+
+#xbg-overlay.xbg-light .xbg-scrub-label {
+  background: rgba(255, 255, 255, 0.92);
+  color: #000;
+}

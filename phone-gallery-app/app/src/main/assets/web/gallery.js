@@ -688,6 +688,7 @@
         else if (dy < -6) bar.classList.remove("xbg-bar-hidden");
         if (Math.abs(dy) > 6 || y < bar.offsetHeight) lastY = y;
         fillPage();
+        showScrubber();
       });
     }, { passive: true });
 
@@ -1698,6 +1699,111 @@
     else closeViewer();
   }
 
+  // --- Fast-scroll bar (like the iPhone's Photos app) -------------------------
+  // A slim handle on the right appears while you scroll and fades once you
+  // stop. Drag it to race through the photos; a date label follows it and the
+  // phone ticks at each new month.
+
+  const SCRUB_MIN_ITEMS = 120;
+  let scrubTimer = null;
+  let scrubbing = false;
+
+  function buildScrubber() {
+    const thumb = el("div", { class: "xbg-scrub-thumb" });
+    const label = el("div", { class: "xbg-scrub-label" });
+    const track = el("div", { class: "xbg-scrubber" }, label, thumb);
+    ui.overlay.append(track);
+    Object.assign(ui, { scrub: track, scrubThumb: thumb, scrubLabel: label });
+
+    let lastLabel = "";
+    const dragTo = (clientY) => {
+      const { top, height } = scrubArea();
+      const f = Math.min(Math.max((clientY - top) / height, 0), 1);
+      placeThumb(f);
+      if (!entries.length) return;
+      // Jump to the photo at that point of the list (loading tiles up to it).
+      const index = Math.round(f * (entries.length - 1));
+      appendUpTo(index + PAGE);
+      const target = ui.grid.children[index];
+      if (target) {
+        ui.jumped = true;
+        ui.scroller.scrollTop = f >= 1 ? ui.scroller.scrollHeight : target.offsetTop - (settings.headerHidden ? 0 : ui.bar.offsetHeight);
+      }
+      const text = labelFor(index);
+      ui.scrubLabel.textContent = text;
+      if (text !== lastLabel && lastLabel && navigator.vibrate) navigator.vibrate(4);
+      lastLabel = text;
+    };
+    let frame = null;
+    thumb.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      thumb.setPointerCapture(e.pointerId);
+      scrubbing = true;
+      lastLabel = "";
+      track.classList.add("xbg-on", "xbg-dragging");
+      clearTimeout(scrubTimer);
+      dragTo(e.clientY);
+    });
+    thumb.addEventListener("pointermove", (e) => {
+      if (!scrubbing) return;
+      const y = e.clientY;
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => dragTo(y));
+    });
+    const end = () => {
+      if (!scrubbing) return;
+      scrubbing = false;
+      track.classList.remove("xbg-dragging");
+      fillPage();
+      hideScrubberSoon();
+    };
+    thumb.addEventListener("pointerup", end);
+    thumb.addEventListener("pointercancel", end);
+  }
+
+  // The part of the screen the handle moves along (below the header).
+  function scrubArea() {
+    const top = (settings.headerHidden ? 0 : ui.bar.getBoundingClientRect().bottom) + 12;
+    const bottom = window.innerHeight - (selectMode ? ui.selectBar.offsetHeight : 0) - 70;
+    return { top, height: Math.max(bottom - top, 1) };
+  }
+
+  function placeThumb(f) {
+    const { top, height } = scrubArea();
+    ui.scrub.style.top = top + f * height + "px";
+  }
+
+  function labelFor(index) {
+    const e = entries[Math.max(0, Math.min(index, entries.length - 1))];
+    if (!e) return "";
+    if (e.header) return e.label;
+    const d = dateOf(e.item);
+    return d ? new Date(d).toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "";
+  }
+
+  function showScrubber() {
+    if (!ui || !ui.scrub || scrubbing) return;
+    const usable = view !== "collections" && settings.layout !== "years" && entries.length >= SCRUB_MIN_ITEMS && !feedOpen();
+    if (!usable) return ui.scrub.classList.remove("xbg-on");
+    // Where we are in the whole list, from the first tile on screen.
+    const y = (settings.headerHidden ? 0 : ui.bar.getBoundingClientRect().bottom) + 4;
+    const hit = document.elementFromPoint(window.innerWidth / 2, Math.max(y, 1));
+    const tile = hit && hit.closest(".xbg-grid > *");
+    let index = tile ? Array.prototype.indexOf.call(ui.grid.children, tile) : 0;
+    if (ui.scroller.scrollTop + ui.scroller.clientHeight >= ui.scroller.scrollHeight - 4 && shown >= entries.length) index = entries.length - 1;
+    placeThumb(index / Math.max(entries.length - 1, 1));
+    ui.scrubLabel.textContent = labelFor(index);
+    ui.scrub.classList.add("xbg-on");
+    hideScrubberSoon();
+  }
+
+  function hideScrubberSoon() {
+    clearTimeout(scrubTimer);
+    scrubTimer = setTimeout(() => {
+      if (!scrubbing) ui.scrub.classList.remove("xbg-on");
+    }, 1400);
+  }
+
   // --- Show/hide-header button ------------------------------------------------
   // A floating button you can drag to either side; tap it to hide or show the
   // header (tabs, filters, sorting).
@@ -1817,6 +1923,7 @@
     await loadStored();
     applyTheme();
     buildHeaderButton();
+    buildScrubber();
     if (settings.headerHidden) setHeaderHidden(true);
     rebuild();
     // Read the media after the first paint so the app opens instantly.
