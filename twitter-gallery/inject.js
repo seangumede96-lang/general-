@@ -13,6 +13,29 @@
   // rate-limit headers instead of a fixed wait.
   const BIG_PAGE = 100;
   const MIN_DELAY_MS = 120;
+  // Huge libraries take a long time (X allows about 500 requests per 15
+  // minutes), so the place reached is remembered: if the tab is closed or
+  // reloaded, the next visit carries on from there instead of starting over.
+  const RESUME_KEY = "xbg_resume";
+  const RESUME_MAX_AGE = 24 * 3600000;
+
+  function readResume(key) {
+    try {
+      const r = JSON.parse(localStorage.getItem(RESUME_KEY) || "null");
+      return r && r.key === key && typeof r.cursor === "string" && Date.now() - r.at < RESUME_MAX_AGE ? r : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeResume(r) {
+    try {
+      if (r) localStorage.setItem(RESUME_KEY, JSON.stringify({ ...r, at: Date.now() }));
+      else localStorage.removeItem(RESUME_KEY);
+    } catch (e) {
+      /* private mode etc. */
+    }
+  }
   const origFetch = window.fetch;
 
   let template = null; // the page's own first bookmarks request: { key, url, method, headers, body }
@@ -27,9 +50,18 @@
     post({ status: s });
   };
 
+  // Where each page of the current load started, so a later visit can carry on
+  // from the last point content.js actually saved (it says so with "saved").
+  let checkpoints = []; // [{ key, posts, pages, cursor }]
+
   // content.js may load after the first status was sent; it can ask again.
   window.addEventListener("message", (e) => {
-    if (e.source === window && e.data && e.data.__xbgAsk === "status" && lastStatus) post({ status: lastStatus });
+    if (e.source !== window || !e.data) return;
+    if (e.data.__xbgAsk === "status" && lastStatus) post({ status: lastStatus });
+    if (e.data.__xbgAsk === "saved" && Number.isFinite(e.data.posts)) {
+      const cp = checkpoints.filter((c) => c.posts <= e.data.posts).pop();
+      if (cp) writeResume(cp);
+    }
   });
 
   // --- Reading media out of X's responses ---------------------------------
@@ -74,7 +106,7 @@
   function postText(tweet) {
     const long = tweet.note_tweet && tweet.note_tweet.note_tweet_results && tweet.note_tweet.note_tweet_results.result;
     const text = (long && long.text) || (tweet.legacy && tweet.legacy.full_text) || "";
-    return text.replace(/https:\/\/t\.co\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 600) || null;
+    return text.replace(/https:\/\/t\.co\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 300) || null;
   }
 
   function toItem(media, tweet, sortIndex) {
@@ -188,15 +220,18 @@
     return Math.min(Math.max(untilReset / Math.max(left, 1), MIN_DELAY_MS), 60000);
   }
 
-  async function loadAll(tpl, cursor, firstPosts) {
+  async function loadAll(tpl, cursor, firstPosts, resumeFrom) {
     if (pagingKey === tpl.key) return;
     pagingKey = tpl.key;
     const used = new Set();
-    let pages = 1;
-    let posts = firstPosts || 0;
+    const resumed = !!resumeFrom;
+    let pages = resumed ? resumeFrom.pages : 1;
+    let posts = resumed ? resumeFrom.posts : firstPosts || 0;
+    if (resumed) cursor = resumeFrom.cursor;
+    checkpoints = [];
     let retries = 0;
     let big = true; // using BIG_PAGE until X refuses it
-    status({ state: "loading", pages, posts });
+    status({ state: "loading", pages, posts, resumed });
     try {
       while (cursor && !used.has(cursor) && template === tpl) {
         used.add(cursor);
@@ -207,14 +242,17 @@
           body: tpl.method === "GET" ? undefined : req.body,
           credentials: "include",
         });
-        if (res.status === 429 && retries < 3) {
-          // Too many requests: wait for X's rate limit to reset, then retry.
+        if (res.status === 429 && retries < 8) {
+          // Too many requests: wait until X's limit resets (up to ~16 minutes), then carry on.
           retries++;
           used.delete(cursor);
           const reset = Number(res.headers.get("x-rate-limit-reset")) * 1000;
-          const wait = reset ? Math.min(Math.max(reset - Date.now(), 5000), 120000) : 30000;
-          status({ state: "waiting", pages, posts, seconds: Math.round(wait / 1000) });
-          await sleep(wait);
+          const wait = reset ? Math.min(Math.max(reset - Date.now() + 2000, 5000), 16 * 60000) : 60000;
+          const until = Date.now() + wait;
+          while (Date.now() < until && template === tpl) {
+            status({ state: "waiting", pages, posts, resumed, seconds: Math.round((until - Date.now()) / 1000) });
+            await sleep(Math.min(5000, until - Date.now()));
+          }
           continue;
         }
         if (!res.ok && big && res.status >= 400 && res.status < 500) {
@@ -228,17 +266,19 @@
         pages++;
         posts += page.posts;
         retries = 0;
-        status({ state: "loading", pages, posts });
+        status({ state: "loading", pages, posts, resumed });
         if (!page.posts) break;
         cursor = page.cursor;
+        if (cursor) checkpoints.push({ key: tpl.key, cursor, posts, pages });
         await sleep(nextDelay(res));
       }
       if (template === tpl) {
         doneKeys.add(tpl.key);
-        status({ state: "done", pages, posts });
+        writeResume(null);
+        status({ state: "done", pages, posts, resumed });
       }
     } catch (e) {
-      status({ state: "failed", posts, error: String((e && e.message) || e) });
+      status({ state: "failed", posts, resumed, error: String((e && e.message) || e) });
     } finally {
       if (pagingKey === tpl.key) pagingKey = null;
     }
@@ -251,7 +291,7 @@
     const isFirstPage = !/"cursor":/.test(new URL(req.url, location.origin).searchParams.get("variables") || req.body || "");
     if (!isFirstPage || pagingKey === key || doneKeys.has(key)) return;
     template = { ...req, key };
-    if (page.cursor && page.posts) loadAll(template, page.cursor, page.posts);
+    if (page.cursor && page.posts) loadAll(template, page.cursor, page.posts, readResume(key));
     else status({ state: "done", pages: 1, posts: page.posts });
   }
 

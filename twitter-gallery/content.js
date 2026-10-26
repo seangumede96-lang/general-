@@ -68,7 +68,7 @@
       out[f] = typeof item[f] === "string" && SAFE_MEDIA.test(item[f]) ? item[f] : null;
     }
     for (const f of ["saved", "posted", "w", "h"]) out[f] = Number.isFinite(item[f]) && item[f] > 0 ? item[f] : null;
-    out.text = typeof item.text === "string" && item.text ? item.text.slice(0, 600) : null;
+    out.text = typeof item.text === "string" && item.text ? item.text.slice(0, 300) : null;
     return out.thumb ? out : null;
   }
 
@@ -111,6 +111,8 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   }
 
+  let storedReady = null; // set once start() begins reading storage
+
   async function loadStored() {
     try {
       const data = await store.get(Object.values(K));
@@ -122,12 +124,28 @@
         if (item) savedItems.set(item.key, item);
       }
       const cache = data[K.cache];
-      if (cache && Array.isArray(cache.items) && !(gotData && loadState.state === "done")) {
-        cacheTime = Number(cache.at) || 0;
-        lastTotal = Number(cache.posts) || 0;
-        for (const raw of cache.items) {
+      if (!(gotData && loadState.state === "done")) {
+        const meta = await store.get(PARTIAL);
+        const partial = meta[PARTIAL] && Date.now() - meta[PARTIAL].at < 24 * 3600000 ? meta[PARTIAL] : null;
+        const readChunks = async (prefix, n) => {
+          if (!(n > 0)) return [];
+          const keys = Array.from({ length: n }, (_, i) => prefix + i);
+          const parts = await store.get(keys);
+          return keys.flatMap((k) => (Array.isArray(parts[k]) ? parts[k] : []));
+        };
+        if (cache) {
+          cacheTime = Number(cache.at) || 0;
+          lastTotal = Number(cache.posts) || 0;
+          counts.main = cache.chunks || 0;
+        }
+        if (partial) counts.partial = partial.chunks || 0;
+        const list = [
+          ...(partial ? await readChunks(PARTIAL + "_", partial.chunks) : []),
+          ...(cache && Array.isArray(cache.items) ? cache.items : await readChunks(K.cache + "_", cache && cache.chunks)),
+        ];
+        for (const raw of list) {
           const item = clean(raw);
-          if (item && !fresh.has(item.key)) cached.set(item.key, item);
+          if (item && !fresh.has(item.key) && !cached.has(item.key)) cached.set(item.key, item);
         }
       }
     } catch (e) {
@@ -147,14 +165,71 @@
     store.set({ [K.settings]: settings }).catch(() => {});
   }
 
+  // The saved copy is written in pieces of CHUNK items, so even hundreds of
+  // thousands of bookmarks never have to be written (or read) in one go, and
+  // only pieces that changed are written again. While a long load runs, what
+  // it has found so far is kept in a separate set of pieces that only grows,
+  // so if the tab closes the next visit shows it and carries on from there.
+  const CHUNK = 5000;
+  const PARTIAL = K.cache + "_partial";
+  const sigs = { main: [], partial: [] };
+  const counts = { main: 0, partial: 0 };
+  let lastPartialSave = 0;
+
+  async function writeChunks(which, list, meta) {
+    const prefix = which === "main" ? K.cache + "_" : PARTIAL + "_";
+    const metaKey = which === "main" ? K.cache : PARTIAL;
+    const chunks = Math.ceil(list.length / CHUNK);
+    const out = {};
+    for (let i = 0; i < chunks; i++) {
+      const part = list.slice(i * CHUNK, (i + 1) * CHUNK);
+      const sig = part.length + ":" + part[0].key + ":" + part[part.length - 1].key;
+      if (sigs[which][i] === sig) continue;
+      sigs[which][i] = sig;
+      out[prefix + i] = part;
+    }
+    out[metaKey] = { ...meta, at: Date.now(), chunks };
+    try {
+      await store.set(out);
+      if (counts[which] > chunks) await store.remove(Array.from({ length: counts[which] - chunks }, (_, i) => prefix + (chunks + i)));
+      counts[which] = chunks;
+    } catch (e) {
+      /* storage full or unavailable: the gallery still works for this visit */
+    }
+  }
+
+  async function clearPartial() {
+    const n = Math.max(counts.partial, 0);
+    sigs.partial = [];
+    counts.partial = 0;
+    lastPartialSave = 0;
+    try {
+      await store.remove([PARTIAL, ...Array.from({ length: n }, (_, i) => PARTIAL + "_" + i)]);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
   // Keep the finished list as the saved copy for next time.
   function saveCache() {
     if (!fresh.size || !isMainBookmarks()) return;
-    cacheTime = Date.now();
-    cached.clear();
     if (loadState.posts) lastTotal = loadState.posts;
-    store.set({ [K.cache]: { at: cacheTime, posts: lastTotal, items: [...fresh.values()] } }).catch(() => {});
+    // A load that carried on from an earlier visit only fetched the rest itself: keep the start too.
+    const list = loadState.resumed ? allItems() : [...fresh.values()];
+    cacheTime = Date.now();
+    if (!loadState.resumed) cached.clear();
+    writeChunks("main", list, { posts: lastTotal }).then(clearPartial);
     scheduleRefresh();
+  }
+
+  // During a long load, keep what's been found about every 10,000 bookmarks.
+  function savePartial() {
+    if (!isMainBookmarks() || loadState.state !== "loading" || !loadState.posts) return;
+    if (loadState.posts - lastPartialSave < 10000) return;
+    lastPartialSave = loadState.posts;
+    const posts = loadState.posts;
+    // Once it's stored, tell inject.js a later visit may carry on from here.
+    writeChunks("partial", loadState.resumed ? allItems() : [...fresh.values()], { posts }).then(() => window.postMessage({ __xbgAsk: "saved", posts }, location.origin));
   }
 
   function saveCollections() {
@@ -207,34 +282,34 @@
     toast("Backup saved to your downloads");
   }
 
-  // Every bookmark with what it says and who posted it, so the posts can be
-  // sorted into folders elsewhere; the folders come back as a normal backup file.
+  // Every bookmarked post, once, with who posted it and what it says, so the
+  // posts can be sorted into folders elsewhere. Kept compact for huge
+  // libraries: pictures stay in the gallery's saved copy, and the folders come
+  // back as a file listing post links only.
   function exportForSorting() {
     const items = allItems();
     if (!items.length) return toast("Open your bookmarks first so they can load");
-    const posts = items.map((it) => ({
-      key: it.key,
-      tweet: it.tweet,
-      user: ((it.tweet || "").match(/^https:\/\/x\.com\/([^/]+)\/status\//) || [])[1] || null,
-      text: it.text,
-      type: it.type,
-      posted: it.posted,
-      saved: it.saved,
-      thumb: it.thumb,
-      full: it.full,
-      video: it.video,
-      w: it.w,
-      h: it.h,
-    }));
-    const data = JSON.stringify({ app: "x-bookmarks-gallery", kind: "all-bookmarks", version: 1, exported: Date.now(), collections, posts });
+    const byPost = new Map();
+    for (const it of items) {
+      const m = (it.tweet || "").match(/^https:\/\/x\.com\/([^/]+)\/status\/(\d+)/);
+      const id = m ? m[2] : it.key;
+      let p = byPost.get(id);
+      if (!p) {
+        p = { id, user: m ? m[1] : null, text: it.text || "", type: it.type, posted: it.posted, saved: it.saved, media: [] };
+        byPost.set(id, p);
+      }
+      p.media.push(it.key);
+    }
+    const posts = [...byPost.values()];
+    const data = JSON.stringify({ app: "x-bookmarks-gallery", kind: "all-bookmarks", version: 2, exported: Date.now(), posts });
     const name = `x-bookmarks-all-${new Date().toISOString().slice(0, 10)}.json`;
     const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
     const a = el("a", { href: url, download: name });
     document.body.append(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    toast(`Exported ${plural(posts.length, "item")} to your downloads`);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast(`Exported ${plural(posts.length, "post")} to your downloads`);
   }
 
   function restore() {
@@ -246,8 +321,17 @@
           const item = clean(raw);
           if (item && !savedItems.has(item.key)) savedItems.set(item.key, item);
         }
+        // Sorted folders can name posts by id: turn each into its media keys.
+        const mediaOf = new Map();
+        for (const it of allItems()) {
+          const m = (it.tweet || "").match(/\/status\/(\d+)/);
+          if (!m) continue;
+          if (!mediaOf.has(m[1])) mediaOf.set(m[1], []);
+          mediaOf.get(m[1]).push(it.key);
+        }
         let added = 0;
         for (const raw of data.collections || []) {
+          if (raw && Array.isArray(raw.posts)) raw.keys = [...(raw.keys || []), ...raw.posts.flatMap((id) => mediaOf.get(String(id)) || [])];
           const c = cleanCollection(raw);
           if (!c) continue;
           const existing = getCollection(c.id);
@@ -281,7 +365,7 @@
       if (loadState.state === "done") {
         stopScrollLoading();
         saveCache();
-      }
+      } else savePartial();
       updateHeader();
     }
   });
@@ -903,7 +987,10 @@
         canRefresh = true;
       } else if (scrollTimer) text = "Loading more…";
       else if (s.state === "loading") text = loadingText(s.posts);
-      else if (s.state === "waiting") text = `X asked us to slow down, continuing in ${s.seconds}s…`;
+      else if (s.state === "waiting") {
+        const wait = s.seconds >= 90 ? `${Math.ceil(s.seconds / 60)} min` : `${s.seconds}s`;
+        text = `X asked for a pause · continuing in ${wait}` + (s.posts ? ` · ${s.posts.toLocaleString()} so far` : "");
+      }
       else if (s.state === "done") text = s.posts ? `All ${s.posts.toLocaleString()} bookmarks loaded` : "All loaded";
       else if (s.state === "failed") text = "Couldn’t load everything";
     }
@@ -1374,7 +1461,7 @@
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
       refresh();
-    }, entries.length ? 700 : 60);
+    }, entries.length ? Math.max(700, Math.min(4000, entries.length / 50)) : 60); // big lists redraw less often while loading
   }
 
   function refresh() {
@@ -2018,7 +2105,9 @@
     placeBall();
   }
 
-  function onBallTap() {
+  // With a big saved copy, reading it takes a moment: wait for it before deciding.
+  async function onBallTap() {
+    if (!isBookmarks()) await storedReady;
     if (isBookmarks() || fresh.size || cached.size) openGallery();
     else goToBookmarks();
   }
@@ -2036,7 +2125,8 @@
     buildUi();
     updateBall();
     watchPage();
-    await loadStored();
+    storedReady = loadStored();
+    await storedReady;
     let lastPath = location.pathname;
     setInterval(() => {
       if (location.pathname === lastPath) return;

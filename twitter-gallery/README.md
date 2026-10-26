@@ -90,10 +90,23 @@ extension, not on X):
 - Tapping a post opens the feed with it in the middle of the screen; Collections
   and each collection reopen where you left them.
 
+## Very large libraries (100,000+ bookmarks)
+
+- X allows about 500 requests per 15 minutes, so 200,000 bookmarks take
+  roughly an hour. When X asks for a pause the header says how long
+  ("continuing in 12 min"), and loading carries on by itself.
+- Progress is kept every 10,000 bookmarks. If the tab is closed or reloaded,
+  the next visit to the bookmarks page shows what was found and carries on
+  from there (within 24 hours).
+- The saved copy is stored in pieces of 5,000, so saving and opening it never
+  freezes the browser.
+
 ## Sorting bookmarks into folders
 
-⋯ → **Export all bookmarks for sorting** saves every loaded bookmark (link,
-author, the post's text, pictures, dates) as `x-bookmarks-all-<date>.json`.
+⋯ → **Export all bookmarks for sorting** saves every loaded post once (its id,
+author, text, type and dates, plus its media keys) as
+`x-bookmarks-all-<date>.json` — about 7–8 MB per 50,000 posts.
 Once the posts are sorted, ⋯ → **Import sorted folders** reads the result (a
-normal collections backup) and adds each folder as a collection. Existing
+collections backup whose folders may list post ids in `posts` instead of
+media `keys`) and adds each folder as a collection. Existing
 collections are kept; a folder with the same id gets the new posts added.
