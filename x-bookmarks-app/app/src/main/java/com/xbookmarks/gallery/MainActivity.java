@@ -26,6 +26,8 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
+import androidx.webkit.UserAgentMetadata;
+import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -36,6 +38,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Set;
 
@@ -75,6 +78,7 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false); // muted videos play while on screen
         // Look like the phone's normal Chrome so X treats this as a regular browser.
         s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replaceAll("Version/\\S+ ", ""));
+        behaveLikeABrowser(s);
 
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
@@ -149,6 +153,36 @@ public class MainActivity extends Activity {
             Uri link = getIntent() != null ? getIntent().getData() : null;
             webView.loadUrl(link != null && isX(link) ? link.toString() : START_URL);
         }
+    }
+
+    /**
+     * Present the app like an ordinary Android browser: don't attach the app's
+     * name to every request (the X-Requested-With header), and report the
+     * browser as Chrome rather than "Android WebView".
+     */
+    private static void behaveLikeABrowser(WebSettings s) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+            WebSettingsCompat.setRequestedWithHeaderOriginAllowList(s, Collections.emptySet());
+        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+            UserAgentMetadata current = WebSettingsCompat.getUserAgentMetadata(s);
+            String full = current.getFullVersion() != null ? current.getFullVersion() : "";
+            String major = full.contains(".") ? full.substring(0, full.indexOf('.')) : full;
+            if (!major.isEmpty()) {
+                UserAgentMetadata metadata = new UserAgentMetadata.Builder(current)
+                        .setBrandVersionList(Arrays.asList(
+                                brand("Chromium", major, full),
+                                brand("Google Chrome", major, full),
+                                brand("Not_A Brand", "24", "24.0.0.0")))
+                        .build();
+                WebSettingsCompat.setUserAgentMetadata(s, metadata);
+            }
+        }
+    }
+
+    private static UserAgentMetadata.BrandVersion brand(String name, String major, String full) {
+        return new UserAgentMetadata.BrandVersion.Builder()
+                .setBrand(name).setMajorVersion(major).setFullVersion(full).build();
     }
 
     /** The extension's scripts, joined into one, with the app's storage in place of the extension's. */
