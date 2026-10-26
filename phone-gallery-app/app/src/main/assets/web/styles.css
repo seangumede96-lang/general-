@@ -1,0 +1,898 @@
+/* All rules are scoped to the gallery's own elements so X's page is untouched. */
+
+#xbg-overlay,
+#xbg-overlay * {
+  box-sizing: border-box;
+}
+
+#xbg-overlay {
+  --xbg-bg: #000;
+  --xbg-surface: #16181c;
+  --xbg-text: #e7e9ea;
+  --xbg-muted: #8b98a5;
+  --xbg-accent: #1d9bf0;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  background: var(--xbg-bg);
+  color: var(--xbg-text);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+#xbg-overlay.xbg-hidden,
+#xbg-overlay .xbg-hidden,
+#xbg-ball.xbg-hidden {
+  display: none !important;
+}
+
+#xbg-overlay button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Header */
+#xbg-overlay .xbg-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  transition: transform 0.22s ease;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: rgba(0, 0, 0, 0.92);
+  border-bottom: 1px solid #2f3336;
+}
+
+#xbg-overlay .xbg-bar.xbg-bar-hidden {
+  transform: translateY(-100%);
+}
+
+#xbg-overlay .xbg-close {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 20px;
+}
+
+#xbg-overlay .xbg-title {
+  flex: 1;
+  font-weight: 700;
+  font-size: 17px;
+}
+
+#xbg-overlay .xbg-count {
+  color: var(--xbg-muted);
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-status {
+  color: var(--xbg-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-status:empty {
+  display: none;
+}
+
+#xbg-overlay .xbg-chips {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+#xbg-overlay .xbg-chip {
+  border: 1px solid #536471;
+  border-radius: 999px;
+  background: transparent;
+  padding: 5px 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#xbg-overlay .xbg-chip.xbg-on {
+  background: var(--xbg-text);
+  border-color: var(--xbg-text);
+  color: #000;
+}
+
+/* Grid */
+#xbg-overlay .xbg-scroll {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+#xbg-overlay .xbg-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  max-width: 935px;
+  margin: 0 auto;
+}
+
+#xbg-overlay .xbg-tile {
+  position: relative;
+  -webkit-touch-callout: none;
+  user-select: none;
+  display: block;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: var(--xbg-surface);
+  /* Let the browser skip work for tiles that are far off screen. */
+  content-visibility: auto;
+  contain-intrinsic-size: 130px 130px;
+}
+
+#xbg-overlay .xbg-tile img,
+#xbg-overlay .xbg-tile video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+#xbg-overlay .xbg-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+#xbg-overlay .xbg-empty {
+  margin: 0;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--xbg-muted);
+}
+
+#xbg-overlay .xbg-empty:empty {
+  display: none;
+}
+
+#xbg-overlay .xbg-empty a {
+  color: var(--xbg-accent);
+}
+
+/* Lightbox */
+#xbg-overlay .xbg-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+
+#xbg-overlay .xbg-note {
+  margin: 12px 20px 0;
+  color: var(--xbg-muted);
+  text-align: center;
+}
+
+#xbg-overlay .xbg-open {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--xbg-accent);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* --- Collections --------------------------------------------------------- */
+
+#xbg-overlay .xbg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+#xbg-overlay .xbg-text-btn,
+#xbg-overlay .xbg-link {
+  border: 0;
+  background: transparent;
+  padding: 6px 4px;
+  color: var(--xbg-accent);
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-link {
+  font-weight: 400;
+  font-size: 14px;
+}
+
+#xbg-overlay .xbg-tabs {
+  display: flex;
+  /* Leave clear space between the tab underline and the buttons below it. */
+  margin: 0 -12px 6px;
+  border-bottom: 1px solid #2f3336;
+  width: calc(100% + 24px);
+}
+
+#xbg-overlay .xbg-tab {
+  flex: 1;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-tab.xbg-on {
+  color: var(--xbg-text);
+  border-bottom-color: var(--xbg-text);
+}
+
+#xbg-overlay .xbg-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px 12px;
+  max-width: 935px;
+  margin: 0 auto;
+  padding: 16px 12px 0;
+}
+
+#xbg-overlay .xbg-card {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#xbg-overlay .xbg-card-cover {
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+}
+
+#xbg-overlay .xbg-card-name {
+  margin-top: 6px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-card-count {
+  color: var(--xbg-muted);
+  font-size: 13px;
+}
+
+/* Cover made of up to 4 thumbnails */
+#xbg-overlay .xbg-mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  overflow: hidden;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-mosaic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="1"] img {
+  grid-column: 1 / 3;
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="2"] img {
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="3"] img:first-child {
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #536471;
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 32px;
+}
+
+#xbg-overlay .xbg-backup {
+  display: block;
+  margin-top: 24px;
+}
+
+/* Select mode */
+#xbg-overlay .xbg-tile.xbg-selected::after {
+  content: "✓";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--xbg-accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected img {
+  opacity: 0.6;
+}
+
+#xbg-overlay.xbg-selecting .xbg-tile:not(.xbg-selected)::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+#xbg-overlay .xbg-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid #2f3336;
+  background: var(--xbg-bg);
+}
+
+#xbg-overlay .xbg-select-info {
+  flex: 1;
+  color: var(--xbg-muted);
+  font-size: 14px;
+}
+
+#xbg-overlay .xbg-select-bar .xbg-primary,
+#xbg-overlay .xbg-select-bar .xbg-secondary {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+}
+
+/* Buttons used in sheets and bars */
+#xbg-overlay .xbg-primary,
+#xbg-overlay .xbg-secondary {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-primary {
+  border: 0;
+  background: var(--xbg-text);
+  color: #000;
+}
+
+#xbg-overlay .xbg-secondary {
+  border: 1px solid #536471;
+  background: transparent;
+}
+
+#xbg-overlay .xbg-primary:disabled,
+#xbg-overlay .xbg-secondary:disabled {
+  opacity: 0.4;
+}
+
+#xbg-overlay .xbg-primary.xbg-danger {
+  background: #f4212e;
+  color: #fff;
+}
+
+#xbg-overlay .xbg-danger-text {
+  color: #f4212e;
+}
+
+/* Bottom sheet */
+#xbg-overlay .xbg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+#xbg-overlay .xbg-sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 8px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  border-radius: 16px 16px 0 0;
+  background: #16181c;
+}
+
+#xbg-overlay .xbg-sheet-handle {
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 2px;
+  background: #536471;
+}
+
+#xbg-overlay .xbg-sheet-title {
+  margin-bottom: 8px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+#xbg-overlay .xbg-sheet-text {
+  margin: 0 0 6px;
+  color: var(--xbg-muted);
+  text-align: center;
+}
+
+#xbg-overlay .xbg-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #536471;
+  border-radius: 8px;
+  background: #000;
+  color: var(--xbg-text);
+  font: inherit;
+  font-size: 16px;
+}
+
+#xbg-overlay .xbg-input:focus {
+  outline: none;
+  border-color: var(--xbg-accent);
+}
+
+#xbg-overlay .xbg-picker {
+  display: flex;
+  flex-direction: column;
+}
+
+#xbg-overlay .xbg-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#xbg-overlay .xbg-pick-cover {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  font-size: 22px;
+}
+
+#xbg-overlay .xbg-pick-name {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-pick-name small {
+  color: var(--xbg-muted);
+  font-weight: 400;
+  font-size: 13px;
+}
+
+#xbg-overlay .xbg-pick-check {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #536471;
+  text-align: center;
+  line-height: 22px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-pick.xbg-on .xbg-pick-check {
+  border-color: var(--xbg-accent);
+  background: var(--xbg-accent);
+  color: #fff;
+}
+
+/* Lightbox save button */
+
+#xbg-overlay .xbg-save {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-save.xbg-on {
+  border-color: var(--xbg-text);
+  background: var(--xbg-text);
+  color: #000;
+}
+
+/* Small message at the bottom */
+#xbg-overlay .xbg-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 90px;
+  z-index: 7;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--xbg-accent);
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* --- Sorting, months and years --------------------------------------------- */
+
+#xbg-overlay .xbg-controls {
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+#xbg-overlay .xbg-chips {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+#xbg-overlay .xbg-sort {
+  flex: none;
+}
+
+#xbg-overlay .xbg-seg {
+  display: flex;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-seg button {
+  flex: 1;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-seg button.xbg-on {
+  background: #333639;
+  color: var(--xbg-text);
+}
+
+#xbg-overlay .xbg-section {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 18px 12px 8px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+#xbg-overlay .xbg-section-count {
+  color: var(--xbg-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-sentinel {
+  height: 1px;
+}
+
+#xbg-overlay .xbg-sheet-label {
+  margin: 12px 0 2px;
+  color: var(--xbg-muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#xbg-overlay .xbg-status .xbg-link {
+  padding: 0 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Sliding between "All posts" and "Collections" */
+@keyframes xbg-in-left {
+  from { transform: translateX(28%); opacity: 0.3; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes xbg-in-right {
+  from { transform: translateX(-28%); opacity: 0.3; }
+  to { transform: none; opacity: 1; }
+}
+
+#xbg-overlay .xbg-scroll.xbg-slide-left > * {
+  animation: xbg-in-left 0.22s ease-out;
+}
+
+#xbg-overlay .xbg-scroll.xbg-slide-right > * {
+  animation: xbg-in-right 0.22s ease-out;
+}
+
+/* --- Floating ball (on every X page) ---------------------------------------- */
+
+#xbg-ball {
+  position: fixed;
+  z-index: 2147483000;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(29, 155, 240, 0.92);
+  color: #fff;
+  font-size: 22px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  opacity: 0.55;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+  transition: left 0.2s ease, top 0.2s ease, opacity 0.3s ease, transform 0.15s ease;
+}
+
+#xbg-ball svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+
+#xbg-ball.xbg-awake {
+  opacity: 1;
+}
+
+#xbg-ball.xbg-dragging {
+  transition: none;
+  transform: scale(1.1);
+}
+
+/* --- Period bar (years, then months of the chosen year) --------------------- */
+
+#xbg-overlay .xbg-periods {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 -12px;
+}
+
+#xbg-overlay .xbg-period-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0 12px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+#xbg-overlay .xbg-period-row::-webkit-scrollbar {
+  display: none;
+}
+
+#xbg-overlay .xbg-pchip {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid #2f3336;
+  border-radius: 999px;
+  background: var(--xbg-surface);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-pchip small {
+  color: var(--xbg-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-pchip.xbg-on {
+  background: var(--xbg-accent);
+  border-color: var(--xbg-accent);
+  color: #fff;
+}
+
+#xbg-overlay .xbg-pchip.xbg-on small {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* --- Post feed (opens when you tap a post) ---------------------------------- */
+
+#xbg-overlay .xbg-feed-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  border-bottom: 1px solid #2f3336;
+  background: #000;
+}
+
+#xbg-overlay .xbg-feed {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+#xbg-overlay .xbg-post {
+  max-width: 600px;
+  margin: 0 auto 2px;
+}
+
+#xbg-overlay .xbg-feed {
+  touch-action: pan-y pinch-zoom;
+}
+
+#xbg-overlay .xbg-post-media {
+  position: relative;
+  width: 100%;
+  background: var(--xbg-surface);
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-post-media img,
+#xbg-overlay .xbg-post-media video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+/* Name and date laid over the top of the picture */
+#xbg-overlay .xbg-post-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px 28px;
+  background: linear-gradient(rgba(0, 0, 0, 0.55), transparent);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+#xbg-overlay .xbg-post-user {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-post-date {
+  flex: none;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+}
+
+/* Save / Open post as round buttons side by side at the bottom centre */
+#xbg-overlay .xbg-post-actions {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 16px;
+}
+
+/* Leave room for a video's own play/seek bar */
+#xbg-overlay .xbg-is-video .xbg-post-actions {
+  bottom: 64px;
+}
+
+#xbg-overlay .xbg-fab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  text-decoration: none;
+}
+
+#xbg-overlay .xbg-fab-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+#xbg-overlay .xbg-save-btn.xbg-on {
+  background: var(--xbg-accent);
+}
+
+#xbg-overlay .xbg-post-media .xbg-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 10px 12px 64px;
+  background: rgba(0, 0, 0, 0.7);
+  text-align: left;
+}
+
+/* --- Phone gallery additions ------------------------------------------------- */
+
+html,
+body {
+  margin: 0;
+  background: #000;
+}
+
+#xbg-overlay .xbg-cards-title {
+  grid-column: 1 / -1;
+  margin: 8px 0 -6px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+/* Albums tab (no filter row): one divider under the tabs, not two */
+#xbg-overlay .xbg-bar:has(.xbg-controls.xbg-hidden) .xbg-tabs {
+  border-bottom: 0;
+  margin-bottom: -10px;
+}

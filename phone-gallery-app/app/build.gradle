@@ -1,0 +1,49 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.phonegallery.app"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.phonegallery.app"
+        minSdk 29
+        // 34 keeps the classic layout (Android 15 forces edge-to-edge drawing at 35).
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    // Every version must be signed with the same key so it installs over the
+    // last one. The key and its password live in keystore/, kept out of git.
+    def keyProps = new Properties()
+    def keyPropsFile = rootProject.file("keystore/keystore.properties")
+    if (keyPropsFile.exists()) keyPropsFile.withInputStream { keyProps.load(it) }
+    signingConfigs {
+        release {
+            if (keyPropsFile.exists()) {
+                storeFile rootProject.file("keystore/" + keyProps["storeFile"])
+                storePassword keyProps["storePassword"]
+                keyAlias keyProps["keyAlias"]
+                keyPassword keyProps["keyPassword"]
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation "androidx.webkit:webkit:1.12.1"
+}
