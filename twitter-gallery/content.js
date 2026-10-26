@@ -728,7 +728,7 @@
   function buildUi() {
     if (ui || !document.body) return;
     const back = el("button", { class: "xbg-close", "aria-label": "Back", onclick: () => setView("collections") }, "‹");
-    const close = el("button", { class: "xbg-close", "aria-label": "Close gallery", onclick: closeGallery }, "✕");
+    const close = el("button", { class: "xbg-close", "aria-label": "Close gallery", onclick: () => closeGallery() }, "✕");
     const titleName = el("span", {}, "Bookmarks");
     const count = el("span", { class: "xbg-count" }, "0");
     const statusText = el("span");
@@ -741,6 +741,8 @@
     for (const [value, label] of [["all", "All posts"], ["collections", "Collections"]]) {
       tabs.append(el("button", { class: "xbg-tab", "data-view": value, onclick: () => setView(value) }, label));
     }
+    const tabInk = el("span", { class: "xbg-tab-ink" });
+    tabs.append(tabInk);
     const filters = el("div", { class: "xbg-chips" });
     for (const [value, label] of [["all", "All"], ["photo", "Photos"], ["video", "Videos"]]) {
       filters.append(el("button", { class: "xbg-chip", "data-filter": value, onclick: () => setFilter(value) }, label));
@@ -807,7 +809,7 @@
     ui = {
       overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn,
       layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
-      lightbox, feed, toast: toastEl, sheet: null, progress, progressFill, progressPct,
+      lightbox, feed, toast: toastEl, sheet: null, tabInk, progress, progressFill, progressPct,
     };
 
     wireGrid();
@@ -918,25 +920,77 @@
         if (Math.abs(dy) > 6 || y < bar.offsetHeight) lastY = y;
         fillPage();
         showScrubber();
+        saveSpot();
       });
     }, { passive: true });
 
+    // Swiping sideways moves between All posts and Collections (and back out
+    // of a collection). The page follows your finger and the tab underline
+    // slides with it; letting go far enough (or with a flick) glides to the
+    // other tab, otherwise it springs back.
     let swipe = null;
+    const targetFor = (dx) => (dx < 0 && view === "all" ? "collections" : dx > 0 && view === "collections" ? "all" : dx > 0 && view === "collection" ? "collections" : null);
+    const inkBase = () => (view === "all" ? 0 : 1);
+    const moveInk = (pos) => ui.tabInk && (ui.tabInk.style.transform = `translateX(${pos * 100}%)`);
     scroller.addEventListener("touchstart", (e) => {
       const t = e.touches[0];
-      swipe = e.touches.length === 1 ? { x: t.clientX, y: t.clientY, at: Date.now() } : null;
+      const fromEdge = t.clientX < 28 || t.clientX > window.innerWidth - 28; // Android's back gesture
+      swipe = e.touches.length === 1 && !selectMode && !ui.sheet && !fromEdge ? { x: t.clientX, y: t.clientY, at: Date.now(), dx: 0, on: false } : null;
     }, { passive: true });
-    scroller.addEventListener("touchend", (e) => {
-      if (!swipe || selectMode || ui.sheet) return (swipe = null);
-      const dx = e.changedTouches[0].clientX - swipe.x;
-      const dy = e.changedTouches[0].clientY - swipe.y;
-      const quick = Date.now() - swipe.at < 700;
+    scroller.addEventListener("touchmove", (e) => {
+      if (!swipe) return;
+      const t = e.touches[0];
+      const dx = t.clientX - swipe.x;
+      const dy = t.clientY - swipe.y;
+      if (!swipe.on) {
+        if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
+        if (Math.abs(dx) < Math.abs(dy) * 1.5 || !targetFor(dx)) return (swipe = null);
+        swipe.on = true;
+        swipe.target = targetFor(dx);
+        scroller.style.transition = "none";
+        if (ui.tabInk) ui.tabInk.style.transition = "none";
+      }
+      // Follow the finger in the allowed direction only, a little damped.
+      swipe.dx = swipe.target === "collections" && view === "all" ? Math.min(0, dx) : Math.max(0, dx);
+      const w = window.innerWidth;
+      scroller.style.transform = `translateX(${swipe.dx * 0.85}px)`;
+      scroller.style.opacity = String(1 - Math.min(Math.abs(swipe.dx) / w, 1) * 0.35);
+      if (view !== "collection") moveInk(Math.min(1, Math.max(0, inkBase() - swipe.dx / w)));
+    }, { passive: true });
+    const endSwipe = () => {
+      const sw = swipe;
       swipe = null;
-      if (!quick || Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 2) return;
-      if (dx < 0 && view === "all") setView("collections", null, "left");
-      else if (dx > 0 && view === "collections") setView("all", null, "right");
-      else if (dx > 0 && view === "collection") setView("collections", null, "right");
-    });
+      if (!sw || !sw.on) return;
+      const w = window.innerWidth;
+      const speed = Math.abs(sw.dx) / Math.max(Date.now() - sw.at, 1);
+      const go = Math.abs(sw.dx) > w * 0.25 || (speed > 0.45 && Math.abs(sw.dx) > 40);
+      const dir = sw.dx < 0 ? -1 : 1;
+      if (ui.tabInk) ui.tabInk.style.transition = "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)";
+      if (!go) {
+        scroller.style.transition = "transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s";
+        scroller.style.transform = "";
+        scroller.style.opacity = "";
+        moveInk(inkBase());
+        return;
+      }
+      // Glide out, switch, glide the new page in from the other side.
+      scroller.style.transition = "transform 0.12s cubic-bezier(0.4, 0, 1, 1), opacity 0.12s";
+      scroller.style.transform = `translateX(${dir * w}px)`;
+      scroller.style.opacity = "0.3";
+      moveInk(sw.target === "all" ? 0 : 1);
+      setTimeout(() => {
+        setView(sw.target);
+        scroller.style.transition = "none";
+        scroller.style.transform = `translateX(${-dir * w * 0.3}px)`;
+        scroller.style.opacity = "0.4";
+        void scroller.offsetWidth;
+        scroller.style.transition = "transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.24s";
+        scroller.style.transform = "";
+        scroller.style.opacity = "";
+      }, 120);
+    };
+    scroller.addEventListener("touchend", endSwipe);
+    scroller.addEventListener("touchcancel", endSwipe);
   }
 
   // The feed adds posts above and below as you scroll, and plays videos
@@ -950,6 +1004,7 @@
       requestAnimationFrame(() => {
         ticking = false;
         extendFeed();
+        saveSpot();
       });
     }, { passive: true });
     ui.feedVideos = new IntersectionObserver(
@@ -970,7 +1025,9 @@
     lightbox.addEventListener("touchstart", (e) => {
       const t = e.touches[0];
       const onControls = e.target.tagName === "VIDEO" && t.clientY > e.target.getBoundingClientRect().bottom - 60;
-      swipe = e.touches.length === 1 && !onControls && !ui.sheet ? { x: t.clientX, y: t.clientY, dx: 0, decided: false } : null;
+      // Swipes from the very edge are Android's own back gesture: leave them to it.
+      const fromEdge = t.clientX < 28 || t.clientX > window.innerWidth - 28;
+      swipe = e.touches.length === 1 && !onControls && !ui.sheet && !fromEdge ? { x: t.clientX, y: t.clientY, dx: 0, at: Date.now(), decided: false } : null;
     }, { passive: true });
     lightbox.addEventListener("touchmove", (e) => {
       if (!swipe) return;
@@ -988,11 +1045,18 @@
     }, { passive: true });
     const endSwipe = () => {
       if (!swipe || !swipe.decided) return (swipe = null);
-      const far = swipe.dx > window.innerWidth * 0.3;
+      const speed = swipe.dx / Math.max(Date.now() - swipe.at, 1);
+      const far = swipe.dx > window.innerWidth * 0.22 || (speed > 0.5 && swipe.dx > 40);
       swipe = null;
-      lightbox.style.transition = "transform 0.2s ease-out";
+      lightbox.style.transition = far ? "transform 0.12s cubic-bezier(0.4, 0, 1, 1)" : "transform 0.18s ease-out";
       lightbox.style.transform = far ? "translateX(100%)" : "";
-      if (far) setTimeout(() => closeLightbox(), 200);
+      if (far) {
+        lightbox.classList.add("xbg-closing");
+        setTimeout(() => {
+          lightbox.classList.remove("xbg-closing");
+          closeLightbox(false, false);
+        }, 120);
+      }
     };
     lightbox.addEventListener("touchend", endSwipe);
     lightbox.addEventListener("touchcancel", endSwipe);
@@ -1052,6 +1116,7 @@
       if (feedOpen() || selectMode) addBackStep();
     } else if (feedOpen()) closeLightbox(true);
     else if (selectMode) setSelectMode(false, true);
+    else if (galleryOpen()) closeGallery(true);
   }
 
   function syncControls() {
@@ -1074,6 +1139,7 @@
     ui.count.textContent = (c ? c.keys.length : view === "collections" ? collections.length : totalCount || allItems().length).toLocaleString();
     ui.count.title = view === "collections" ? "collections" : "pictures and videos (a post can have up to 4)";
     ui.tabs.querySelectorAll(".xbg-tab").forEach((t) => t.classList.toggle("xbg-on", t.dataset.view === view));
+    if (ui.tabInk && view !== "collection") ui.tabInk.style.transform = `translateX(${view === "all" ? 0 : 100}%)`;
 
     let text = "";
     let canRefresh = false;
@@ -1126,6 +1192,7 @@
   const collectionSpots = new Map(); // collection id -> spot
 
   function setView(value, id = null, slide = null) {
+    saveSpot();
     const from = view;
     const here = { top: ui.scroller.scrollTop, barHidden: ui.bar.classList.contains("xbg-bar-hidden") };
     if (from === "collections" && value !== "collections") collectionsSpot = here;
@@ -1661,9 +1728,11 @@
   // --- Opening and closing -------------------------------------------------
 
   function openGallery() {
+    saveSpot();
     buildUi();
     if (!ui) return;
     if (!gotData && isBookmarks()) scanPage();
+    if (!galleryOpen()) addBackStep(); // back from the grid closes the gallery, not the page
     ui.overlay.classList.remove("xbg-hidden");
     updateBall();
     rebuild();
@@ -1675,13 +1744,65 @@
     }
   }
 
-  function closeGallery() {
+  // Firefox on Android reloads the page after it's been in the background for
+  // a while. Remember where you were (tab, collection, scroll position, the
+  // post you had open) so the gallery comes straight back to the same spot.
+  const SPOT_KEY = "xbg_spot";
+  let spotTimer = null;
+  function centreFeedKey() {
+    const mid = window.innerHeight / 2;
+    for (const el of ui.feed.querySelectorAll(".xbg-post")) {
+      const r = el.getBoundingClientRect();
+      if (r.top <= mid && r.bottom >= mid) return el.dataset.key;
+    }
+    return null;
+  }
+  function saveSpotNow() {
+    clearTimeout(spotTimer);
+    try {
+      if (!ui || !galleryOpen()) return sessionStorage.removeItem(SPOT_KEY);
+      sessionStorage.setItem(SPOT_KEY, JSON.stringify({ view, openId, filter, top: Math.round(ui.scroller.scrollTop), post: feedOpen() ? centreFeedKey() : null, at: Date.now() }));
+    } catch (e) {
+      /* private mode etc. */
+    }
+  }
+  function saveSpot() {
+    clearTimeout(spotTimer);
+    spotTimer = setTimeout(saveSpotNow, 400);
+  }
+  document.addEventListener("visibilitychange", () => document.hidden && saveSpotNow());
+  window.addEventListener("pagehide", saveSpotNow);
+
+  function restoreSpot() {
+    let spot = null;
+    try {
+      spot = JSON.parse(sessionStorage.getItem(SPOT_KEY) || "null");
+    } catch (e) {
+      /* ignore */
+    }
+    if (!spot || Date.now() - spot.at > 12 * 3600000) return false;
+    openGallery();
+    if (!ui) return false;
+    if (spot.filter && spot.filter !== filter) setFilter(spot.filter);
+    if (spot.view && spot.view !== view && (spot.view !== "collection" || getCollection(spot.openId))) setView(spot.view, spot.openId);
+    ui.jumped = true;
+    ui.scroller.style.paddingTop = (settings.headerHidden ? 0 : ui.bar.offsetHeight) + "px";
+    ui.scroller.scrollTop = spot.top || 0;
+    fillPage();
+    if (spot.post && getItem(spot.post)) openLightbox(spot.post);
+    return true;
+  }
+
+  function closeGallery(fromHistory = false) {
+    if (!galleryOpen()) return;
     closeSheet();
-    closeLightbox();
+    closeLightbox(false, false);
     stopScrollLoading();
     if (selectMode) setSelectMode(false);
     ui.overlay.classList.add("xbg-hidden");
+    if (!fromHistory) removeBackStep();
     updateBall();
+    saveSpot();
   }
 
   // Open the bookmarks page and pop the gallery open once it has loaded.
@@ -1698,7 +1819,7 @@
 
   const FEED_CHUNK = 10;
 
-  const feedOpen = () => ui && !ui.lightbox.classList.contains("xbg-hidden");
+  const feedOpen = () => ui && !ui.lightbox.classList.contains("xbg-hidden") && !ui.lightbox.classList.contains("xbg-closing");
 
   function icon(d, filled) {
     const ns = "http://www.w3.org/2000/svg";
@@ -1801,6 +1922,7 @@
   }
 
   function openLightbox(key) {
+    saveSpot();
     const index = current.findIndex((it) => it.key === key);
     if (index < 0) return;
     const wasOpen = feedOpen();
@@ -1841,12 +1963,24 @@
   }
 
   // `fromHistory` is set when the phone's back gesture already took us back.
-  function closeLightbox(fromHistory = false) {
+  // Back (gesture, button or swipe) slides the feed away quickly to the right.
+  function closeLightbox(fromHistory = false, animate = true) {
+    saveSpot();
     if (!ui || !feedOpen()) return;
-    clearFeed();
-    ui.lightbox.classList.add("xbg-hidden");
-    ui.lightbox.style.transition = "none";
-    ui.lightbox.style.transform = "";
+    const lb = ui.lightbox;
+    const finish = () => {
+      lb.classList.remove("xbg-closing");
+      clearFeed();
+      lb.classList.add("xbg-hidden");
+      lb.style.transition = "none";
+      lb.style.transform = "";
+    };
+    if (animate) {
+      lb.classList.add("xbg-closing");
+      lb.style.transition = "transform 0.14s cubic-bezier(0.4, 0, 1, 1)";
+      lb.style.transform = "translateX(100%)";
+      setTimeout(finish, 140);
+    } else finish();
     if (!fromHistory) removeBackStep();
   }
 
@@ -2246,7 +2380,7 @@
         /* fine */
       }
     }
-    if (autoOpen) openGallery();
+    if (!restoreSpot() && autoOpen) openGallery();
   }
 
   if (document.body) start();

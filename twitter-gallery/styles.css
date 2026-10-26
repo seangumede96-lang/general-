@@ -2143,3 +2143,32 @@
   transition: none;
   transform: scale(1.1);
 }
+
+/* All posts / Collections: one underline that slides between the tabs */
+#xbg-overlay .xbg-tabs {
+  position: relative;
+}
+
+#xbg-overlay .xbg-tab.xbg-on,
+#xbg-overlay.xbg-light .xbg-tab.xbg-on {
+  border-bottom-color: transparent;
+}
+
+#xbg-overlay .xbg-tab-ink {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 50%;
+  height: 2px;
+  background: #fff;
+  pointer-events: none;
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#xbg-overlay.xbg-light .xbg-tab-ink {
+  background: var(--xbg-red);
+}
+
+#xbg-overlay .xbg-scroll {
+  will-change: transform;
+}
