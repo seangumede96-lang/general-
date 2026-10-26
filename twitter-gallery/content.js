@@ -949,17 +949,24 @@
       const dy = t.clientY - swipe.y;
       if (!swipe.on) {
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-        if (Math.abs(dx) < Math.abs(dy) * 1.3 || !targetFor(dx)) return (swipe = null);
+        if (Math.abs(dx) < Math.abs(dy) * 1.3) return (swipe = null);
         swipe.on = true;
-        swipe.target = targetFor(dx);
+        swipe.target = targetFor(dx); // none: there's nothing that way, it just stretches
         swipe.dir = dx < 0 ? -1 : 1;
         swipe.x = t.clientX; // start following from here, so nothing jumps
-        foldFiltersNow(); // same as the header button's first tap, instantly
+        swipe.track = [];
+        if (swipe.target) foldFiltersNow(); // same as the header button's first tap, instantly
         startSlide(swipe.target, swipe.dir);
       }
       if (e.cancelable) e.preventDefault(); // sideways only: no drifting up and down
       const raw = t.clientX - swipe.x;
-      swipe.dx = swipe.dir < 0 ? Math.min(0, raw) : Math.max(0, raw);
+      const now = performance.now();
+      swipe.track.push([now, raw]);
+      while (swipe.track.length > 2 && now - swipe.track[0][0] > 100) swipe.track.shift();
+      // Toward the other page the page sticks to your finger; the other way
+      // (or where there's no page) it stretches with growing resistance.
+      const toward = swipe.target && Math.sign(raw) === swipe.dir;
+      swipe.dx = toward ? raw : rubberBand(raw, window.innerWidth);
       if (!frame) frame = requestAnimationFrame(() => {
         frame = 0;
         if (swipe && swipe.on) moveSlide(swipe.dx);
@@ -970,9 +977,14 @@
       swipe = null;
       if (!sw || !sw.on) return;
       const w = window.innerWidth;
-      const speed = Math.abs(sw.dx) / Math.max(Date.now() - sw.at, 1);
-      const go = Math.abs(sw.dx) > w * 0.25 || (speed > 0.45 && Math.abs(sw.dx) > 40);
-      finishSlide(go);
+      // Finger speed over the last moment (px per ms), and where that speed
+      // would carry the page: a flick counts as much as a long drag.
+      const [t0, x0] = sw.track[0] || [0, 0];
+      const [t1, x1] = sw.track[sw.track.length - 1] || [0, 0];
+      const v = t1 > t0 ? (x1 - x0) / (t1 - t0) : 0;
+      const projected = sw.dx + v * 180;
+      const go = !!sw.target && Math.sign(sw.dx) === sw.dir && Math.sign(projected) === sw.dir && Math.abs(projected) > w * 0.35;
+      finishSlide(go, v);
     };
     scroller.addEventListener("touchend", endSwipe);
     scroller.addEventListener("touchcancel", endSwipe);
@@ -1020,12 +1032,13 @@
   }
 
   function startSlide(target, dir) {
-    if (view === "all") snapshotGrid();
-    const peek = buildPeek(target);
+    if (target && view === "all") snapshotGrid();
+    const peek = target ? buildPeek(target) : null;
     slide = { target, dir, peek, w: window.innerWidth };
     ui.sliding = true;
-    ui.bar.classList.add("xbg-swiping");
-    ui.scroller.style.transition = peek.style.transition = "none";
+    if (target) ui.bar.classList.add("xbg-swiping");
+    ui.scroller.style.transition = "none";
+    if (peek) peek.style.transition = "none";
     if (ui.tabInk) ui.tabInk.style.transition = "none";
     moveSlide(0);
   }
@@ -1035,6 +1048,7 @@
     const { w, dir, peek } = slide;
     const p = Math.min(Math.abs(dx) / w, 1);
     ui.scroller.style.transform = `translate3d(${dx}px, 0, 0)`;
+    if (!peek) return; // just stretching
     peek.style.transform = `translate3d(${-dir * (w + PAGE_GAP) + dx}px, 0, 0)`;
     peek.style.opacity = String(0.25 + 0.75 * p);
     if (ui.tabInk && view !== "collection") {
@@ -1043,17 +1057,34 @@
     }
   }
 
-  function finishSlide(go) {
+  // Pull past the end: the further you go the harder it gets, like iOS.
+  function rubberBand(x, d) {
+    return Math.sign(x) * (1 - 1 / ((Math.abs(x) * 0.55) / d + 1)) * d;
+  }
+
+  // A spring-like ease that starts at the speed your finger let go with, so
+  // the page carries on smoothly instead of jerking, then settles softly.
+  function springEase(velocity, distance, seconds) {
+    const slope = distance > 1 ? (Math.abs(velocity) * seconds * 1000) / distance : 0;
+    const y1 = Math.min(Math.max(0.25 * slope, 0.3), 1.2);
+    return `cubic-bezier(0.25, ${y1.toFixed(3)}, 0.3, 1)`;
+  }
+
+  function finishSlide(go, velocity = 0) {
     if (!slide) return;
     const { target, dir, peek, w } = slide;
-    const ease = "cubic-bezier(0.2, 0.8, 0.2, 1)";
-    const t = go ? 0.2 : 0.22;
-    ui.scroller.style.transition = peek.style.transition = `transform ${t}s ${ease}, opacity ${t}s ${ease}`;
+    const at = new DOMMatrix(getComputedStyle(ui.scroller).transform).m41 || 0;
+    const t = go ? 0.36 : 0.32;
+    const ease = springEase(velocity, go ? Math.max(w + PAGE_GAP - Math.abs(at), 1) : Math.abs(at), t);
+    ui.scroller.style.transition = `transform ${t}s ${ease}`;
+    if (peek) peek.style.transition = `transform ${t}s ${ease}, opacity ${t}s ${ease}`;
     if (ui.tabInk) ui.tabInk.style.transition = `transform ${t}s ${ease}`;
     if (!go) {
       ui.scroller.style.transform = "";
-      peek.style.transform = `translate3d(${-dir * (w + PAGE_GAP)}px, 0, 0)`;
-      peek.style.opacity = "0";
+      if (peek) {
+        peek.style.transform = `translate3d(${-dir * (w + PAGE_GAP)}px, 0, 0)`;
+        peek.style.opacity = "0";
+      }
       if (ui.tabInk && view !== "collection") ui.tabInk.style.transform = `translateX(${view === "all" ? 0 : 100}%)`;
       setTimeout(() => endSlide(), t * 1000);
       return;

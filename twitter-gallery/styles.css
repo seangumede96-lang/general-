@@ -2464,3 +2464,13 @@
 #xbg-overlay .xbg-hbtn.xbg-half .xbg-hbtn-ring {
   opacity: 0.7;
 }
+
+/* The title row keeps the same height on every tab (a status line's worth of
+   room is always kept), so nothing resizes when you swipe between them */
+#xbg-overlay .xbg-bar > .xbg-row .xbg-status {
+  min-height: 18px;
+}
+
+#xbg-overlay .xbg-bar > .xbg-row {
+  min-height: 42px;
+}
