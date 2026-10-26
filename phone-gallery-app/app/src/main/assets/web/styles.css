@@ -1550,3 +1550,116 @@ html,
 #xbg-overlay .xbg-v-btn.xbg-danger-text svg path {
   stroke: var(--xbg-red);
 }
+
+/* Header button: round */
+#xbg-overlay .xbg-hbtn {
+  border-radius: 50%;
+}
+
+#xbg-overlay .xbg-hbtn-ring {
+  inset: 10px;
+}
+
+/* --- iPhone-style confirmation -------------------------------------------- */
+
+#xbg-overlay .xbg-alert-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  animation: xbg-alert-fade 0.15s ease-out;
+}
+
+#xbg-overlay .xbg-alert {
+  width: min(280px, 100%);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(44, 44, 46, 0.92);
+  backdrop-filter: blur(20px) saturate(1.6);
+  color: #fff;
+  text-align: center;
+  animation: xbg-alert-pop 0.18s ease-out;
+}
+
+#xbg-overlay .xbg-alert-text {
+  padding: 19px 16px 18px;
+}
+
+#xbg-overlay .xbg-alert-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+#xbg-overlay .xbg-alert-message {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+#xbg-overlay .xbg-alert-link {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+#xbg-overlay .xbg-alert-buttons {
+  display: flex;
+  border-top: 0.5px solid rgba(255, 255, 255, 0.2);
+}
+
+#xbg-overlay .xbg-alert-buttons button {
+  flex: 1;
+  padding: 11px 8px 12px;
+  border: 0;
+  background: transparent;
+  font-size: 17px;
+}
+
+#xbg-overlay .xbg-alert-buttons button + button {
+  border-left: 0.5px solid rgba(255, 255, 255, 0.2);
+}
+
+#xbg-overlay .xbg-alert-cancel {
+  color: #fff;
+}
+
+#xbg-overlay .xbg-alert-action {
+  color: var(--xbg-red);
+  font-weight: 600;
+}
+
+#xbg-overlay.xbg-light .xbg-alert {
+  background: rgba(242, 242, 247, 0.94);
+  color: #000;
+}
+
+#xbg-overlay.xbg-light .xbg-alert-buttons,
+#xbg-overlay.xbg-light .xbg-alert-buttons button + button {
+  border-color: rgba(60, 60, 67, 0.29);
+}
+
+#xbg-overlay.xbg-light .xbg-alert-cancel {
+  color: #000;
+}
+
+#xbg-overlay.xbg-light .xbg-alert-link {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+@keyframes xbg-alert-fade {
+  from { opacity: 0; }
+}
+
+@keyframes xbg-alert-pop {
+  from { transform: scale(1.12); opacity: 0; }
+}

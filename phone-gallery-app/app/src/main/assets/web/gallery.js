@@ -300,9 +300,38 @@
 
   const shareKeys = (keys) => Android.share(keys.join(","));
   // These open Android's own confirmation; the result comes back in galleryActionDone.
-  const deleteKeys = (keys) => Android.trash(keys.join(","));
+  const itemWord = (keys) => {
+    if (keys.length > 1) return `${keys.length} items`;
+    const it = getItem(keys[0]) || trash.get(keys[0]);
+    return it && it.type === "video" ? "this video" : "this photo";
+  };
+  const deleteKeys = (keys) =>
+    iosAlert(`Delete ${itemWord(keys)}?`, "It will go to the Recycle bin and be deleted for good after 30 days.", "Delete", () => Android.trash(keys.join(",")));
   const restoreKeys = (keys) => Android.restore(keys.join(","));
-  const deleteForever = (keys) => Android.deleteForever(keys.join(","));
+  const deleteForever = (keys) =>
+    iosAlert(`Delete ${itemWord(keys)} forever?`, "This can’t be undone.", "Delete", () => Android.deleteForever(keys.join(",")));
+
+  // An iPhone-style confirmation: title, message, then Cancel | Delete.
+  function iosAlert(title, message, action, onConfirm) {
+    const close = () => backdrop.remove();
+    const extra = Android.canSkipConfirm && !Android.canSkipConfirm()
+      ? el("button", { class: "xbg-alert-link", onclick: () => { close(); Android.openManageMedia(); } }, "Stop Android asking again")
+      : "";
+    const box = el(
+      "div",
+      { class: "xbg-alert", role: "alertdialog" },
+      el("div", { class: "xbg-alert-text" }, el("div", { class: "xbg-alert-title" }, title), el("div", { class: "xbg-alert-message" }, message), extra),
+      el(
+        "div",
+        { class: "xbg-alert-buttons" },
+        el("button", { class: "xbg-alert-cancel", onclick: close }, "Cancel"),
+        el("button", { class: "xbg-alert-action", onclick: () => { close(); onConfirm(); } }, action)
+      )
+    );
+    const backdrop = el("div", { class: "xbg-alert-backdrop", onclick: (e) => e.target === backdrop && close() }, box);
+    ui.overlay.append(backdrop);
+    ui.alert = backdrop;
+  }
 
   window.galleryActionDone = (kind, ok, count) => {
     if (!ok) return;
@@ -749,6 +778,10 @@
   // can close itself.
   window.galleryBack = () => {
     if (!ui) return false;
+    if (ui.alert && ui.alert.isConnected) {
+      ui.alert.remove();
+      return true;
+    }
     if (ui.sheet) {
       if (selectMode && !feedOpen()) {
         closeSheet(true);
@@ -964,7 +997,7 @@
   }
 
   function trashMenu() {
-    confirmSheet("Empty the recycle bin?", `${plural(trash.size, "item")} will be deleted forever.`, "Delete all", () => deleteForever([...trash.keys()]));
+    iosAlert("Empty the Recycle bin?", `${plural(trash.size, "item")} will be deleted forever. This can’t be undone.`, "Delete all", () => Android.deleteForever([...trash.keys()].join(",")));
   }
 
   function collectionMenu() {
@@ -978,12 +1011,12 @@
         el("button", { class: "xbg-secondary", onclick: () => askName("Rename album", c.name, (name) => { c.name = name; saveCollections(); updateHeader(); }) }, "Rename"),
         el(
           "button",
-          { class: "xbg-secondary xbg-danger-text", onclick: () => confirmSheet("Delete album?", `“${c.name}” will be deleted. The photos stay on your phone.`, "Delete", () => {
+          { class: "xbg-secondary xbg-danger-text", onclick: () => { closeSheet(true); iosAlert(`Delete “${c.name}”?`, "The album will be deleted. The photos stay on your phone.", "Delete", () => {
             collections = collections.filter((x) => x !== c);
             saveCollections();
             setView("collections");
             toast("Album deleted");
-          }) },
+          }); } },
           "Delete album"
         )
       )
