@@ -18,6 +18,9 @@
   let view = "all"; // "all" | "collections" | "collection"
   let openId = null; // collection shown when view === "collection"
   let filter = "all";
+  let periodYear = null; // Months view: only this year ("2026"), or all years when null
+  let periodMonth = null; // Months view: only this month ("2026-01"), or the whole year when null
+  let periods = { years: [], months: [] }; // what the period bar offers
   let entries = []; // what the grid shows: { item } or { header, label, count }
   let current = []; // the items in `entries`, in order (for the full-screen viewer)
   let totalCount = 0;
@@ -493,7 +496,10 @@
     for (const [value, label] of [["grid", "Grid"], ["months", "Months"], ["years", "Years"]]) {
       layouts.append(el("button", { "data-layout": value, onclick: () => setLayout(value) }, label));
     }
-    const controls = el("div", { class: "xbg-controls" }, el("div", { class: "xbg-row" }, filters, sortBtn), layouts);
+    const yearBar = el("div", { class: "xbg-period-row" });
+    const monthBar = el("div", { class: "xbg-period-row" });
+    const periodBar = el("div", { class: "xbg-periods xbg-hidden" }, yearBar, monthBar);
+    const controls = el("div", { class: "xbg-controls" }, el("div", { class: "xbg-row" }, filters, sortBtn), layouts, periodBar);
 
     const grid = el("div", { class: "xbg-grid" });
     const years = el("div", { class: "xbg-cards xbg-hidden" });
@@ -516,8 +522,8 @@
       { class: "xbg-lightbox xbg-hidden" },
       stage,
       el("button", { class: "xbg-lb-close", "aria-label": "Close", onclick: closeLightbox }, "✕"),
-      el("button", { class: "xbg-nav xbg-prev", "aria-label": "Previous", onclick: () => step(-1) }, "‹"),
-      el("button", { class: "xbg-nav xbg-next", "aria-label": "Next", onclick: () => step(1) }, "›"),
+      el("button", { class: "xbg-nav xbg-prev", "aria-label": "Previous", onclick: () => slideTo(-1) }, "▲"),
+      el("button", { class: "xbg-nav xbg-next", "aria-label": "Next", onclick: () => slideTo(1) }, "▼"),
       el("div", { class: "xbg-lb-bar" }, counter, el("div", { class: "xbg-lb-actions" }, saveBtn, openLink))
     );
 
@@ -534,7 +540,7 @@
 
     ui = {
       overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn,
-      layouts, controls, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
+      layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
       lightbox, stage, openLink, saveBtn, counter, toast: toastEl, sheet: null,
     };
 
@@ -553,8 +559,8 @@
       if (e.key === "Escape") closeSheet();
     } else if (!ui.lightbox.classList.contains("xbg-hidden")) {
       if (e.key === "Escape") closeLightbox();
-      else if (e.key === "ArrowRight") step(1);
-      else if (e.key === "ArrowLeft") step(-1);
+      else if (e.key === "ArrowDown" || e.key === "ArrowRight") slideTo(1);
+      else if (e.key === "ArrowUp" || e.key === "ArrowLeft") slideTo(-1);
     } else if (e.key === "Escape") {
       if (selectMode) setSelectMode(false);
       else if (view === "collection") setView("collections");
@@ -657,24 +663,67 @@
     });
   }
 
+  // In the full-screen viewer, swipe up for the next post and down for the
+  // previous one, like a feed: the post follows your finger, then slides away.
+  // Swipes that start on a video's control bar are left alone so seeking works.
   function wireLightbox() {
-    const { lightbox } = ui;
-    // Swipe left/right to move, swipe down to close. Swipes that start on the
-    // video's control bar are left alone so seeking still works.
+    const { lightbox, stage } = ui;
     let touch = null;
     lightbox.addEventListener("touchstart", (e) => {
       const t = e.touches[0];
       const onControls = e.target.tagName === "VIDEO" && t.clientY > e.target.getBoundingClientRect().bottom - 60;
-      touch = e.touches.length === 1 && !onControls && !e.target.closest(".xbg-lb-bar") ? { x: t.clientX, y: t.clientY } : null;
+      const onButtons = e.target.closest(".xbg-lb-bar, .xbg-nav, .xbg-lb-close");
+      touch = e.touches.length === 1 && !onControls && !onButtons && !sliding ? { x: t.clientX, y: t.clientY, at: Date.now(), dy: 0, vertical: false } : null;
     }, { passive: true });
-    lightbox.addEventListener("touchend", (e) => {
+    lightbox.addEventListener("touchmove", (e) => {
       if (!touch) return;
-      const dx = e.changedTouches[0].clientX - touch.x;
-      const dy = e.changedTouches[0].clientY - touch.y;
+      const t = e.touches[0];
+      const dx = t.clientX - touch.x;
+      const dy = t.clientY - touch.y;
+      if (!touch.vertical) {
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        if (Math.abs(dx) > Math.abs(dy)) return (touch = null);
+        touch.vertical = true;
+      }
+      touch.dy = dy;
+      stage.style.transition = "none";
+      stage.style.transform = `translateY(${dy}px)`;
+    }, { passive: true });
+    lightbox.addEventListener("touchend", () => {
+      if (!touch || !touch.vertical) return (touch = null);
+      const { dy, at } = touch;
       touch = null;
-      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
-      else if (dy > 100 && dy > Math.abs(dx) * 1.5) closeLightbox();
+      const flick = Math.abs(dy) > 40 && Date.now() - at < 300;
+      if (Math.abs(dy) > window.innerHeight * 0.15 || flick) slideTo(dy < 0 ? 1 : -1);
+      else settle();
     });
+  }
+
+  function settle() {
+    ui.stage.style.transition = "transform 0.2s ease";
+    ui.stage.style.transform = "";
+  }
+
+  let sliding = false;
+  function slideTo(delta) {
+    if (!lbKey || sliding) return;
+    const i = current.findIndex((it) => it.key === lbKey);
+    const target = current[i + delta];
+    if (!target) return settle(); // already at the first or last post
+    const { stage } = ui;
+    const h = window.innerHeight;
+    sliding = true;
+    stage.style.transition = "transform 0.18s ease-in";
+    stage.style.transform = `translateY(${delta > 0 ? -h : h}px)`;
+    setTimeout(() => {
+      openLightbox(target.key);
+      stage.style.transition = "none";
+      stage.style.transform = `translateY(${delta > 0 ? h : -h}px)`;
+      void stage.offsetHeight;
+      stage.style.transition = "transform 0.22s ease-out";
+      stage.style.transform = "";
+      setTimeout(() => (sliding = false), 220);
+    }, 180);
   }
 
   function syncControls() {
@@ -810,7 +859,11 @@
     return (settings.dateMode === "posted" ? item.posted || item.saved : item.saved || item.posted) || 0;
   }
 
-  const monthKey = (d) => (d ? new Date(d).toISOString().slice(0, 7) : "unknown");
+  const monthKey = (d) => {
+    if (!d) return "unknown";
+    const t = new Date(d);
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+  };
   const monthLabel = (d) => (d ? new Date(d).toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "Date unknown");
   const yearOf = (d) => (d ? String(new Date(d).getFullYear()) : "unknown");
 
@@ -820,8 +873,9 @@
     totalCount = c ? c.keys.length : base.length;
     const dir = settings.sort === "oldest" ? -1 : 1;
     // Dated posts first, by date; ties and undated posts keep their bookmark order.
-    const list = base.filter(matches).map((item, i) => ({ item, i, d: dateOf(item) }));
+    let list = base.filter(matches).map((item, i) => ({ item, i, d: dateOf(item) }));
     list.sort((a, b) => (!a.d !== !b.d ? (a.d ? -1 : 1) : dir * (b.d - a.d || a.i - b.i)));
+    list = applyPeriod(list);
     current = list.map((x) => x.item);
     const out = [];
     if (settings.layout === "months") {
@@ -839,6 +893,69 @@
       for (const x of list) out.push({ item: x.item });
     }
     return out;
+  }
+
+  // Work out which years/months exist (for the period bar), then keep only the
+  // chosen year or month when in Months view.
+  function applyPeriod(list) {
+    const years = new Map();
+    const months = new Map();
+    for (const x of list) {
+      const y = yearOf(x.d);
+      years.set(y, (years.get(y) || 0) + 1);
+      if (y === periodYear) {
+        const k = monthKey(x.d);
+        if (!months.has(k)) months.set(k, { key: k, d: x.d, count: 0 });
+        months.get(k).count++;
+      }
+    }
+    const byTime = (a, b) => (a === "unknown") - (b === "unknown") || b.localeCompare(a);
+    periods = {
+      years: [...years.keys()].sort(byTime).map((y) => ({ year: y, count: years.get(y) })),
+      // Months read left to right through the year: January first.
+      months: [...months.values()].sort((a, b) => a.key.localeCompare(b.key)),
+    };
+    if (settings.layout !== "months" || !periodYear) return list;
+    return list.filter((x) => yearOf(x.d) === periodYear && (!periodMonth || monthKey(x.d) === periodMonth));
+  }
+
+  function renderPeriodBar() {
+    const show = view !== "collections" && (settings.layout === "months" || settings.layout === "years");
+    ui.periodBar.classList.toggle("xbg-hidden", !show);
+    if (!show) return;
+    const chip = (label, on, onclick, count) =>
+      el("button", { class: "xbg-pchip" + (on ? " xbg-on" : ""), onclick }, label, count != null ? el("small", {}, String(count)) : "");
+    const yearLabel = (y) => (y === "unknown" ? "No date" : y);
+    const yearChips = [chip("All years", !periodYear || settings.layout === "years", () => choosePeriod(null, null))];
+    for (const { year, count } of periods.years) {
+      yearChips.push(chip(yearLabel(year), settings.layout === "months" && periodYear === year, () => choosePeriod(year, null), count));
+    }
+    const monthChips = [];
+    if (settings.layout === "months" && periodYear && periodYear !== "unknown") {
+      monthChips.push(chip(`All of ${periodYear}`, !periodMonth, () => choosePeriod(periodYear, null)));
+      for (const m of periods.months) {
+        const label = new Date(m.d).toLocaleDateString(undefined, { month: "short" });
+        monthChips.push(chip(label, periodMonth === m.key, () => choosePeriod(periodYear, m.key), m.count));
+      }
+    }
+    // Only redraw when something changed, so the bar keeps its scroll position.
+    const signature = [settings.layout, periodYear, periodMonth, ...periods.years.map((y) => y.year + y.count), ...periods.months.map((m) => m.key + m.count)].join("|");
+    if (ui.periodBar.dataset.sig === signature) return;
+    ui.periodBar.dataset.sig = signature;
+    ui.yearBar.replaceChildren(...yearChips);
+    ui.monthBar.replaceChildren(...monthChips);
+    ui.monthBar.classList.toggle("xbg-hidden", !monthChips.length);
+    for (const row of [ui.yearBar, ui.monthBar]) {
+      const on = row.querySelector(".xbg-on");
+      if (on) row.scrollLeft = on.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
+    }
+  }
+
+  function choosePeriod(year, month) {
+    periodYear = year;
+    periodMonth = month;
+    if (year && settings.layout !== "months") setLayout("months");
+    else rebuild();
   }
 
   const sig = (e) => (e ? (e.header ? "h:" + e.header : e.item.key) : "");
@@ -896,9 +1013,11 @@
     ui.collGrid.classList.toggle("xbg-hidden", mode !== "collections");
     if (mode === "collections") {
       entries = [];
+      ui.periodBar.classList.add("xbg-hidden");
       renderCollections();
     } else {
       entries = computeEntries();
+      renderPeriodBar();
       if (mode === "years") {
         renderYears();
         entries = [];
@@ -927,6 +1046,7 @@
     if (view === "collections") return updateHeader();
     if (settings.layout === "years") return rebuild(false);
     const next = computeEntries();
+    renderPeriodBar();
     let same = shown <= next.length;
     for (let i = 0; same && i < shown; i++) if (sig(next[i]) !== sig(entries[i])) same = false;
     entries = next;
@@ -982,17 +1102,9 @@
     );
   }
 
-  // Tapping a year shows the month view, starting at that year.
+  // Tapping a year shows that year's posts, by month.
   function openYear(year) {
-    setLayout("months");
-    const idx = entries.findIndex((e) => e.header && (year === "unknown" ? e.header === "unknown" : e.header.startsWith(year + "-")));
-    if (idx < 0) return;
-    appendUpTo(idx + PAGE);
-    const h = ui.grid.querySelector(`.xbg-section[data-key="${CSS.escape(entries[idx].header)}"]`);
-    if (h) {
-      ui.jumped = true;
-      ui.scroller.scrollTop = h.offsetTop - ui.bar.offsetHeight;
-    }
+    choosePeriod(year, null);
   }
 
   function renderCollections() {
@@ -1125,17 +1237,24 @@
     lbKey = null;
   }
 
-  function step(delta) {
-    if (!lbKey || !current.length) return;
-    const i = current.findIndex((it) => it.key === lbKey);
-    openLightbox(current[(i + delta + current.length) % current.length].key);
-  }
-
   // --- Floating ball (shown everywhere on X) -------------------------------
+
+  // A simple bookmark ribbon, drawn so it sits in the middle of the ball.
+  function bookmarkIcon() {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", "M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-4.6L5 21V4.5A1.5 1.5 0 0 1 6.5 3z");
+    path.setAttribute("fill", "#fff");
+    svg.append(path);
+    return svg;
+  }
 
   function buildBall() {
     if (ball || !document.body) return;
-    ball = el("button", { id: "xbg-ball", class: "xbg-hidden", "aria-label": "Open bookmarks gallery" }, el("span", {}, "▦"));
+    ball = el("button", { id: "xbg-ball", class: "xbg-hidden", "aria-label": "Open bookmarks gallery" }, bookmarkIcon());
     document.body.append(ball);
     const size = () => ball.offsetWidth || 52;
     const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);

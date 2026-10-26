@@ -1,8 +1,8 @@
 # X Bookmarks Gallery (browser extension)
 
 Shows the photos and videos from your X bookmarks in a 3-column, Instagram-style
-grid. Tap any item for a full-screen viewer (swipe left/right to move, swipe
-down to close) with an **Open post** button.
+grid. Tap any item for a full-screen viewer (swipe up/down to move between posts)
+with an **Open post** button.
 
 No X API is needed. When you open <https://x.com/i/bookmarks> while logged in,
 the extension notes how the page asks X for its first batch of bookmarks, then
@@ -35,7 +35,11 @@ scrolls the bookmarks page for you while it's open.
 - **⇅ Newest / Oldest** sorts posts, by when you bookmarked them or when they
   were posted.
 - **Grid / Months / Years**: Months groups posts under month headings; Years
-  shows a card per year — tap one to jump to its months.
+  shows a card per year. In both, a bar under the header lists the years —
+  tap one to see only that year, then a second bar lists its months — tap
+  one to see only that month.
+- In the full-screen viewer, **swipe up** for the next post and **down** for
+  the previous one (or use the ▲ ▼ buttons).
 - **Long-press** a post to start selecting; tap more to add them.
 
 ## Collections

@@ -188,6 +188,7 @@
 }
 
 #xbg-overlay .xbg-stage {
+  will-change: transform;
   width: 100%;
   height: 100%;
   display: flex;
@@ -230,12 +231,19 @@
   line-height: 1;
 }
 
+#xbg-overlay .xbg-prev,
+#xbg-overlay .xbg-next {
+  right: 8px;
+  font-size: 15px;
+  z-index: 1;
+}
+
 #xbg-overlay .xbg-prev {
-  left: 8px;
+  transform: translateY(calc(-100% - 6px));
 }
 
 #xbg-overlay .xbg-next {
-  right: 8px;
+  transform: translateY(6px);
 }
 
 #xbg-overlay .xbg-lb-bar {
@@ -740,6 +748,9 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: rgba(29, 155, 240, 0.92);
   color: #fff;
   font-size: 22px;
@@ -752,7 +763,10 @@
   transition: left 0.2s ease, top 0.2s ease, opacity 0.3s ease, transform 0.15s ease;
 }
 
-#xbg-ball span {
+#xbg-ball svg {
+  display: block;
+  width: 24px;
+  height: 24px;
   pointer-events: none;
 }
 
@@ -763,4 +777,57 @@
 #xbg-ball.xbg-dragging {
   transition: none;
   transform: scale(1.1);
+}
+
+/* --- Period bar (years, then months of the chosen year) --------------------- */
+
+#xbg-overlay .xbg-periods {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 -12px;
+}
+
+#xbg-overlay .xbg-period-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0 12px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+#xbg-overlay .xbg-period-row::-webkit-scrollbar {
+  display: none;
+}
+
+#xbg-overlay .xbg-pchip {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid #2f3336;
+  border-radius: 999px;
+  background: var(--xbg-surface);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-pchip small {
+  color: var(--xbg-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-pchip.xbg-on {
+  background: var(--xbg-accent);
+  border-color: var(--xbg-accent);
+  color: #fff;
+}
+
+#xbg-overlay .xbg-pchip.xbg-on small {
+  color: rgba(255, 255, 255, 0.85);
 }
