@@ -523,7 +523,7 @@
     const menuBtn = el("button", { class: "xbg-close", "aria-label": "Options", onclick: () => (view === "collection" ? collectionMenu() : view === "trash" ? trashMenu() : settingsMenu()) }, "⋯");
 
     const tabs = el("div", { class: "xbg-tabs" });
-    for (const [value, label] of [["all", "▦  All"], ["collections", "▢  Albums"]]) {
+    for (const [value, label] of [["all", "All"], ["collections", "Albums"]]) {
       tabs.append(el("button", { class: "xbg-tab", "data-view": value, onclick: () => setView(value) }, label));
     }
     const filters = el("div", { class: "xbg-chips" });

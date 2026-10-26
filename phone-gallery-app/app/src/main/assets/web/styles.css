@@ -1965,3 +1965,12 @@ html,
 #xbg-overlay .xbg-tile.xbg-selected img.xbg-in {
   opacity: 0.72;
 }
+
+/* All / Albums underline: white in dark mode, red in light mode */
+#xbg-overlay .xbg-tab.xbg-on {
+  border-bottom-color: #fff;
+}
+
+#xbg-overlay.xbg-light .xbg-tab.xbg-on {
+  border-bottom-color: var(--xbg-red);
+}
