@@ -15,6 +15,7 @@
   let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid", theme: "dark", headerHidden: false, toggleBtn: { side: "right", y: 0.75 } };
   let cacheTime = 0;
   let lastTotal = 0; // how many bookmarks the last full load found, to show progress next time
+  let partialInfo = null; // { posts, at } while an unfinished long load's progress is all that's saved
 
   let view = "all"; // "all" | "collections" | "collection"
   let openId = null; // collection shown when view === "collection"
@@ -138,7 +139,11 @@
           lastTotal = Number(cache.posts) || 0;
           counts.main = cache.chunks || 0;
         }
-        if (partial) counts.partial = partial.chunks || 0;
+        if (partial) {
+          counts.partial = partial.chunks || 0;
+          // Only an unfinished load has been saved so far (or it's newer than the last full one).
+          if (!cache || partial.at > cacheTime) partialInfo = { posts: Number(partial.posts) || 0, at: partial.at };
+        }
         const list = [
           ...(partial ? await readChunks(PARTIAL + "_", partial.chunks) : []),
           ...(cache && Array.isArray(cache.items) ? cache.items : await readChunks(K.cache + "_", cache && cache.chunks)),
@@ -218,6 +223,7 @@
     const list = loadState.resumed ? allItems() : [...fresh.values()];
     cacheTime = Date.now();
     if (!loadState.resumed) cached.clear();
+    partialInfo = null;
     writeChunks("main", list, { posts: lastTotal }).then(clearPartial);
     scheduleRefresh();
   }
@@ -309,7 +315,7 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
-    toast(`Exported ${plural(posts.length, "post")} to your downloads`);
+    toast(`Exported ${plural(posts.length, "post")} (${items.length.toLocaleString()} pictures and videos) to your downloads`);
   }
 
   function restore() {
@@ -976,6 +982,7 @@
     ui.selectBtn.textContent = selectMode ? "Cancel" : "Select";
     ui.titleName.textContent = c ? c.name : "Bookmarks";
     ui.count.textContent = (c ? c.keys.length : view === "collections" ? collections.length : totalCount || allItems().length).toLocaleString();
+    ui.count.title = view === "collections" ? "collections" : "pictures and videos (a post can have up to 4)";
     ui.tabs.querySelectorAll(".xbg-tab").forEach((t) => t.classList.toggle("xbg-on", t.dataset.view === view));
 
     let text = "";
@@ -983,7 +990,8 @@
     if (view === "all") {
       const s = loadState;
       if (!isBookmarks()) {
-        text = cached.size || fresh.size ? `Saved copy · ${ago(cacheTime)}` : "";
+        if (partialInfo) text = `Partly loaded (${partialInfo.posts.toLocaleString()} bookmarks) · open your bookmarks to finish`;
+        else text = (cached.size || fresh.size) && cacheTime ? `Saved copy · ${ago(cacheTime)}` : cached.size || fresh.size ? "Saved copy" : "";
         canRefresh = true;
       } else if (scrollTimer) text = "Loading more…";
       else if (s.state === "loading") text = loadingText(s.posts);
