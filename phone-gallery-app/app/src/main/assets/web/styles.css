@@ -6,11 +6,19 @@
 }
 
 #xbg-overlay {
+  /* Dark theme (default). Accents are white; red where white wouldn't show. */
   --xbg-bg: #000;
   --xbg-surface: #16181c;
+  --xbg-sheet: #16181c;
   --xbg-text: #e7e9ea;
   --xbg-muted: #8b98a5;
-  --xbg-accent: #1d9bf0;
+  --xbg-accent: #fff;
+  --xbg-on-accent: #000;
+  --xbg-red: #ff3b30;
+  --xbg-line: #2f3336;
+  --xbg-line-strong: #536471;
+  --xbg-bar-bg: rgba(0, 0, 0, 0.92);
+  --xbg-seg-on: #333639;
   position: fixed;
   inset: 0;
   z-index: 2147483000;
@@ -48,8 +56,8 @@
   gap: 8px 10px;
   padding: 10px 12px;
   padding-top: max(10px, env(safe-area-inset-top));
-  background: rgba(0, 0, 0, 0.92);
-  border-bottom: 1px solid #2f3336;
+  background: var(--xbg-bar-bg);
+  border-bottom: 1px solid var(--xbg-line);
 }
 
 #xbg-overlay .xbg-bar.xbg-bar-hidden {
@@ -93,7 +101,7 @@
 }
 
 #xbg-overlay .xbg-chip {
-  border: 1px solid #536471;
+  border: 1px solid var(--xbg-line-strong);
   border-radius: 999px;
   background: transparent;
   padding: 5px 14px;
@@ -102,9 +110,9 @@
 }
 
 #xbg-overlay .xbg-chip.xbg-on {
-  background: var(--xbg-text);
-  border-color: var(--xbg-text);
-  color: #000;
+  background: var(--xbg-accent);
+  border-color: var(--xbg-accent);
+  color: var(--xbg-on-accent);
 }
 
 /* Grid */
@@ -180,7 +188,7 @@
   position: fixed;
   inset: 0;
   z-index: 5;
-  background: #000;
+  background: var(--xbg-bg);
   display: flex;
   flex-direction: column;
 }
@@ -227,7 +235,7 @@
   display: flex;
   /* Leave clear space between the tab underline and the buttons below it. */
   margin: 0 -12px 6px;
-  border-bottom: 1px solid #2f3336;
+  border-bottom: 1px solid var(--xbg-line);
   width: calc(100% + 24px);
 }
 
@@ -316,7 +324,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px dashed #536471;
+  border: 1px dashed var(--xbg-line-strong);
   background: transparent;
   color: var(--xbg-muted);
   font-size: 32px;
@@ -337,7 +345,7 @@
   height: 24px;
   border-radius: 50%;
   background: var(--xbg-accent);
-  color: #fff;
+  color: var(--xbg-on-accent);
   font-size: 14px;
   font-weight: 700;
   line-height: 24px;
@@ -366,7 +374,7 @@
   gap: 8px;
   padding: 10px 12px;
   padding-bottom: max(10px, env(safe-area-inset-bottom));
-  border-top: 1px solid #2f3336;
+  border-top: 1px solid var(--xbg-line);
   background: var(--xbg-bg);
 }
 
@@ -396,12 +404,12 @@
 
 #xbg-overlay .xbg-primary {
   border: 0;
-  background: var(--xbg-text);
-  color: #000;
+  background: var(--xbg-accent);
+  color: var(--xbg-on-accent);
 }
 
 #xbg-overlay .xbg-secondary {
-  border: 1px solid #536471;
+  border: 1px solid var(--xbg-line-strong);
   background: transparent;
 }
 
@@ -438,7 +446,7 @@
   padding: 8px 16px;
   padding-bottom: max(16px, env(safe-area-inset-bottom));
   border-radius: 16px 16px 0 0;
-  background: #16181c;
+  background: var(--xbg-sheet);
 }
 
 #xbg-overlay .xbg-sheet-handle {
@@ -446,7 +454,7 @@
   height: 4px;
   margin: 0 auto 10px;
   border-radius: 2px;
-  background: #536471;
+  background: var(--xbg-line-strong);
 }
 
 #xbg-overlay .xbg-sheet-title {
@@ -465,9 +473,9 @@
 #xbg-overlay .xbg-input {
   width: 100%;
   padding: 12px;
-  border: 1px solid #536471;
+  border: 1px solid var(--xbg-line-strong);
   border-radius: 8px;
-  background: #000;
+  background: var(--xbg-bg);
   color: var(--xbg-text);
   font: inherit;
   font-size: 16px;
@@ -520,7 +528,7 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  border: 2px solid #536471;
+  border: 2px solid var(--xbg-line-strong);
   text-align: center;
   line-height: 22px;
   font-weight: 700;
@@ -529,7 +537,7 @@
 #xbg-overlay .xbg-pick.xbg-on .xbg-pick-check {
   border-color: var(--xbg-accent);
   background: var(--xbg-accent);
-  color: #fff;
+  color: var(--xbg-on-accent);
 }
 
 /* Lightbox save button */
@@ -558,7 +566,7 @@
   padding: 10px 16px;
   border-radius: 8px;
   background: var(--xbg-accent);
-  color: #fff;
+  color: var(--xbg-on-accent);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -602,7 +610,7 @@
 }
 
 #xbg-overlay .xbg-seg button.xbg-on {
-  background: #333639;
+  background: var(--xbg-seg-on);
   color: var(--xbg-text);
 }
 
@@ -660,47 +668,6 @@
   animation: xbg-in-right 0.22s ease-out;
 }
 
-/* --- Floating ball (on every X page) ---------------------------------------- */
-
-#xbg-ball {
-  position: fixed;
-  z-index: 2147483000;
-  width: 52px;
-  height: 52px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(29, 155, 240, 0.92);
-  color: #fff;
-  font-size: 22px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
-  opacity: 0.55;
-  touch-action: none;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  cursor: pointer;
-  transition: left 0.2s ease, top 0.2s ease, opacity 0.3s ease, transform 0.15s ease;
-}
-
-#xbg-ball svg {
-  display: block;
-  width: 24px;
-  height: 24px;
-  pointer-events: none;
-}
-
-#xbg-ball.xbg-awake {
-  opacity: 1;
-}
-
-#xbg-ball.xbg-dragging {
-  transition: none;
-  transform: scale(1.1);
-}
-
 /* --- Period bar (years, then months of the chosen year) --------------------- */
 
 #xbg-overlay .xbg-periods {
@@ -729,8 +696,8 @@
   align-items: baseline;
   gap: 5px;
   padding: 5px 12px;
-  border: 1px solid #2f3336;
-  border-radius: 999px;
+  border: 1px solid var(--xbg-line);
+  border-radius: 8px;
   background: var(--xbg-surface);
   font-size: 14px;
   font-weight: 600;
@@ -746,11 +713,11 @@
 #xbg-overlay .xbg-pchip.xbg-on {
   background: var(--xbg-accent);
   border-color: var(--xbg-accent);
-  color: #fff;
+  color: var(--xbg-on-accent);
 }
 
 #xbg-overlay .xbg-pchip.xbg-on small {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--xbg-on-accent); opacity: 0.75;
 }
 
 /* --- Post feed (opens when you tap a post) ---------------------------------- */
@@ -761,8 +728,8 @@
   gap: 8px;
   padding: 8px 12px;
   padding-top: max(8px, env(safe-area-inset-top));
-  border-bottom: 1px solid #2f3336;
-  background: #000;
+  border-bottom: 1px solid var(--xbg-line);
+  background: var(--xbg-bg);
 }
 
 #xbg-overlay .xbg-feed {
@@ -972,7 +939,7 @@ body {
   width: 42px;
   height: 24px;
   border-radius: 12px;
-  background: #536471;
+  background: var(--xbg-line-strong);
   transition: background 0.15s ease;
 }
 
@@ -989,9 +956,461 @@ body {
 }
 
 #xbg-overlay .xbg-switch.xbg-on {
-  background: var(--xbg-accent);
+  background: var(--xbg-red);
 }
 
 #xbg-overlay .xbg-switch.xbg-on::after {
   transform: translateX(18px);
+}
+
+/* --- Gallery layout (v1.2) ------------------------------------------------- */
+
+/* No sideways wiggle anywhere */
+#xbg-overlay .xbg-scroll {
+  overflow-x: hidden;
+}
+
+/* 4 photos per row */
+#xbg-overlay .xbg-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+}
+
+#xbg-overlay .xbg-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Video length / GIF: bottom-left pill; star: top-right */
+#xbg-overlay .xbg-badge-time {
+  top: auto;
+  right: auto;
+  left: 5px;
+  bottom: 5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+#xbg-overlay .xbg-star-badge {
+  left: auto;
+  bottom: auto;
+  top: 4px;
+  right: 6px;
+  color: #fff;
+  font-size: 15px;
+}
+
+/* --- Albums page ---------------------------------------------------------- */
+
+#xbg-overlay .xbg-albums {
+  max-width: 935px;
+  margin: 0 auto;
+  padding: 14px 16px 0;
+}
+
+#xbg-overlay .xbg-albums .xbg-cards-title {
+  margin: 22px 0 10px;
+}
+
+#xbg-overlay .xbg-album-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 12px;
+}
+
+#xbg-overlay .xbg-album {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#xbg-overlay .xbg-album .xbg-card-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#xbg-overlay .xbg-album .xbg-card-count {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-album-cover {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-album-cover > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#xbg-overlay .xbg-album-cover.xbg-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--xbg-line-strong);
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 30px;
+}
+
+#xbg-overlay .xbg-starred-cover::after {
+  content: "★";
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  color: #fff;
+  font-size: 18px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* The "All" album: newest photo as a slightly tilted Polaroid */
+#xbg-overlay .xbg-polaroid-bg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #3a3326, #1c1a17);
+}
+
+#xbg-overlay .xbg-polaroid {
+  width: 66%;
+  padding: 6% 6% 20%;
+  background: #fbfaf6;
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  transform: rotate(-6deg);
+}
+
+#xbg-overlay .xbg-polaroid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: #ddd;
+}
+
+/* "Others": 2x2 of the small folders, last one showing "+N" */
+#xbg-overlay .xbg-others {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-others > div {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+#xbg-overlay .xbg-others img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+#xbg-overlay .xbg-others span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* "Media types" list */
+#xbg-overlay .xbg-type-list {
+  margin-bottom: 14px;
+  border-radius: 16px;
+  background: var(--xbg-surface);
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-type-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 17px;
+}
+
+#xbg-overlay .xbg-type-row + .xbg-type-row {
+  border-top: 1px solid var(--xbg-line);
+}
+
+#xbg-overlay .xbg-type-row svg {
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+
+#xbg-overlay .xbg-type-row svg path {
+  stroke: var(--xbg-text);
+  fill: none;
+}
+
+#xbg-overlay .xbg-type-name {
+  flex: 1;
+}
+
+#xbg-overlay .xbg-type-count,
+#xbg-overlay .xbg-type-arrow {
+  color: var(--xbg-muted);
+}
+
+#xbg-overlay .xbg-type-arrow {
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* --- Feed: just the pictures ---------------------------------------------- */
+
+#xbg-overlay .xbg-post-media {
+  cursor: pointer;
+}
+
+#xbg-overlay .xbg-post-media .xbg-badge-time {
+  position: absolute;
+}
+
+/* --- Full-screen view ------------------------------------------------------ */
+
+#xbg-overlay .xbg-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  background: #000;
+  color: #fff;
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-v-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: pan-y pinch-zoom;
+}
+
+#xbg-overlay .xbg-v-stage img,
+#xbg-overlay .xbg-v-stage video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+#xbg-overlay .xbg-v-top,
+#xbg-overlay .xbg-v-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+#xbg-overlay .xbg-viewer.xbg-ui-on .xbg-v-top,
+#xbg-overlay .xbg-viewer.xbg-ui-on .xbg-v-bottom {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-v-top {
+  top: 0;
+  gap: 12px;
+  padding: 16px 12px 28px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  background: linear-gradient(rgba(0, 0, 0, 0.7), transparent);
+}
+
+#xbg-overlay .xbg-v-titles {
+  min-width: 0;
+}
+
+#xbg-overlay .xbg-v-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-v-sub {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-v-icon {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+#xbg-overlay .xbg-v-icon svg,
+#xbg-overlay .xbg-v-action svg {
+  width: 24px;
+  height: 24px;
+}
+
+#xbg-overlay .xbg-v-bottom {
+  bottom: 0;
+  justify-content: space-around;
+  padding: 28px 4px 14px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+}
+
+#xbg-overlay .xbg-v-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 52px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+}
+
+#xbg-overlay .xbg-v-action small {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#xbg-overlay .xbg-v-action.xbg-on svg path {
+  fill: #fff;
+}
+
+/* Details sheet */
+#xbg-overlay .xbg-detail {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--xbg-line);
+}
+
+#xbg-overlay .xbg-detail span {
+  color: var(--xbg-muted);
+}
+
+#xbg-overlay .xbg-detail b {
+  text-align: right;
+  word-break: break-all;
+}
+
+#xbg-overlay .xbg-setting {
+  padding: 12px 0;
+}
+
+/* --- Show/hide-header button (iPhone AssistiveTouch style) ---------------- */
+
+#xbg-overlay .xbg-hbtn {
+  position: fixed;
+  z-index: 4;
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(30, 30, 30, 0.72);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  opacity: 0.5;
+  touch-action: none;
+  transition: left 0.2s ease, top 0.2s ease, opacity 0.3s ease, transform 0.15s ease;
+}
+
+#xbg-overlay .xbg-hbtn.xbg-awake {
+  opacity: 1;
+}
+
+#xbg-overlay .xbg-hbtn.xbg-dragging {
+  transition: none;
+  transform: scale(1.08);
+}
+
+/* Concentric white rings, like AssistiveTouch */
+#xbg-overlay .xbg-hbtn-ring {
+  position: absolute;
+  inset: 11px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 34%, rgba(255, 255, 255, 0.55) 35% 52%, rgba(255, 255, 255, 0.3) 53% 70%, rgba(255, 255, 255, 0.18) 71% 100%);
+  pointer-events: none;
+}
+
+/* Header switched off with the button */
+#xbg-overlay.xbg-header-off .xbg-bar {
+  transform: translateY(-100%);
+}
+
+/* --- Light theme ------------------------------------------------------------ */
+
+html.xbg-light-page,
+html.xbg-light-page body {
+  background: #f2f3f5;
+}
+
+#xbg-overlay.xbg-light {
+  --xbg-bg: #f2f3f5;
+  --xbg-surface: #ffffff;
+  --xbg-sheet: #ffffff;
+  --xbg-text: #111418;
+  --xbg-muted: #6b7380;
+  --xbg-accent: #ff3b30; /* white wouldn't show on a light page: red */
+  --xbg-on-accent: #fff;
+  --xbg-line: #e3e5e8;
+  --xbg-line-strong: #c4c8cf;
+  --xbg-bar-bg: rgba(242, 243, 245, 0.95);
+  --xbg-seg-on: #ffffff;
+}
+
+#xbg-overlay.xbg-light .xbg-backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+#xbg-overlay.xbg-light .xbg-tile,
+#xbg-overlay.xbg-light .xbg-post-media {
+  background: #e3e5e8;
+}
+
+#xbg-overlay.xbg-light .xbg-select-bar svg path,
+#xbg-overlay.xbg-light .xbg-sheet svg path {
+  stroke: var(--xbg-text);
+}
+
+#xbg-overlay.xbg-light .xbg-tile.xbg-selected::after {
+  background: var(--xbg-accent);
+}
+
+#xbg-overlay.xbg-light .xbg-polaroid-bg {
+  background: linear-gradient(145deg, #e9e2d3, #cfc6b4);
+}
+
+/* Labels on photos stay white in both themes */
+#xbg-overlay .xbg-badge {
+  color: #fff;
 }

@@ -33,7 +33,10 @@
   const cached = new Map(); // unused here (kept so shared code reads the same)
   const savedItems = new Map(); // key -> item, for everything in an album
   let collections = []; // [{ id, name, keys: [newest first] }]
-  let settings = { sort: "newest", dateMode: "saved", layout: "grid", hiddenFolders: [] };
+  let settings = {
+    sort: "newest", dateMode: "saved", layout: "grid", hiddenFolders: [],
+    theme: "dark", groupSmall: true, headerHidden: false, toggleBtn: { side: "right", y: 0.75 },
+  };
   let starred = []; // keys of starred photos/videos, most recently starred first
   const trash = new Map(); // key -> item in the phone's recycle bin (with `expires`)
 
@@ -64,7 +67,11 @@
   // Only what's on the phone right now (deleted items drop out of albums and Starred).
   const getItem = (key) => fresh.get(key) || (view === "trash" ? trash.get(key) : undefined);
   const isStarred = (key) => starred.includes(key);
-  const insideViews = ["collection", "folder", "starred", "trash"];
+  const insideViews = ["collection", "folder", "starred", "trash", "videos", "gifs", "others"];
+  // Folders with fewer items than this are combined into "Others" (like the
+  // phone's own gallery does with one-off app and Instagram-account folders).
+  const SMALL_FOLDER = 5;
+  const MAIN_FOLDERS = ["Camera", "Screenshots", "Download", "Pictures"];
   const getCollection = (id) => collections.find((c) => c.id === id);
   const isSaved = (key) => collections.some((c) => c.keys.includes(key));
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -89,6 +96,9 @@
     }
     for (const f of ["saved", "posted", "w", "h", "duration", "expires"]) out[f] = Number.isFinite(item[f]) && item[f] > 0 ? item[f] : null;
     out.folder = typeof item.folder === "string" ? item.folder.slice(0, 100) : "";
+    out.name = typeof item.name === "string" ? item.name.slice(0, 200) : "";
+    out.size = Number.isFinite(item.size) && item.size > 0 ? item.size : null;
+    out.gif = item.gif === true;
     return out.thumb ? out : null;
   }
 
@@ -136,6 +146,7 @@
       const s = data[K.settings] || {};
       settings = { ...settings, ...s };
       if (!Array.isArray(settings.hiddenFolders)) settings.hiddenFolders = [];
+      settings.toggleBtn = { side: "right", y: 0.75, ...(s.toggleBtn || {}) };
       starred = (data[K.starred] || []).filter((k) => typeof k === "string");
       collections = (data[K.collections] || []).map(cleanCollection).filter(Boolean);
       for (const raw of Object.values(data[K.items] || {})) {
@@ -260,6 +271,7 @@
     if (ui) {
       rebuild(false);
       syncFeed();
+      syncViewer();
     }
   }
 
@@ -313,6 +325,9 @@
     const newest = (f) => Math.max(...f.items.slice(0, 1).map(dateOf), 0);
     return [...byName.values()].sort((a, b) => newest(b) - newest(a));
   }
+
+  const isSmallFolder = (f) => settings.groupSmall && f.items.length < SMALL_FOLDER && !MAIN_FOLDERS.includes(f.name);
+  const smallFolders = () => phoneFolders().filter(isSmallFolder);
 
   // --- UI building blocks --------------------------------------------------
 
@@ -471,7 +486,7 @@
     const refreshBtn = el("button", { class: "xbg-link xbg-hidden", onclick: () => Android.requestAccess() }, "Allow access");
     const status = el("div", { class: "xbg-status" }, statusText, refreshBtn);
     const selectBtn = el("button", { class: "xbg-text-btn", onclick: () => setSelectMode(!selectMode) }, "Select");
-    const menuBtn = el("button", { class: "xbg-close", "aria-label": "Options", onclick: () => (view === "collection" ? collectionMenu() : view === "trash" ? trashMenu() : galleryMenu()) }, "⋯");
+    const menuBtn = el("button", { class: "xbg-close", "aria-label": "Options", onclick: () => (view === "collection" ? collectionMenu() : view === "trash" ? trashMenu() : settingsMenu()) }, "⋯");
 
     const tabs = el("div", { class: "xbg-tabs" });
     for (const [value, label] of [["all", "▦  All"], ["collections", "▢  Albums"]]) {
@@ -493,7 +508,7 @@
 
     const grid = el("div", { class: "xbg-grid" });
     const years = el("div", { class: "xbg-cards xbg-hidden" });
-    const collGrid = el("div", { class: "xbg-cards xbg-hidden" });
+    const collGrid = el("div", { class: "xbg-albums xbg-hidden" });
     const empty = el("p", { class: "xbg-empty" });
     const sentinel = el("div", { class: "xbg-sentinel" });
     const scroller = el("div", { class: "xbg-scroll" }, grid, years, collGrid, empty, sentinel);
@@ -537,7 +552,7 @@
     wireScroller();
     wireLightbox();
     document.addEventListener("keydown", onKey);
-    new ResizeObserver(() => (scroller.style.paddingTop = bar.offsetHeight + "px")).observe(bar);
+    new ResizeObserver(() => (scroller.style.paddingTop = settings.headerHidden ? "0px" : bar.offsetHeight + "px")).observe(bar);
     syncControls();
     updateHeader();
   }
@@ -546,6 +561,10 @@
     if (!galleryOpen() || (e.key !== "Escape" && !e.key.startsWith("Arrow"))) return;
     if (ui.sheet) {
       if (e.key === "Escape") closeSheet();
+    } else if (viewerOpen()) {
+      if (e.key === "Escape") closeViewer();
+      else if (e.key === "ArrowRight") slideViewer(1);
+      else if (e.key === "ArrowLeft") slideViewer(-1);
     } else if (!ui.lightbox.classList.contains("xbg-hidden")) {
       if (e.key === "Escape") closeLightbox();
     } else if (e.key === "Escape") {
@@ -623,6 +642,11 @@
           return;
         }
         const dy = y - lastY;
+        if (settings.headerHidden) {
+          lastY = y;
+          fillPage();
+          return;
+        }
         if (y < bar.offsetHeight) bar.classList.remove("xbg-bar-hidden");
         else if (dy > 6) bar.classList.add("xbg-bar-hidden");
         else if (dy < -6) bar.classList.remove("xbg-bar-hidden");
@@ -725,7 +749,8 @@
       } else {
         closeSheet();
       }
-    } else if (feedOpen()) closeLightbox(true);
+    } else if (viewerOpen()) closeViewer();
+    else if (feedOpen()) closeLightbox(true);
     else if (selectMode) setSelectMode(false, true);
     else if (insideViews.includes(view)) setView("collections", null, "right");
     else if (view === "collections") setView("all", null, "right");
@@ -746,7 +771,7 @@
     const inside = insideViews.includes(view);
     ui.back.classList.toggle("xbg-hidden", !inside);
     ui.close.classList.add("xbg-hidden"); // the gallery is the whole app: nothing to close
-    ui.menuBtn.classList.toggle("xbg-hidden", !(c || view === "all" || (view === "trash" && trash.size)));
+    ui.menuBtn.classList.toggle("xbg-hidden", !(c || view === "all" || view === "collections" || (view === "trash" && trash.size)));
     ui.tabs.classList.toggle("xbg-hidden", inside);
     ui.controls.classList.toggle("xbg-hidden", view === "collections");
     ui.selectBtn.classList.toggle("xbg-hidden", view === "collections" || settings.layout === "years");
@@ -755,8 +780,12 @@
       : view === "folder" ? openId
       : view === "starred" ? "Starred"
       : view === "trash" ? "Recycle bin"
+      : view === "videos" ? "Videos"
+      : view === "gifs" ? "GIFs"
+      : view === "others" ? "Others"
+      : view === "collections" ? "Albums"
       : "Gallery";
-    ui.count.textContent = String(c ? c.keys.length : view === "collections" ? collections.length + phoneFolders().length : totalCount || allItems().length);
+    ui.count.textContent = view === "collections" ? "" : String(c ? c.keys.length : totalCount || allItems().length);
     ui.tabs.querySelectorAll(".xbg-tab").forEach((t) => t.classList.toggle("xbg-on", t.dataset.view === view));
     const noAccess = !Android.hasAccess();
     const hiddenCount = settings.hiddenFolders.length;
@@ -848,8 +877,49 @@
     toast(`Removed ${plural(n, "item")}`);
   }
 
-  // ⋯ on the All tab: choose which folders appear in All.
-  function galleryMenu() {
+  // ⋯ on the All and Albums tabs.
+  function settingsMenu() {
+    const toggle = (label, note, on, flip) =>
+      el(
+        "button",
+        { class: "xbg-pick xbg-setting", onclick: () => { flip(); saveSettings(); settingsMenu(); } },
+        el("span", { class: "xbg-pick-name" }, label, note ? el("small", {}, note) : ""),
+        el("span", { class: "xbg-switch" + (on ? " xbg-on" : "") })
+      );
+    const hiddenCount = settings.hiddenFolders.length;
+    const extra = [];
+    if (Android.canSkipConfirm && !Android.canSkipConfirm()) {
+      extra.push(el("button", { class: "xbg-secondary", onclick: () => Android.openManageMedia() }, "Delete without asking each time…"));
+    }
+    openSheet(
+      "Settings",
+      el(
+        "div",
+        { class: "xbg-sheet-body" },
+        toggle("Dark mode", "", settings.theme !== "light", () => {
+          settings.theme = settings.theme === "light" ? "dark" : "light";
+          applyTheme();
+        }),
+        toggle("Combine small folders", `Folders with fewer than ${SMALL_FOLDER} items go into “Others”`, settings.groupSmall, () => {
+          settings.groupSmall = !settings.groupSmall;
+        }),
+        el("button", { class: "xbg-secondary", onclick: () => foldersMenu() }, hiddenCount ? `Folders shown in All (${hiddenCount} hidden)…` : "Folders shown in All…"),
+        ...extra,
+        el("button", { class: "xbg-primary", onclick: () => closeSheet() }, "Done")
+      ),
+      () => rebuild(false)
+    );
+  }
+
+  function applyTheme() {
+    const light = settings.theme === "light";
+    if (ui) ui.overlay.classList.toggle("xbg-light", light);
+    document.documentElement.classList.toggle("xbg-light-page", light);
+    if (Android.setLightBars) Android.setLightBars(light);
+  }
+
+  // Choose which folders appear in All.
+  function foldersMenu() {
     const list = el("div", { class: "xbg-picker" });
     const draw = () => {
       const hidden = new Set(settings.hiddenFolders);
@@ -937,6 +1007,9 @@
       : view === "folder" ? phoneItems().filter((it) => (it.folder || "Other") === openId)
       : view === "starred" ? starred.map(getItem).filter(Boolean)
       : view === "trash" ? [...trash.values()]
+      : view === "videos" ? phoneItems().filter((it) => it.type === "video")
+      : view === "gifs" ? phoneItems().filter((it) => it.gif)
+      : view === "others" ? smallFolders().flatMap((f) => f.items)
       : allItems();
     totalCount = base.length;
     const dir = settings.sort === "oldest" ? -1 : 1;
@@ -1057,7 +1130,8 @@
   function makeTile(item) {
     const tile = el("button", { class: "xbg-tile" + (selected.has(item.key) ? " xbg-selected" : ""), "data-key": item.key, "aria-label": item.type === "photo" ? "Photo" : "Video" });
     tile.append(el("img", { src: item.thumb, loading: "lazy", decoding: "async", alt: "" }));
-    if (item.type !== "photo") tile.append(el("span", { class: "xbg-badge" }, item.duration ? "▶ " + durationText(item.duration) : "▶"));
+    if (item.type === "video") tile.append(el("span", { class: "xbg-badge xbg-badge-time" }, item.duration ? durationText(item.duration) : "▶"));
+    else if (item.gif) tile.append(el("span", { class: "xbg-badge xbg-badge-time" }, "GIF"));
     if (view === "trash" && item.expires) {
       const days = Math.max(0, Math.ceil((item.expires - Date.now()) / 86400000));
       tile.append(el("span", { class: "xbg-badge xbg-badge-left" }, plural(days, "day") + " left"));
@@ -1208,60 +1282,78 @@
     choosePeriod(year, null);
   }
 
-  // The Albums tab: albums you made, then the phone's own folders.
+  // The Albums tab, laid out like the phone's own gallery: the main albums,
+  // your albums, the phone's other folders (small ones combined into
+  // "Others"), then a list of media types and the recycle bin.
+  function albumCard(name, sub, cover, onclick, cls = "") {
+    return el("button", { class: "xbg-album " + cls, onclick }, cover, el("div", { class: "xbg-card-name" }, name), el("div", { class: "xbg-card-count" }, sub));
+  }
+
+  function coverOf(item, extraCls = "") {
+    const box = el("div", { class: "xbg-album-cover " + extraCls });
+    if (item) box.append(el("img", { src: item.thumb, loading: "lazy", decoding: "async", alt: "" }));
+    return box;
+  }
+
+  // The "All" album's cover: the newest photo as a Polaroid.
+  function polaroidCover(item) {
+    const box = el("div", { class: "xbg-album-cover xbg-polaroid-bg" });
+    const card = el("div", { class: "xbg-polaroid" });
+    if (item) card.append(el("img", { src: item.thumb, alt: "" }));
+    box.append(card);
+    return box;
+  }
+
   function renderCollections() {
-    const starredItems = starred.map(getItem).filter(Boolean);
-    const cards = [
-      el(
-        "button",
-        { class: "xbg-card", onclick: () => setView("starred", null, "left") },
-        starredItems.length ? mosaic(starredItems, "xbg-card-cover") : el("div", { class: "xbg-card-cover xbg-plus" }, "★"),
-        el("div", { class: "xbg-card-name" }, "★ Starred"),
-        el("div", { class: "xbg-card-count" }, plural(starredItems.length, "item"))
-      ),
-      el(
-        "button",
-        { class: "xbg-card", onclick: () => setView("trash", null, "left") },
-        trash.size ? mosaic([...trash.values()], "xbg-card-cover xbg-dim") : el("div", { class: "xbg-card-cover xbg-plus" }, "🗑"),
-        el("div", { class: "xbg-card-name" }, "Recycle bin"),
-        el("div", { class: "xbg-card-count" }, plural(trash.size, "item"))
-      ),
-      el("div", { class: "xbg-cards-title" }, "Your albums"),
-      el(
-        "button",
-        { class: "xbg-card", onclick: () => askName("New album", "", (name) => { createCollection(name); rebuild(false); }) },
-        el("div", { class: "xbg-card-cover xbg-plus" }, "＋"),
-        el("div", { class: "xbg-card-name" }, "New album")
-      ),
-    ];
-    for (const c of collections) {
-      cards.push(
-        el(
-          "button",
-          { class: "xbg-card", onclick: () => setView("collection", c.id, "left") },
-          cover(c, "xbg-card-cover"),
-          el("div", { class: "xbg-card-name" }, c.name),
-          el("div", { class: "xbg-card-count" }, plural(c.keys.length, "item"))
-        )
-      );
-    }
+    const items = phoneItems();
     const folders = phoneFolders();
-    if (folders.length) {
-      cards.push(el("div", { class: "xbg-cards-title" }, "On this phone"));
-      const hidden = new Set(settings.hiddenFolders);
-      for (const f of folders) {
-        cards.push(
-          el(
-            "button",
-            { class: "xbg-card", onclick: () => setView("folder", f.name, "left") },
-            mosaic(f.items, "xbg-card-cover"),
-            el("div", { class: "xbg-card-name" }, f.name),
-            el("div", { class: "xbg-card-count" }, plural(f.items.length, "item") + (hidden.has(f.name) ? " · hidden from All" : ""))
-          )
-        );
-      }
+    const byName = new Map(folders.map((f) => [f.name, f]));
+    const starredItems = starred.map(getItem).filter(Boolean);
+    const videos = items.filter((it) => it.type === "video");
+    const gifs = items.filter((it) => it.gif);
+    const count = (n) => n.toLocaleString();
+    const main = [
+      albumCard("All", count(items.length), polaroidCover(allItems()[0]), () => setView("all", null, "right")),
+    ];
+    if (byName.has("Camera")) main.push(albumCard("Camera", count(byName.get("Camera").items.length), coverOf(byName.get("Camera").items[0]), () => setView("folder", "Camera", "left")));
+    main.push(albumCard("Starred", count(starredItems.length), coverOf(starredItems[0], "xbg-starred-cover"), () => setView("starred", null, "left")));
+    main.push(albumCard("Videos", count(videos.length), coverOf(videos[0]), () => setView("videos", null, "left")));
+    if (byName.has("Screenshots")) main.push(albumCard("Screenshots", count(byName.get("Screenshots").items.length), coverOf(byName.get("Screenshots").items[0]), () => setView("folder", "Screenshots", "left")));
+
+    const yours = [albumCard("New album", "", el("div", { class: "xbg-album-cover xbg-plus" }, "＋"), () => askName("New album", "", (name) => { createCollection(name); rebuild(false); }))];
+    for (const c of collections) {
+      yours.push(albumCard(c.name, count(c.keys.length), coverOf(c.keys.map(getItem).find(Boolean)), () => setView("collection", c.id, "left")));
     }
-    ui.collGrid.replaceChildren(...cards);
+
+    const hidden = new Set(settings.hiddenFolders);
+    const small = folders.filter(isSmallFolder);
+    const more = folders
+      .filter((f) => !["Camera", "Screenshots"].includes(f.name) && !isSmallFolder(f))
+      .map((f) => albumCard(f.name, count(f.items.length) + (hidden.has(f.name) ? " · hidden" : ""), coverOf(f.items[0]), () => setView("folder", f.name, "left")));
+    if (small.length) {
+      const total = small.reduce((n, f) => n + f.items.length, 0);
+      const cover = el("div", { class: "xbg-album-cover xbg-others" });
+      small.slice(0, 4).forEach((f, i) => {
+        const cell = el("div", {}, el("img", { src: f.items[0].thumb, loading: "lazy", alt: "" }));
+        if (i === 3 && small.length > 4) cell.append(el("span", {}, "+" + (small.length - 3)));
+        cover.append(cell);
+      });
+      more.push(albumCard("Others", small.map((f) => f.name).join(", "), cover, () => setView("others", null, "left"), "xbg-album-others"));
+      void total;
+    }
+
+    const row = (iconPath, label, n, onclick) =>
+      el("button", { class: "xbg-type-row", onclick }, icon(iconPath, false), el("span", { class: "xbg-type-name" }, label), el("span", { class: "xbg-type-count" }, count(n)), el("span", { class: "xbg-type-arrow" }, "›"));
+
+    ui.collGrid.replaceChildren(
+      el("div", { class: "xbg-album-grid" }, ...main),
+      el("div", { class: "xbg-cards-title" }, "Your albums"),
+      el("div", { class: "xbg-album-grid" }, ...yours),
+      ...(more.length ? [el("div", { class: "xbg-cards-title" }, "More albums"), el("div", { class: "xbg-album-grid" }, ...more)] : []),
+      el("div", { class: "xbg-cards-title" }, "Media types"),
+      el("div", { class: "xbg-type-list" }, row(VIDEO_PATH, "Videos", videos.length, () => setView("videos", null, "left")), row(GIF_PATH, "GIFs", gifs.length, () => setView("gifs", null, "left"))),
+      el("div", { class: "xbg-type-list" }, row(STAR_PATH, "Starred", starredItems.length, () => setView("starred", null, "left")), row(TRASH_PATH, "Recycle bin", trash.size, () => setView("trash", null, "left")))
+    );
     ui.empty.replaceChildren(
       el(
         "span",
@@ -1300,59 +1392,32 @@
   const TRASH_PATH = "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6";
   const RESTORE_PATH = "M4 12a8 8 0 1 0 3-6.2M4 4v5h5";
   const MINUS_PATH = "M5 12h14";
+  const VIDEO_PATH = "M3 7a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM16 10l5-3v10l-5-3";
+  const GIF_PATH = "M4 6h16v12H4zM9 10H7v4h2v-1.5M12 10v4M15 14v-4h2M15 12h1.5";
+  const EDIT_PATH = "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4";
+  const MORE_PATH = "M12 5.5v.01M12 12v.01M12 18.5v.01";
+  const BACK_PATH = "M19 12H5M11 6l-6 6 6 6";
 
-  // Each post is just its picture or video, edge to edge, with the name and
-  // date laid over the top and Save / Open post as round buttons over the
-  // corner, like Instagram.
+  // The feed is just the pictures and videos, edge to edge, with nothing laid
+  // over them. Tap one to open it full screen.
   function feedPost(item) {
-    const d = dateOf(item);
-    const head = el(
-      "div",
-      { class: "xbg-post-head" },
-      el("span", { class: "xbg-post-user" }, item.folder || "Photo"),
-      el("span", { class: "xbg-post-date" }, d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "")
-    );
     // Size the box from the media's real shape so the feed doesn't jump.
     const ratio = item.w && item.h ? Math.min(Math.max(item.w / item.h, 0.56), 2) : 1;
     const isVideo = item.type === "video";
     const media = el("div", { class: "xbg-post-media" + (isVideo ? " xbg-is-video" : ""), style: `aspect-ratio: ${ratio.toFixed(4)}` });
     if (isVideo) {
-      const v = el("video", { src: item.video, poster: item.thumb, controls: true, muted: true, loop: true, playsinline: true, preload: "none" });
+      const v = el("video", { src: item.video, poster: item.thumb, muted: true, loop: true, playsinline: true, preload: "none" });
       v.muted = true;
-      media.append(v);
+      media.append(v, el("span", { class: "xbg-badge xbg-badge-time" }, item.duration ? durationText(item.duration) : "▶"));
       ui.feedVideos.observe(v);
     } else {
       media.append(el("img", { src: item.full || item.thumb, loading: "lazy", decoding: "async", alt: "" }));
     }
-    const fab = (label, path, onclick, cls = "") => el("button", { class: "xbg-fab-btn " + cls, "aria-label": label, onclick }, icon(path, false));
-    const actions = el("div", { class: "xbg-post-actions" });
-    if (view === "trash") {
-      actions.append(fab("Restore", RESTORE_PATH, () => restoreKeys([item.key])), fab("Delete forever", TRASH_PATH, () => deleteForever([item.key]), "xbg-danger-btn"));
-    } else {
-      const star = fab("Star", STAR_PATH, () => toggleStar([item.key]), "xbg-star-btn");
-      const save = el("button", { class: "xbg-fab-btn xbg-save-btn", onclick: () => openPicker([item.key], () => afterSave(item.key)) });
-      actions.append(star, save, fab("Share", SHARE_PATH, () => shareKeys([item.key])), fab("Delete", TRASH_PATH, () => deleteKeys([item.key])));
-    }
-    media.append(head, actions);
-    const post = el("article", { class: "xbg-post", "data-key": item.key }, media);
-    paintPostButtons(post);
-    return post;
+    media.addEventListener("click", () => openViewer(item.key));
+    return el("article", { class: "xbg-post", "data-key": item.key }, media);
   }
 
-  function paintPostButtons(post) {
-    const key = post.dataset.key;
-    const save = post.querySelector(".xbg-save-btn");
-    if (save) paintSave(save, key);
-    const star = post.querySelector(".xbg-star-btn");
-    if (star) {
-      const on = isStarred(key);
-      star.replaceChildren(icon(STAR_PATH, on));
-      star.setAttribute("aria-label", on ? "Unstar" : "Star");
-      star.classList.toggle("xbg-on", on);
-    }
-  }
-
-  const paintFeedButtons = () => ui.feed.querySelectorAll(".xbg-post").forEach(paintPostButtons);
+  const paintFeedButtons = () => paintViewer();
 
   // After deleting/restoring/unstarring: drop posts that no longer belong in
   // this view from the feed (and close it if nothing is left).
@@ -1434,21 +1499,280 @@
     if (!fromHistory) removeBackStep();
   }
 
-  // After the "Save to…" sheet closes: update the buttons, and if the post was
-  // taken out of the collection being viewed, drop it from the feed too.
-  function afterSave(key) {
-    for (const btn of ui.feed.querySelectorAll(".xbg-post .xbg-save-btn")) paintSave(btn, btn.closest(".xbg-post").dataset.key);
-    const c = view === "collection" ? getCollection(openId) : null;
-    if (!c) return;
-    rebuild(false);
-    if (!c.keys.includes(key)) {
-      const post = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(key)}"]`);
-      if (post) post.remove();
+  // After the "Add to album…" sheet closes: if the photo was taken out of the
+  // album being viewed, it leaves this view.
+  function afterSave() {
+    if (view === "collection") {
+      rebuild(false);
+      syncFeed();
+      syncViewer();
     }
-    const keys = [...ui.feed.querySelectorAll(".xbg-post")].map((p) => p.dataset.key);
-    if (!keys.length) return closeLightbox();
-    feedStart = current.findIndex((it) => it.key === keys[0]);
-    feedEnd = current.findIndex((it) => it.key === keys[keys.length - 1]) + 1;
+    paintViewer();
+  }
+
+  // --- Full-screen view of one photo or video ------------------------------
+  // Opens from the feed. The bars stay hidden until you tap; tap again to hide
+  // them. Swipe left/right for the next/previous one.
+
+  let viewerKey = null;
+  const viewerOpen = () => ui && ui.viewer && !ui.viewer.classList.contains("xbg-hidden");
+
+  function buildViewer() {
+    if (ui.viewer) return;
+    const stage = el("div", { class: "xbg-v-stage" });
+    const title = el("div", { class: "xbg-v-title" });
+    const sub = el("div", { class: "xbg-v-sub" });
+    const top = el(
+      "div",
+      { class: "xbg-v-top" },
+      el("button", { class: "xbg-v-icon", "aria-label": "Back", onclick: () => closeViewer() }, icon(BACK_PATH, false)),
+      el("div", { class: "xbg-v-titles" }, title, sub)
+    );
+    const bottom = el("div", { class: "xbg-v-bottom" });
+    const viewer = el("div", { class: "xbg-viewer xbg-hidden" }, stage, top, bottom);
+    ui.overlay.append(viewer);
+    Object.assign(ui, { viewer, vStage: stage, vTitle: title, vSub: sub, vBottom: bottom });
+
+    let t = null;
+    stage.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) return (t = null);
+      const p = e.touches[0];
+      const onControls = e.target.tagName === "VIDEO" && p.clientY > e.target.getBoundingClientRect().bottom - 60;
+      t = onControls ? null : { x: p.clientX, y: p.clientY, dx: 0, decided: false, sideways: false, at: Date.now() };
+    }, { passive: true });
+    stage.addEventListener("touchmove", (e) => {
+      if (!t) return;
+      const p = e.touches[0];
+      const dx = p.clientX - t.x;
+      const dy = p.clientY - t.y;
+      if (!t.decided) {
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        t.decided = true;
+        t.sideways = Math.abs(dx) > Math.abs(dy);
+      }
+      if (!t.sideways) return;
+      t.dx = dx;
+      stage.style.transition = "none";
+      stage.style.transform = `translateX(${dx}px)`;
+    }, { passive: true });
+    stage.addEventListener("touchend", () => {
+      if (!t || !t.sideways) return (t = null);
+      const { dx, at } = t;
+      t = null;
+      if (Math.abs(dx) > window.innerWidth * 0.25 || (Math.abs(dx) > 40 && Date.now() - at < 300)) slideViewer(dx < 0 ? 1 : -1);
+      else settleViewer();
+    });
+    // A tap shows or hides the bars.
+    stage.addEventListener("click", () => viewer.classList.toggle("xbg-ui-on"));
+  }
+
+  function friendlyDate(d) {
+    if (!d) return "";
+    const day = new Date(d);
+    const today = new Date();
+    const days = Math.round((new Date(today.toDateString()) - new Date(day.toDateString())) / 86400000);
+    if (days === 0) return "Today";
+    if (days === 1) return "Yesterday";
+    return day.toLocaleDateString(undefined, { day: "numeric", month: "long", year: day.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+  }
+
+  function showViewerItem(key) {
+    const item = current.find((it) => it.key === key);
+    if (!item) return closeViewer();
+    viewerKey = key;
+    viewerIndexHint = current.indexOf(item);
+    const { vStage: stage } = ui;
+    stage.querySelectorAll("video").forEach((v) => v.pause());
+    stage.replaceChildren(
+      item.type === "video"
+        ? el("video", { src: item.video, poster: item.thumb, controls: true, autoplay: true, playsinline: true, loop: true })
+        : el("img", { src: item.full || item.thumb, alt: "" })
+    );
+    const d = dateOf(item);
+    ui.vTitle.textContent = friendlyDate(d);
+    ui.vSub.textContent = [d ? new Date(d).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "", item.folder].filter(Boolean).join(" · ");
+    paintViewer();
+    // Warm up the neighbours so swiping feels instant.
+    const i = current.indexOf(item);
+    for (const n of [current[i + 1], current[i - 1]]) if (n && n.type === "photo") new Image().src = n.full || n.thumb;
+  }
+
+  function paintViewer() {
+    if (!viewerOpen() || !viewerKey) return;
+    const key = viewerKey;
+    const btn = (label, path, onclick, filled = false, cls = "") =>
+      el("button", { class: "xbg-v-action " + cls, "aria-label": label, onclick }, icon(path, filled), el("small", {}, label));
+    if (view === "trash") {
+      ui.vBottom.replaceChildren(btn("Restore", RESTORE_PATH, () => restoreKeys([key])), btn("Delete", TRASH_PATH, () => deleteForever([key]), false, "xbg-danger-text"));
+      return;
+    }
+    const starredNow = isStarred(key);
+    ui.vBottom.replaceChildren(
+      btn("Share", SHARE_PATH, () => shareKeys([key])),
+      btn(starredNow ? "Starred" : "Star", STAR_PATH, () => toggleStar([key]), starredNow, starredNow ? "xbg-on" : ""),
+      btn("Album", BOOKMARK_PATH, () => openPicker([key], afterSave)),
+      btn("Edit", EDIT_PATH, () => Android.edit(key)),
+      btn("Delete", TRASH_PATH, () => deleteKeys([key])),
+      btn("More", MORE_PATH, () => viewerMore(key))
+    );
+  }
+
+  function viewerMore(key) {
+    const item = current.find((it) => it.key === key);
+    if (!item) return;
+    const d = dateOf(item);
+    const size = item.size ? (item.size > 1048576 ? (item.size / 1048576).toFixed(1) + " MB" : Math.round(item.size / 1024) + " KB") : "";
+    const line = (label, value) => (value ? el("div", { class: "xbg-detail" }, el("span", {}, label), el("b", {}, value)) : "");
+    openSheet(
+      "Details",
+      el(
+        "div",
+        { class: "xbg-sheet-body" },
+        line("Name", item.name),
+        line("Taken", d ? new Date(d).toLocaleString() : ""),
+        line("Folder", item.folder),
+        line("Size", [item.w && item.h ? `${item.w} × ${item.h}` : "", size].filter(Boolean).join(" · ")),
+        item.type === "video" && item.duration ? line("Length", durationText(item.duration)) : "",
+        el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); Android.openWith(key); } }, "Open with another app"),
+        el("button", { class: "xbg-primary", onclick: () => closeSheet() }, "Done")
+      )
+    );
+  }
+
+  function openViewer(key) {
+    buildViewer();
+    ui.feed.querySelectorAll("video").forEach((v) => v.pause());
+    ui.viewer.classList.remove("xbg-hidden", "xbg-ui-on"); // bars start hidden
+    ui.vStage.style.transition = "none";
+    ui.vStage.style.transform = "";
+    showViewerItem(key);
+  }
+
+  function closeViewer() {
+    if (!viewerOpen()) return;
+    ui.vStage.querySelectorAll("video").forEach((v) => v.pause());
+    ui.vStage.replaceChildren();
+    ui.viewer.classList.add("xbg-hidden");
+    // Leave the feed where you were in the full-screen view.
+    const post = feedOpen() && viewerKey && ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(viewerKey)}"]`);
+    if (post) ui.feed.scrollTop = post.offsetTop;
+    viewerKey = null;
+  }
+
+  function settleViewer() {
+    ui.vStage.style.transition = "transform 0.2s ease";
+    ui.vStage.style.transform = "";
+  }
+
+  let viewerSliding = false;
+  function slideViewer(delta) {
+    if (viewerSliding) return;
+    const i = current.findIndex((it) => it.key === viewerKey);
+    const target = current[i + delta];
+    if (!target) return settleViewer(); // first or last one
+    const stage = ui.vStage;
+    const w = window.innerWidth;
+    viewerSliding = true;
+    stage.style.transition = "transform 0.16s ease-in";
+    stage.style.transform = `translateX(${delta > 0 ? -w : w}px)`;
+    setTimeout(() => {
+      showViewerItem(target.key);
+      stage.style.transition = "none";
+      stage.style.transform = `translateX(${delta > 0 ? w : -w}px)`;
+      void stage.offsetWidth;
+      stage.style.transition = "transform 0.2s ease-out";
+      stage.style.transform = "";
+      setTimeout(() => (viewerSliding = false), 200);
+    }, 160);
+  }
+
+  // After deleting/restoring: if the open item is gone, show the next one.
+  let viewerIndexHint = 0;
+  function syncViewer() {
+    if (!viewerOpen()) return;
+    const i = current.findIndex((it) => it.key === viewerKey);
+    if (i >= 0) {
+      viewerIndexHint = i;
+      return paintViewer();
+    }
+    const next = current[Math.min(viewerIndexHint, current.length - 1)];
+    if (next) showViewerItem(next.key);
+    else closeViewer();
+  }
+
+  // --- Show/hide-header button ------------------------------------------------
+  // A floating button you can drag to either side; tap it to hide or show the
+  // header (tabs, filters, sorting).
+
+  function buildHeaderButton() {
+    const btn = el("button", { class: "xbg-hbtn", "aria-label": "Show or hide the header" }, el("span", { class: "xbg-hbtn-ring" }));
+    ui.overlay.append(btn);
+    ui.hbtn = btn;
+    const size = () => btn.offsetWidth || 54;
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+    let drag = null;
+    let idle = null;
+    const wake = () => {
+      btn.classList.add("xbg-awake");
+      clearTimeout(idle);
+      idle = setTimeout(() => btn.classList.remove("xbg-awake"), 2500);
+    };
+    btn.addEventListener("pointerdown", (e) => {
+      drag = { sx: e.clientX, sy: e.clientY, ox: btn.offsetLeft, oy: btn.offsetTop, moved: false };
+      btn.setPointerCapture(e.pointerId);
+      wake();
+    });
+    btn.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.sx;
+      const dy = e.clientY - drag.sy;
+      if (!drag.moved && Math.hypot(dx, dy) < 8) return;
+      drag.moved = true;
+      btn.classList.add("xbg-dragging");
+      btn.style.left = clamp(drag.ox + dx, 0, window.innerWidth - size()) + "px";
+      btn.style.top = clamp(drag.oy + dy, 0, window.innerHeight - size()) + "px";
+    });
+    btn.addEventListener("pointerup", () => {
+      if (!drag) return;
+      const moved = drag.moved;
+      drag = null;
+      btn.classList.remove("xbg-dragging");
+      wake();
+      if (!moved) return setHeaderHidden(!settings.headerHidden);
+      // Snap to the nearest side.
+      settings.toggleBtn = { side: btn.offsetLeft + size() / 2 < window.innerWidth / 2 ? "left" : "right", y: btn.offsetTop / window.innerHeight };
+      placeHeaderButton();
+      saveSettings();
+    });
+    btn.addEventListener("pointercancel", () => {
+      drag = null;
+      btn.classList.remove("xbg-dragging");
+      placeHeaderButton();
+    });
+    window.addEventListener("resize", placeHeaderButton);
+    placeHeaderButton();
+    wake();
+  }
+
+  function placeHeaderButton() {
+    const btn = ui.hbtn;
+    const s = btn.offsetWidth || 54;
+    btn.style.top = Math.min(Math.max(settings.toggleBtn.y * window.innerHeight, 60), window.innerHeight - s - 60) + "px";
+    btn.style.left = (settings.toggleBtn.side === "left" ? 8 : window.innerWidth - s - 8) + "px";
+  }
+
+  function setHeaderHidden(hidden) {
+    const { bar, scroller } = ui;
+    const h = bar.offsetHeight;
+    settings.headerHidden = hidden;
+    saveSettings();
+    ui.overlay.classList.toggle("xbg-header-off", hidden);
+    bar.classList.remove("xbg-bar-hidden");
+    // Keep the same photos on screen as the space at the top opens or closes.
+    scroller.style.paddingTop = hidden ? "0px" : h + "px";
+    ui.jumped = true; // this scroll is ours: don't treat it as scrolling down
+    scroller.scrollTop = Math.max(0, scroller.scrollTop + (hidden ? -h : h));
+    ui.hbtn.classList.toggle("xbg-on", hidden);
   }
 
   // --- Start ----------------------------------------------------------------
@@ -1461,6 +1785,9 @@
     buildUi();
     ui.overlay.classList.remove("xbg-hidden");
     await loadStored();
+    applyTheme();
+    buildHeaderButton();
+    if (settings.headerHidden) setHeaderHidden(true);
     rebuild();
     // Read the media after the first paint so the app opens instantly.
     setTimeout(loadMedia, 0);

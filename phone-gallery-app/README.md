@@ -3,19 +3,25 @@
 The photos and videos on your phone in an Instagram-style gallery, built from
 the X Bookmarks Gallery (`../twitter-gallery`):
 
-- 3-column grid with All / Photos / Videos, newest/oldest sorting (by date
+- 4-column grid with All / Photos / Videos, newest/oldest sorting (by date
   taken or date added), and Grid / Months / Years with a year and month bar.
 - **Albums** tab: albums you make (long-press to select, then "Add to album",
   or the bookmark button on a photo), plus the phone's own folders (Camera,
   Screenshots, WhatsApp…).
-- Tap a photo for a freely scrolling feed with Add to album and Share buttons;
-  videos play muted while on screen and show their length in the grid.
+- Tap a photo for a freely scrolling feed of just the pictures; tap one to
+  open it full screen, where tapping shows/hides the Share · Star · Album ·
+  Edit · Delete · More bar and swiping left/right moves between photos.
 - ★ Star photos (Starred album), share one or many, and delete to the
   phone's own recycle bin (kept 30 days) with a Recycle bin album to restore
   or delete forever. Android asks to confirm each delete unless you allow
   "media management" (⋯ on the All tab → "Delete without asking each time").
 - ⋯ on the All tab: switch folders (e.g. Screenshots) off to keep them out of
   All; they still open from Albums.
+- Albums page laid out like the phone's gallery (All, Camera, Starred,
+  Videos, Screenshots; your albums; more albums with small one-off folders
+  combined into "Others"; Media types and Recycle bin).
+- Settings (⋯): dark/light mode, combining small folders, folders in All.
+- A floating AssistiveTouch-style button hides/shows the header.
 - Swipe between tabs; the phone's back button closes menus, the feed,
   selection, then albums, then the app.
 - Albums can be backed up to Downloads and restored.

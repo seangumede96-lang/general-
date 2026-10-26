@@ -23,6 +23,7 @@ import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Size;
 import android.view.View;
+import android.view.WindowInsetsController;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -233,6 +234,9 @@ public class MainActivity extends Activity {
                 MediaStore.MediaColumns.DURATION,
                 MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
                 MediaStore.MediaColumns.DATE_EXPIRES,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.MIME_TYPE,
         };
         String where = MediaStore.Files.FileColumns.MEDIA_TYPE + " IN ("
                 + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE + ","
@@ -273,6 +277,9 @@ public class MainActivity extends Activity {
                         .append(",\"duration\":").append(c.getLong(7))
                         .append(",\"folder\":").append(jsonString(c.getString(8)));
                 if (trashed && !c.isNull(9)) json.append(",\"expires\":").append(c.getLong(9) * 1000L);
+                json.append(",\"name\":").append(jsonString(c.getString(10)))
+                        .append(",\"size\":").append(c.getLong(11));
+                if ("image/gif".equals(c.getString(12))) json.append(",\"gif\":true");
                 json.append('}');
             }
         } catch (SecurityException e) {
@@ -592,6 +599,53 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void deleteForever(String keys) {
             runOnUiThread(() -> changeMedia(DELETE, keys));
+        }
+
+        /** Open the photo/video in the phone's editor. */
+        @JavascriptInterface
+        public void edit(String key) {
+            Uri uri = uriFor(key);
+            if (uri == null) return;
+            Intent edit = new Intent(Intent.ACTION_EDIT).setDataAndType(uri, key.charAt(0) == 'v' ? "video/*" : "image/*")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            runOnUiThread(() -> {
+                try {
+                    startActivity(Intent.createChooser(edit, "Edit with"));
+                } catch (ActivityNotFoundException e) {
+                    /* no editor */
+                }
+            });
+        }
+
+        /** Open the photo/video in another app (choose which). */
+        @JavascriptInterface
+        public void openWith(String key) {
+            Uri uri = uriFor(key);
+            if (uri == null) return;
+            Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, key.charAt(0) == 'v' ? "video/*" : "image/*")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            runOnUiThread(() -> {
+                try {
+                    startActivity(Intent.createChooser(view, "Open with"));
+                } catch (ActivityNotFoundException e) {
+                    /* nothing to open it with */
+                }
+            });
+        }
+
+        /** Light or dark status and navigation bars, to match the gallery's theme. */
+        @JavascriptInterface
+        public void setLightBars(boolean light) {
+            runOnUiThread(() -> {
+                int bg = light ? 0xFFF2F3F5 : 0xFF000000;
+                getWindow().setStatusBarColor(bg);
+                getWindow().setNavigationBarColor(bg);
+                WindowInsetsController bars = getWindow().getInsetsController();
+                if (bars != null) {
+                    int flags = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                    bars.setSystemBarsAppearance(light ? flags : 0, flags);
+                }
+            });
         }
 
         /** True when Android lets the app delete without asking each time. */
