@@ -292,7 +292,7 @@
   // posts can be sorted into folders elsewhere. Kept compact for huge
   // libraries: pictures stay in the gallery's saved copy, and the folders come
   // back as a file listing post links only.
-  function exportForSorting() {
+  async function exportForSorting() {
     const items = allItems();
     if (!items.length) return toast("Open your bookmarks first so they can load");
     const byPost = new Map();
@@ -309,13 +309,27 @@
     const posts = [...byPost.values()];
     const data = JSON.stringify({ app: "x-bookmarks-gallery", kind: "all-bookmarks", version: 2, exported: Date.now(), posts });
     const name = `x-bookmarks-all-${new Date().toISOString().slice(0, 10)}.json`;
-    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
-    const a = el("a", { href: url, download: name });
+    toast("Preparing the export…");
+    // Compressed (.json.gz) it's about a sixth of the size, small enough to upload.
+    let blob = new Blob([data], { type: "application/json" });
+    let file = name;
+    try {
+      if (typeof CompressionStream === "function") {
+        blob = await new Response(blob.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+        file = name + ".gz";
+      }
+    } catch (e) {
+      blob = new Blob([data], { type: "application/json" });
+      file = name;
+    }
+    const url = URL.createObjectURL(new Blob([blob], { type: file.endsWith(".gz") ? "application/gzip" : "application/json" }));
+    const a = el("a", { href: url, download: file });
     document.body.append(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    toast(`Exported ${plural(posts.length, "post")} (${items.length.toLocaleString()} pictures and videos) to your downloads`);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    const mb = (blob.size / 1048576).toFixed(1);
+    toast(`Exported ${plural(posts.length, "post")} (${items.length.toLocaleString()} pictures and videos, ${mb} MB) to your downloads`);
   }
 
   function restore() {

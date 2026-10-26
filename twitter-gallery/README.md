@@ -105,7 +105,8 @@ extension, not on X):
 
 ⋯ → **Export all bookmarks for sorting** saves every loaded post once (its id,
 author, text, type and dates, plus its media keys) as
-`x-bookmarks-all-<date>.json` — about 7–8 MB per 50,000 posts.
+`x-bookmarks-all-<date>.json.gz` (compressed, so about a sixth of the size;
+plain `.json` on browsers without compression support).
 Once the posts are sorted, ⋯ → **Import sorted folders** reads the result (a
 collections backup whose folders may list post ids in `posts` instead of
 media `keys`) and adds each folder as a collection. Existing
