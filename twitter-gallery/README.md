@@ -1,6 +1,6 @@
 # X Bookmarks Gallery (browser extension)
 
-Shows the photos and videos from your X bookmarks in a 3-column, Instagram-style
+Shows the photos and videos from your X bookmarks in a 4-column, Instagram-style
 grid. Tap any item to open a feed of posts you can scroll freely, like Instagram:
 posts run edge to edge, with the account name and date over each picture and
 round Save / Open post buttons side by side at the bottom.

@@ -1161,8 +1161,8 @@
   // Only the rows near the screen exist in the page (like the iPhone's Photos
   // app). Every tile's spot is worked out up front, so tens of thousands of
   // photos scroll and fast-scroll smoothly.
-  const COLS = 3;
-  const GAP = 3;
+  const COLS = 4;
+  const GAP = 2;
   const HEADER_H = 50;
   const BUFFER = 900; // px drawn above and below the screen
   let tops = [];
