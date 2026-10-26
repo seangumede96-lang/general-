@@ -39,7 +39,14 @@ document.getElementById("open").addEventListener("click", async () => {
 document.getElementById("goto").addEventListener("click", async () => {
   const tab = await findXTab();
   if (tab) {
-    await ext.tabs.update(tab.id, { url: BOOKMARKS, active: true });
+    // Ask the page to move to the bookmarks itself (no page load, so Firefox
+    // doesn't offer to open the X app); load the address only if that fails.
+    try {
+      await ext.tabs.sendMessage(tab.id, { type: "xbg-goto" });
+      await focus(tab);
+    } catch (e) {
+      await ext.tabs.update(tab.id, { url: BOOKMARKS, active: true });
+    }
   } else {
     await ext.tabs.create({ url: BOOKMARKS });
   }

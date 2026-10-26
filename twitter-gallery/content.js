@@ -749,8 +749,10 @@
     }
     const sortBtn = el("button", { class: "xbg-chip xbg-sort", onclick: sortMenu });
     const layouts = el("div", { class: "xbg-seg" });
-    for (const [value, label] of [["grid", "Grid"], ["months", "Months"], ["years", "Years"]]) {
-      layouts.append(el("button", { "data-layout": value, onclick: () => setLayout(value) }, label));
+    for (const [value, label] of [["grid", ""], ["months", "Months"], ["years", "Years"]]) {
+      const b = el("button", { "data-layout": value, "aria-label": value === "grid" ? "Grid" : label, onclick: () => setLayout(value) }, label);
+      if (value === "grid") b.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3 3h5v5H3zm6.5 0h5v5h-5zM16 3h5v5h-5zM3 9.5h5v5H3zm6.5 0h5v5h-5zM16 9.5h5v5h-5zM3 16h5v5H3zm6.5 0h5v5h-5zM16 16h5v5h-5z"/></svg>';
+      layouts.append(b);
     }
     const yearBar = el("div", { class: "xbg-period-row" });
     const monthBar = el("div", { class: "xbg-period-row" });
@@ -956,6 +958,7 @@
       scroller.style.transform = `translateX(${swipe.dx * 0.85}px)`;
       scroller.style.opacity = String(1 - Math.min(Math.abs(swipe.dx) / w, 1) * 0.35);
       if (view !== "collection") moveInk(Math.min(1, Math.max(0, inkBase() - swipe.dx / w)));
+      if (view === "all") ui.controls.style.opacity = String(1 - Math.min(Math.abs(swipe.dx) / (w * 0.4), 1));
     }, { passive: true });
     const endSwipe = () => {
       const sw = swipe;
@@ -964,33 +967,44 @@
       const w = window.innerWidth;
       const speed = Math.abs(sw.dx) / Math.max(Date.now() - sw.at, 1);
       const go = Math.abs(sw.dx) > w * 0.25 || (speed > 0.45 && Math.abs(sw.dx) > 40);
-      const dir = sw.dx < 0 ? -1 : 1;
       if (ui.tabInk) ui.tabInk.style.transition = "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)";
       if (!go) {
         scroller.style.transition = "transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s";
         scroller.style.transform = "";
         scroller.style.opacity = "";
+        ui.controls.style.opacity = "";
         moveInk(inkBase());
         return;
       }
-      // Glide out, switch, glide the new page in from the other side.
-      scroller.style.transition = "transform 0.12s cubic-bezier(0.4, 0, 1, 1), opacity 0.12s";
-      scroller.style.transform = `translateX(${dir * w}px)`;
-      scroller.style.opacity = "0.3";
-      moveInk(sw.target === "all" ? 0 : 1);
-      setTimeout(() => {
-        setView(sw.target);
-        scroller.style.transition = "none";
-        scroller.style.transform = `translateX(${-dir * w * 0.3}px)`;
-        scroller.style.opacity = "0.4";
-        void scroller.offsetWidth;
-        scroller.style.transition = "transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.24s";
-        scroller.style.transform = "";
-        scroller.style.opacity = "";
-      }, 120);
+      slideTo(sw.target, sw.dx < 0 ? -1 : 1);
     };
     scroller.addEventListener("touchend", endSwipe);
     scroller.addEventListener("touchcancel", endSwipe);
+  }
+
+  // Glide the page out, switch view, glide the new one in from the other side.
+  // The filter rows fold away while leaving All posts and unfold smoothly on return.
+  function slideTo(target, dir, fromHistory = false) {
+    const scroller = ui.scroller;
+    const w = window.innerWidth;
+    scroller.style.transition = "transform 0.12s cubic-bezier(0.4, 0, 1, 1), opacity 0.12s";
+    scroller.style.transform = `translateX(${dir * w}px)`;
+    scroller.style.opacity = "0.3";
+    if (ui.tabInk && target !== "collection") {
+      ui.tabInk.style.transition = "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)";
+      ui.tabInk.style.transform = `translateX(${target === "all" ? 0 : 100}%)`;
+    }
+    setTimeout(() => {
+      setView(target, null, null, fromHistory);
+      ui.controls.style.opacity = "";
+      scroller.style.transition = "none";
+      scroller.style.transform = `translateX(${-dir * w * 0.3}px)`;
+      scroller.style.opacity = "0.4";
+      void scroller.offsetWidth;
+      scroller.style.transition = "transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.24s";
+      scroller.style.transform = "";
+      scroller.style.opacity = "";
+    }, 120);
   }
 
   // The feed adds posts above and below as you scroll, and plays videos
@@ -1089,6 +1103,7 @@
   }
 
   function onBack() {
+    if (quietPop) return void quietPop--; // our own nudge to X's page router
     if (backSteps.ignore) {
       // One of our own quiet steps back.
       if (--backSteps.ignore === 0) {
@@ -1116,6 +1131,7 @@
       if (feedOpen() || selectMode) addBackStep();
     } else if (feedOpen()) closeLightbox(true);
     else if (selectMode) setSelectMode(false, true);
+    else if (galleryOpen() && view === "collection") slideTo("collections", 1, true);
     else if (galleryOpen()) closeGallery(true);
   }
 
@@ -1132,7 +1148,7 @@
     ui.back.classList.toggle("xbg-hidden", !c);
     ui.close.classList.toggle("xbg-hidden", !!c);
     ui.tabs.classList.toggle("xbg-hidden", !!c);
-    ui.controls.classList.toggle("xbg-hidden", view === "collections");
+    ui.controls.classList.toggle("xbg-collapsed", view === "collections");
     ui.selectBtn.classList.toggle("xbg-hidden", view === "collections" || settings.layout === "years");
     ui.selectBtn.textContent = selectMode ? "Cancel" : "Select";
     ui.titleName.textContent = c ? c.name : "Bookmarks";
@@ -1191,9 +1207,12 @@
   let collectionsSpot = null;
   const collectionSpots = new Map(); // collection id -> spot
 
-  function setView(value, id = null, slide = null) {
+  function setView(value, id = null, slide = null, fromHistory = false) {
     saveSpot();
     const from = view;
+    // Opening a collection is one step back, so Android's back gesture returns to Collections.
+    if (value === "collection" && from !== "collection") addBackStep();
+    else if (from === "collection" && value !== "collection" && !fromHistory) removeBackStep();
     const here = { top: ui.scroller.scrollTop, barHidden: ui.bar.classList.contains("xbg-bar-hidden") };
     if (from === "collections" && value !== "collections") collectionsSpot = here;
     if (from === "collection") collectionSpots.set(openId, here);
@@ -1806,11 +1825,30 @@
   }
 
   // Open the bookmarks page and pop the gallery open once it has loaded.
+  // Moves X itself to the bookmarks page the way its own links do, without a
+  // page load, so Firefox doesn't ask "Open this link in X app?". If X doesn't
+  // follow within a few seconds, fall back to a normal page load.
+  let quietPop = 0;
   function goToBookmarks() {
     try {
       sessionStorage.setItem("xbg_open", "1");
     } catch (e) {
       /* fine */
+    }
+    if (/(^|\.)(x|twitter)\.com$/.test(location.hostname) && !isMainBookmarks()) {
+      try {
+        history.pushState({}, "", "/i/bookmarks");
+        quietPop++;
+        window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
+        watchPage();
+        openGallery();
+        setTimeout(() => {
+          if (isMainBookmarks() && !gotData && loadState.state === "idle" && !document.querySelector('[data-testid="cellInnerDiv"]')) location.reload();
+        }, 6000);
+        return;
+      } catch (e) {
+        /* fall through */
+      }
     }
     location.href = "https://x.com/i/bookmarks";
   }
@@ -2349,6 +2387,10 @@
   // --- Wiring --------------------------------------------------------------
 
   ext.runtime.onMessage.addListener((msg, _sender, respond) => {
+    if (msg && msg.type === "xbg-goto") {
+      goToBookmarks();
+      respond({ ok: true });
+    }
     if (msg && msg.type === "xbg-open") {
       onBallTap();
       respond({ ok: true, onBookmarks: isBookmarks() });
