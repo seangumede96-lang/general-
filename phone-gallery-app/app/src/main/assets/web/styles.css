@@ -1832,3 +1832,109 @@ html,
   background-color: var(--xbg-red);
   background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTYuNSAxMi41bDMuNSAzLjUgNy41LTgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=");
 }
+
+/* Delete confirmation as a bottom action sheet: message, Delete, Cancel */
+#xbg-overlay .xbg-alert-backdrop.xbg-sheet-style {
+  align-items: flex-end;
+  padding: 12px 12px max(14px, env(safe-area-inset-bottom));
+}
+
+#xbg-overlay .xbg-action-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 100%);
+  border-radius: 26px;
+  animation: xbg-sheet-up 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-text {
+  padding: 22px 26px 14px;
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-message {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#xbg-overlay .xbg-action-sheet > button {
+  padding: 16px 8px;
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-action {
+  font-weight: 500;
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-cancel {
+  margin: 0 22px;
+  padding: 16px 8px 18px;
+  border-top: 0.5px solid rgba(255, 255, 255, 0.2);
+  font-weight: 500;
+}
+
+#xbg-overlay .xbg-action-sheet > button:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+#xbg-overlay.xbg-light .xbg-action-sheet {
+  background: rgba(255, 255, 255, 0.93);
+}
+
+#xbg-overlay.xbg-light .xbg-action-sheet .xbg-alert-title,
+#xbg-overlay.xbg-light .xbg-action-sheet .xbg-alert-message {
+  color: rgba(60, 60, 67, 0.75);
+}
+
+#xbg-overlay.xbg-light .xbg-action-sheet .xbg-alert-cancel {
+  border-top-color: rgba(60, 60, 67, 0.2);
+}
+
+#xbg-overlay.xbg-light .xbg-action-sheet > button:active {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+@keyframes xbg-sheet-up {
+  from { transform: translateY(110%); }
+}
+
+/* Smaller glass buttons in the photo view */
+#xbg-overlay .xbg-viewer .xbg-round {
+  width: 40px;
+  height: 40px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-group {
+  height: 40px;
+  gap: 2px;
+  padding: 0 6px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-btn {
+  width: 38px;
+  height: 38px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-glass svg {
+  width: 20px;
+  height: 20px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-titles {
+  padding: 4px 18px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-title {
+  font-size: 14px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-sub {
+  font-size: 11px;
+}

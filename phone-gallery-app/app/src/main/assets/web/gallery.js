@@ -311,7 +311,7 @@
   const deleteForever = (keys) =>
     iosAlert(`Delete ${itemWord(keys)} forever?`, "This can’t be undone.", "Delete", () => Android.deleteForever(keys.join(",")));
 
-  // An iPhone-style confirmation: title, message, then Cancel | Delete.
+  // An iPhone-style action sheet at the bottom: the message, then Delete, then Cancel.
   function iosAlert(title, message, action, onConfirm) {
     const close = () => backdrop.remove();
     const extra = Android.canSkipConfirm && !Android.canSkipConfirm()
@@ -319,16 +319,12 @@
       : "";
     const box = el(
       "div",
-      { class: "xbg-alert", role: "alertdialog" },
+      { class: "xbg-alert xbg-action-sheet", role: "alertdialog" },
       el("div", { class: "xbg-alert-text" }, el("div", { class: "xbg-alert-title" }, title), el("div", { class: "xbg-alert-message" }, message), extra),
-      el(
-        "div",
-        { class: "xbg-alert-buttons" },
-        el("button", { class: "xbg-alert-cancel", onclick: close }, "Cancel"),
-        el("button", { class: "xbg-alert-action", onclick: () => { close(); onConfirm(); } }, action)
-      )
+      el("button", { class: "xbg-alert-action", onclick: () => { close(); onConfirm(); } }, action),
+      el("button", { class: "xbg-alert-cancel", onclick: close }, "Cancel")
     );
-    const backdrop = el("div", { class: "xbg-alert-backdrop", onclick: (e) => e.target === backdrop && close() }, box);
+    const backdrop = el("div", { class: "xbg-alert-backdrop xbg-sheet-style", onclick: (e) => e.target === backdrop && close() }, box);
     ui.overlay.append(backdrop);
     ui.alert = backdrop;
   }
@@ -956,7 +952,12 @@
     const light = settings.theme === "light";
     if (ui) ui.overlay.classList.toggle("xbg-light", light);
     document.documentElement.classList.toggle("xbg-light-page", light);
-    if (Android.setLightBars) Android.setLightBars(light);
+    syncBars();
+  }
+
+  // Phone status and navigation bars: the theme's colour, but black while a photo is open.
+  function syncBars() {
+    if (Android.setLightBars) Android.setLightBars(settings.theme === "light" && !viewerOpen());
   }
 
   // Choose which folders appear in All.
@@ -1671,6 +1672,7 @@
     buildViewer();
     ui.feed.querySelectorAll("video").forEach((v) => v.pause());
     ui.viewer.classList.remove("xbg-hidden", "xbg-ui-on"); // bars start hidden
+    syncBars();
     showViewerItem(key);
   }
 
@@ -1679,6 +1681,7 @@
     ui.vStage.querySelectorAll("video").forEach((v) => v.pause());
     ui.vStage.replaceChildren();
     ui.viewer.classList.add("xbg-hidden");
+    syncBars();
     // Leave the feed where you were in the full-screen view.
     const post = feedOpen() && viewerKey && ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(viewerKey)}"]`);
     if (post) ui.feed.scrollTop = post.offsetTop;
