@@ -571,9 +571,18 @@
       tabs,
       controls
     );
-    const progressFill = el("span");
-    const progress = el("div", { class: "xbg-progress xbg-hidden" }, progressFill);
-    bar.append(progress);
+    // Loading progress as a ring like the iPhone's App Store download circle.
+    const svgEl = (tag, attrs) => {
+      const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+      return n;
+    };
+    const ring = svgEl("svg", { viewBox: "0 0 36 36", class: "xbg-ring" });
+    const progressFill = svgEl("circle", { cx: 18, cy: 18, r: 15.5, class: "xbg-ring-fill", pathLength: 100 });
+    ring.append(svgEl("circle", { cx: 18, cy: 18, r: 15.5, class: "xbg-ring-track" }), progressFill, svgEl("rect", { x: 13, y: 13, width: 10, height: 10, rx: 2, class: "xbg-ring-stop" }));
+    const progressPct = el("span", { class: "xbg-ring-pct" });
+    const progress = el("span", { class: "xbg-progress xbg-hidden", role: "progressbar" }, ring, progressPct);
+    status.prepend(progress);
     const toastEl = el("div", { class: "xbg-toast xbg-hidden" });
     const overlay = el("div", { id: "xbg-overlay", class: "xbg-hidden" }, scroller, bar, selectBar, lightbox, toastEl);
     document.body.append(overlay);
@@ -581,7 +590,7 @@
     ui = {
       overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn,
       layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
-      lightbox, feed, toast: toastEl, sheet: null, progress, progressFill,
+      lightbox, feed, toast: toastEl, sheet: null, progress, progressFill, progressPct,
     };
 
     wireGrid();
@@ -837,7 +846,7 @@
     ui.selectBtn.classList.toggle("xbg-hidden", view === "collections" || settings.layout === "years");
     ui.selectBtn.textContent = selectMode ? "Cancel" : "Select";
     ui.titleName.textContent = c ? c.name : "Bookmarks";
-    ui.count.textContent = String(c ? c.keys.length : view === "collections" ? collections.length : totalCount || allItems().length);
+    ui.count.textContent = (c ? c.keys.length : view === "collections" ? collections.length : totalCount || allItems().length).toLocaleString();
     ui.tabs.querySelectorAll(".xbg-tab").forEach((t) => t.classList.toggle("xbg-on", t.dataset.view === view));
 
     let text = "";
@@ -856,14 +865,18 @@
     ui.statusText.textContent = text;
     ui.refreshBtn.classList.toggle("xbg-hidden", !canRefresh);
 
-    // A thin bar under the header fills up as bookmarks arrive, measured
-    // against how many the last full load found.
+    // The ring fills as bookmarks arrive, measured against how many the last
+    // full load found; the first time, it spins with the live count instead.
     const loading = view === "all" && isBookmarks() && (loadState.state === "loading" || loadState.state === "waiting");
     ui.progress.classList.toggle("xbg-hidden", !loading);
     if (loading) {
       const n = loadState.posts || 0;
-      ui.progress.classList.toggle("xbg-progress-unknown", !lastTotal);
-      ui.progressFill.style.width = lastTotal ? Math.min(98, Math.max(3, (n / lastTotal) * 100)) + "%" : "";
+      const known = lastTotal > n;
+      const pct = known ? Math.min(99, Math.max(1, Math.floor((n / lastTotal) * 100))) : 0;
+      ui.progress.classList.toggle("xbg-progress-unknown", !known);
+      ui.progressFill.style.strokeDasharray = known ? `${pct} 100` : "";
+      ui.progressPct.textContent = known ? pct + "%" : "";
+      ui.progress.setAttribute("aria-valuenow", String(pct));
     }
   }
 
@@ -872,7 +885,7 @@
   function loadingText(n) {
     if (!n) return cached.size ? "Updating…" : "Loading all bookmarks…";
     const done = n.toLocaleString();
-    return lastTotal && lastTotal > n ? `Loading ${done} of about ${lastTotal.toLocaleString()} bookmarks…` : `Loading… ${done} bookmarks so far`;
+    return lastTotal && lastTotal > n ? `${done} of ~${lastTotal.toLocaleString()}` : `Loading… ${done} so far`;
   }
 
   // Where you were on the Collections page and inside each collection, so going

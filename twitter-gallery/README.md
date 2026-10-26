@@ -22,10 +22,11 @@ scrolls the bookmarks page for you while it's open.
 
 1. Open <https://x.com/i/bookmarks> and log in.
 2. Tap the floating round bookmark ball, or open the extension from the menu
-   and tap **Open gallery**. The header counts bookmarks as they
-   arrive ("Loading 1,240 of about 5,300 bookmarks…", with a thin progress bar;
-   the "about" total is from your last full load, since X doesn't say how many
-   you have), then "All 5,300 bookmarks loaded".
+   and tap **Open gallery**. A ring like the iPhone's App Store
+   download circle fills up beside the count ("31%  12,400 of ~40,000"; the
+   total is from your last full load, since X doesn't say how many you have;
+   the first time, the ring spins beside a live count), then the header says
+   "All 40,000 bookmarks loaded".
 
 ## Browsing
 

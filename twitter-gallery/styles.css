@@ -2044,32 +2044,62 @@
   stroke: #000;
 }
 
-/* Loading progress: a thin bar along the bottom of the header */
+/* Loading progress: a ring like the iPhone's App Store download circle */
 #xbg-overlay .xbg-progress {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  overflow: hidden;
-  background: var(--xbg-line, rgba(255, 255, 255, 0.12));
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  vertical-align: -7px;
+  color: var(--xbg-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-#xbg-overlay .xbg-progress > span {
-  display: block;
-  height: 100%;
-  background: var(--xbg-accent);
-  transition: width 0.4s ease;
+#xbg-overlay .xbg-progress.xbg-hidden {
+  display: none !important;
 }
 
-#xbg-overlay .xbg-progress.xbg-progress-unknown > span {
-  width: 30%;
-  animation: xbg-progress-slide 1.2s ease-in-out infinite;
+#xbg-overlay .xbg-ring {
+  width: 24px;
+  height: 24px;
+  transform: rotate(-90deg); /* start at 12 o'clock */
 }
 
-@keyframes xbg-progress-slide {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(340%); }
+#xbg-overlay .xbg-ring circle {
+  fill: none;
+  stroke-width: 3;
+}
+
+#xbg-overlay .xbg-ring-track {
+  stroke: var(--xbg-line-strong);
+  opacity: 0.6;
+}
+
+#xbg-overlay .xbg-ring-fill {
+  stroke: var(--xbg-accent);
+  stroke-linecap: round;
+  stroke-dasharray: 0 100;
+  transition: stroke-dasharray 0.4s ease;
+}
+
+#xbg-overlay .xbg-ring-stop {
+  fill: var(--xbg-accent);
+}
+
+/* Total not known yet (first load): a quarter ring spins */
+#xbg-overlay .xbg-progress-unknown .xbg-ring {
+  animation: xbg-ring-spin 0.9s linear infinite;
+}
+
+#xbg-overlay .xbg-progress-unknown .xbg-ring-fill {
+  stroke-dasharray: 25 100;
+  transition: none;
+}
+
+@keyframes xbg-ring-spin {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(270deg); }
 }
 
 /* --- Floating ball (on every X page) ---------------------------------------- */
