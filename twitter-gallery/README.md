@@ -4,9 +4,11 @@ Shows the photos and videos from your X bookmarks in a 3-column, Instagram-style
 grid. Tap any item for a full-screen viewer (swipe left/right to move, swipe
 down to close) with an **Open post** button.
 
-No X API is needed. While you're logged in at <https://x.com/i/bookmarks>, the
-extension reads the bookmark data the page already loads (this gives playable
-video links), and also collects media from the posts visible on screen.
+No X API is needed. When you open <https://x.com/i/bookmarks> while logged in,
+the extension notes how the page asks X for its first batch of bookmarks, then
+asks for every following batch the same way in the background, so all your
+bookmarks load without scrolling. If X refuses those requests, the gallery
+scrolls the bookmarks page for you while it's open.
 
 ## Install on Android
 
@@ -18,9 +20,9 @@ video links), and also collects media from the posts visible on screen.
 ## Use
 
 1. Open <https://x.com/i/bookmarks> and log in.
-2. Tap the blue **▦** button (bottom right), or open the extension from the menu
-   and tap **Open gallery**.
-3. Tap **Load more** to keep loading older bookmarks automatically.
+2. Tap the blue **▦** button (bottom left), or open the extension from the menu
+   and tap **Open gallery**. The header shows "Loading all bookmarks…" until
+   everything is in, then "All loaded".
 
 ## Files
 

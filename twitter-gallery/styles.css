@@ -67,14 +67,23 @@
   font-weight: 400;
 }
 
+#xbg-overlay .xbg-status {
+  color: var(--xbg-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-status:empty {
+  display: none;
+}
+
 #xbg-overlay .xbg-filters {
   display: flex;
   gap: 6px;
   width: 100%;
 }
 
-#xbg-overlay .xbg-chip,
-#xbg-overlay .xbg-load {
+#xbg-overlay .xbg-chip {
   border: 1px solid #536471;
   border-radius: 999px;
   background: transparent;
@@ -83,8 +92,7 @@
   font-weight: 600;
 }
 
-#xbg-overlay .xbg-chip.xbg-on,
-#xbg-overlay .xbg-load.xbg-on {
+#xbg-overlay .xbg-chip.xbg-on {
   background: var(--xbg-text);
   border-color: var(--xbg-text);
   color: #000;
@@ -114,6 +122,9 @@
   border: 0;
   overflow: hidden;
   background: var(--xbg-surface);
+  /* Let the browser skip work for tiles that are far off screen. */
+  content-visibility: auto;
+  contain-intrinsic-size: 130px 130px;
 }
 
 #xbg-overlay .xbg-tile img,
@@ -241,10 +252,10 @@
   text-decoration: none;
 }
 
-/* Floating button on the bookmarks page */
+/* Floating button on the bookmarks page (left side, away from X's post button) */
 #xbg-fab {
   position: fixed;
-  right: 16px;
+  left: 16px;
   bottom: 84px;
   z-index: 2147483000;
   width: 52px;
