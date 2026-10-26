@@ -20,6 +20,8 @@
   let view = "all"; // "all" | "collections" | "collection"
   let openId = null; // collection shown when view === "collection"
   let filter = "all";
+  let searchText = ""; // words to look for in the post text or the poster's @name
+  let searchTerms = [];
   let periodYear = null; // Months view: only this year ("2026"), or all years when null
   let periodMonth = null; // Months view: only this month ("2026-01"), or the whole year when null
   let periods = { years: [], months: [] }; // what the period bar offers
@@ -137,13 +139,24 @@
     window.postMessage({ __xbgPlan: { mode: quick ? "quick" : "full", known } }, location.origin);
   }
 
+  // The plan was sent when the page loaded, and moving to the bookmarks
+  // doesn't load the page again: tell inject.js directly (the flag covers a
+  // real page load). On the bookmarks already, it starts over in place.
   function reloadEverything() {
     try {
       sessionStorage.setItem("xbg_full", "1");
     } catch (e) {
       /* ignore */
     }
-    goToBookmarks();
+    const here = isMainBookmarks();
+    window.postMessage({ __xbgAsk: "reload", now: here }, location.origin);
+    if (!here) return goToBookmarks();
+    try {
+      sessionStorage.removeItem("xbg_full");
+    } catch (e) {
+      /* ignore */
+    }
+    toast("Reloading all your bookmarks…");
   }
 
   async function loadStored() {
@@ -168,7 +181,7 @@
           // Remember what each stored piece holds, so unchanged pieces aren't rewritten.
           keys.forEach((k, i) => {
             const part = parts[k];
-            if (which && Array.isArray(part) && part.length) sigs[which][i] = part.length + ":" + part[0].key + ":" + part[part.length - 1].key;
+            if (which && Array.isArray(part) && part.length) sigs[which][i] = chunkSig(part);
           });
           return keys.flatMap((k) => (Array.isArray(parts[k]) ? parts[k] : []));
         };
@@ -223,6 +236,19 @@
   const counts = { main: 0, partial: 0 };
   let lastPartialSave = 0;
 
+  // A fingerprint of every key in a piece (not just its ends), so a change
+  // anywhere inside it gets written.
+  function chunkSig(part) {
+    let h = 0x811c9dc5;
+    for (const it of part) {
+      const k = it && it.key ? it.key : "";
+      for (let i = 0; i < k.length; i++) h = Math.imul(h ^ k.charCodeAt(i), 16777619);
+      h = Math.imul(h ^ 10, 16777619);
+    }
+    return part.length + ":" + (h >>> 0).toString(36);
+  }
+
+  // Resolves true once everything is stored.
   async function writeChunks(which, list, meta) {
     const prefix = which === "main" ? K.cache + "_" : PARTIAL + "_";
     const metaKey = which === "main" ? K.cache : PARTIAL;
@@ -230,18 +256,21 @@
     const out = {};
     for (let i = 0; i < chunks; i++) {
       const part = list.slice(i * CHUNK, (i + 1) * CHUNK);
-      const sig = part.length + ":" + part[0].key + ":" + part[part.length - 1].key;
+      const sig = chunkSig(part);
       if (sigs[which][i] === sig) continue;
-      sigs[which][i] = sig;
       out[prefix + i] = part;
     }
     out[metaKey] = { ...meta, at: Date.now(), chunks };
     try {
       await store.set(out);
+      for (const k in out) if (k !== metaKey) sigs[which][+k.slice(prefix.length)] = chunkSig(out[k]);
       if (counts[which] > chunks) await store.remove(Array.from({ length: counts[which] - chunks }, (_, i) => prefix + (chunks + i)));
+      sigs[which].length = chunks;
       counts[which] = chunks;
+      return true;
     } catch (e) {
       /* storage full or unavailable: the gallery still works for this visit */
+      return false;
     }
   }
 
@@ -281,7 +310,8 @@
       if (kept) saveCollections();
     }
     partialInfo = null;
-    writeChunks("main", list, { posts: lastTotal }).then(clearPartial);
+    // Keep the unfinished copy if the finished one couldn't be stored.
+    writeChunks("main", list, { posts: lastTotal }).then((ok) => ok && clearPartial());
     scheduleRefresh();
   }
 
@@ -292,7 +322,7 @@
     lastPartialSave = loadState.posts;
     const posts = loadState.posts;
     // Once it's stored, tell inject.js a later visit may carry on from here.
-    writeChunks("partial", loadState.resumed ? allItems() : [...fresh.values()], { posts }).then(() => window.postMessage({ __xbgAsk: "saved", posts }, location.origin));
+    writeChunks("partial", loadState.resumed ? allItems() : [...fresh.values()], { posts }).then((ok) => ok && window.postMessage({ __xbgAsk: "saved", posts }, location.origin));
   }
 
   // Collections keep their own copy only of posts that aren't in the saved
@@ -781,7 +811,15 @@
     const yearBar = el("div", { class: "xbg-period-row" });
     const monthBar = el("div", { class: "xbg-period-row" });
     const periodBar = el("div", { class: "xbg-periods xbg-hidden" }, yearBar, monthBar);
-    const controls = el("div", { class: "xbg-controls" }, el("div", { class: "xbg-row" }, filters, sortBtn), layouts, periodBar);
+    const search = el("input", { class: "xbg-search-input", type: "search", placeholder: "Search posts or @name", "aria-label": "Search posts", autocomplete: "off", spellcheck: "false", enterkeyhint: "search" });
+    const searchClear = el("button", { class: "xbg-search-clear xbg-hidden", "aria-label": "Clear search", onclick: () => { setSearch(""); search.focus(); } }, "✕");
+    search.addEventListener("input", () => setSearch(search.value, true));
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") search.blur(); // tuck the phone keyboard away
+    });
+    const searchBox = el("label", { class: "xbg-search" }, el("span", { class: "xbg-search-icon", "aria-hidden": "true" }), search, searchClear);
+    searchBox.firstChild.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15zM16 16l5 5"/></svg>';
+    const controls = el("div", { class: "xbg-controls" }, searchBox, el("div", { class: "xbg-row" }, filters, sortBtn), layouts, periodBar);
 
     const grid = el("div", { class: "xbg-grid" });
     const years = el("div", { class: "xbg-cards xbg-hidden" });
@@ -833,7 +871,7 @@
     document.body.append(overlay);
 
     ui = {
-      overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn,
+      overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn, search, searchClear,
       layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
       lightbox, feed, toast: toastEl, sheet: null, tabInk, progress, progressFill, progressPct,
     };
@@ -853,9 +891,28 @@
   }
 
   function onKey(e) {
-    if (!galleryOpen() || (e.key !== "Escape" && !e.key.startsWith("Arrow"))) return;
-    if (ui.sheet) {
+    if (!galleryOpen()) return;
+    const typing = e.target instanceof HTMLElement && (e.target.matches("input, textarea") || e.target.isContentEditable);
+    if (e.key === "/" && !typing && !ui.sheet && !feedOpen() && view !== "collections") {
+      e.preventDefault();
+      return openSearch();
+    }
+    if (e.key !== "Escape" && !e.key.startsWith("Arrow")) return;
+    if (typing && e.key !== "Escape") return;
+    if (ui.alert && ui.alert.isConnected) {
+      if (e.key === "Escape") ui.alert.remove();
+    } else if (ui.sheet) {
       if (e.key === "Escape") closeSheet();
+    } else if (reels) {
+      // Full screen: up/down (or left/right) moves between posts, Esc goes back.
+      if (e.key === "Escape") return closeReels(true);
+      const step = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
+      if (!step || reels.anim) return;
+      e.preventDefault();
+      if (reels.cur + step >= 0 && reels.cur + step < current.length) settleReels(step, 0);
+    } else if (typing && e.key === "Escape" && e.target === ui.search) {
+      e.target.blur();
+      if (searchText) setSearch("");
     } else if (!ui.lightbox.classList.contains("xbg-hidden")) {
       if (e.key === "Escape") closeLightbox();
     } else if (e.key === "Escape") {
@@ -1248,8 +1305,6 @@
     };
     lightbox.addEventListener("touchend", endSwipe);
     lightbox.addEventListener("touchcancel", endSwipe);
-
-    window.addEventListener("popstate", onBack);
   }
 
   // The phone's own back gesture/button undoes the last thing opened (the post
@@ -1276,8 +1331,13 @@
     history.back();
   }
 
+  // Listened for from the start (not only once the gallery is built), so our
+  // own nudge to X's router is always counted off and never eats a real back.
+  window.addEventListener("popstate", onBack);
+
   function onBack() {
     if (quietPop) return void quietPop--; // our own nudge to X's page router
+    if (!ui) return;
     if (backSteps.ignore) {
       // One of our own quiet steps back.
       if (--backSteps.ignore === 0) {
@@ -1328,8 +1388,11 @@
     ui.selectBtn.classList.toggle("xbg-hidden", view === "collections" || settings.layout === "years");
     ui.selectBtn.textContent = selectMode ? "Cancel" : "Select";
     ui.titleName.textContent = c ? c.name : "Bookmarks";
-    ui.count.textContent = (c ? c.keys.length : view === "collections" ? collections.length : totalCount || allItems().length).toLocaleString();
-    ui.count.title = view === "collections" ? "collections" : "pictures and videos (a post can have up to 4)";
+    const searching = searchTerms.length && view !== "collections";
+    ui.count.textContent = searching
+      ? `${current.length.toLocaleString()} found`
+      : (c ? c.keys.length : view === "collections" ? collections.length : totalCount || allItems().length).toLocaleString();
+    ui.count.title = view === "collections" ? "collections" : searching ? "pictures and videos matching your search" : "pictures and videos (a post can have up to 4)";
     ui.tabs.querySelectorAll(".xbg-tab").forEach((t) => t.classList.toggle("xbg-on", t.dataset.view === view));
     if (ui.tabInk && view !== "collection") ui.tabInk.style.transform = `translateX(${view === "all" ? 0 : 100}%)`;
 
@@ -1419,6 +1482,40 @@
     rebuild();
   }
 
+  // Typing redraws a moment after you pause, so big libraries stay responsive.
+  let searchTimer = null;
+  function setSearch(value, typed = false) {
+    searchText = String(value || "").slice(0, 100);
+    if (ui) {
+      if (ui.search.value !== searchText) ui.search.value = searchText;
+      ui.searchClear.classList.toggle("xbg-hidden", !searchText);
+    }
+    clearTimeout(searchTimer);
+    const apply = () => {
+      const terms = searchText.toLowerCase().split(/\s+/).filter((t) => t && t !== "@");
+      if (terms.join(" ") === searchTerms.join(" ")) return;
+      searchTerms = terms;
+      if (galleryOpen() && view !== "collections") rebuild();
+      saveSpot();
+    };
+    if (typed) searchTimer = setTimeout(apply, 220);
+    else apply();
+  }
+
+  // Bring the header and its filters back if they were tucked away, then type.
+  function openSearch() {
+    if (!ui || view === "collections") return;
+    if (settings.headerHidden || settings.filtersHidden) {
+      settings.filtersHidden = false;
+      ui.overlay.classList.remove("xbg-filters-off");
+      ui.hbtn.classList.remove("xbg-half");
+      if (settings.headerHidden) setHeaderHidden(false);
+      else saveSettings();
+    }
+    ui.bar.classList.remove("xbg-bar-hidden");
+    ui.search.focus();
+  }
+
   function setLayout(value) {
     settings.layout = value;
     saveSettings();
@@ -1492,7 +1589,18 @@
   // --- Building what the grid shows ----------------------------------------
 
   function matches(item) {
-    return filter === "all" || (filter === "photo" ? item.type === "photo" : item.type !== "photo");
+    if (filter !== "all" && (filter === "photo" ? item.type !== "photo" : item.type === "photo")) return false;
+    return !searchTerms.length || matchesSearch(item);
+  }
+
+  // Every word must appear; a word starting with @ only looks at who posted it.
+  function matchesSearch(item) {
+    const user = (((item.tweet || "").match(/^https:\/\/x\.com\/([^/]+)\/status\//) || [])[1] || "").toLowerCase();
+    const text = (item.text || "").toLowerCase();
+    for (const t of searchTerms) {
+      if (t[0] === "@" ? !user.includes(t.slice(1)) : !text.includes(t) && !user.includes(t)) return false;
+    }
+    return true;
   }
 
   function dateOf(item) {
@@ -1634,16 +1742,18 @@
 
   // Grid tiles are plain thumbnails (videos too) so scrolling stays smooth;
   // videos play in the full-screen viewer.
-  function thumbFallback() {
-    if (this.dataset.fb || !/name=360x360/.test(this.src)) return;
-    this.dataset.fb = "1";
-    this.src = this.src.replace("name=360x360", "name=small");
+  // Returns true when it asked for another size (so the image isn't broken yet).
+  function thumbFallback(img) {
+    if (img.dataset.fb || !/name=360x360/.test(img.src)) return false;
+    img.dataset.fb = "1";
+    img.src = img.src.replace("name=360x360", "name=small");
+    return true;
   }
 
   function makeTile(item) {
     const tile = el("button", { class: "xbg-tile" + (selected.has(item.key) ? " xbg-selected" : ""), "data-key": item.key, "aria-label": item.type === "photo" ? "Photo" : "Video" });
     // The picture is asked for once the tile is on screen and the scrolling has slowed (see loadThumbs).
-    tile.append(el("img", { "data-src": item.thumb, decoding: "async", alt: "", referrerpolicy: "no-referrer", onerror: thumbFallback }));
+    tile.append(el("img", { "data-src": item.thumb, decoding: "async", alt: "", referrerpolicy: "no-referrer" }));
     if (item.type !== "photo") tile.append(el("span", { class: "xbg-badge xbg-badge-time" }, item.type === "gif" ? "GIF" : "▶"));
     return tile;
   }
@@ -1860,7 +1970,9 @@
     const c = view === "collection" ? getCollection(openId) : null;
     if (view === "collections") return;
     if (current.length) ui.empty.textContent = "";
-    else if (c) ui.empty.textContent = c.keys.length ? "Nothing here for this filter." : "No posts yet. Go to All posts, long-press a post, pick some more, then tap “Add to collection”.";
+    else if (searchTerms.length && (c ? c.keys.length : totalCount)) {
+      ui.empty.replaceChildren(`Nothing matches “${searchText.trim()}”. `, el("button", { class: "xbg-link", onclick: () => setSearch("") }, "Clear search"));
+    } else if (c) ui.empty.textContent = c.keys.length ? "Nothing here for this filter." : "No posts yet. Go to All posts, long-press a post, pick some more, then tap “Add to collection”.";
     else if (!isBookmarks() && !totalCount) {
       ui.empty.replaceChildren("Open your bookmarks to fill the gallery. ", el("button", { class: "xbg-link", onclick: () => goToBookmarks() }, "Go to bookmarks"));
     } else if (!totalCount) ui.empty.textContent = "Loading your bookmarks…";
@@ -1975,7 +2087,7 @@
     clearTimeout(spotTimer);
     try {
       if (!ui || !galleryOpen()) return sessionStorage.removeItem(SPOT_KEY);
-      sessionStorage.setItem(SPOT_KEY, JSON.stringify({ view, openId, filter, top: Math.round(ui.scroller.scrollTop), post: feedOpen() ? centreFeedKey() : null, at: Date.now() }));
+      sessionStorage.setItem(SPOT_KEY, JSON.stringify({ view, openId, filter, search: searchText, top: Math.round(ui.scroller.scrollTop), post: feedOpen() ? centreFeedKey() : null, at: Date.now() }));
     } catch (e) {
       /* private mode etc. */
     }
@@ -1998,6 +2110,7 @@
     openGallery();
     if (!ui) return false;
     if (spot.filter && spot.filter !== filter) setFilter(spot.filter);
+    if (typeof spot.search === "string" && spot.search !== searchText) setSearch(spot.search);
     if (spot.view && spot.view !== view && (spot.view !== "collection" || getCollection(spot.openId))) setView(spot.view, spot.openId);
     ui.jumped = true;
     ui.scroller.style.paddingTop = (settings.headerHidden ? 0 : ui.bar.offsetHeight) + "px";
@@ -2764,12 +2877,14 @@
     true
   );
 
-  // A picture X won't serve shows a dark tile with a cracked-Polaroid icon.
+  // A picture X won't serve shows a dark tile with a cracked-Polaroid icon
+  // (after trying the other thumbnail size once).
   document.addEventListener(
     "error",
     (e) => {
       const img = e.target;
       if (!(img instanceof HTMLImageElement) || !img.closest("#xbg-overlay") || img.classList.contains("xbg-gave-up")) return;
+      if (thumbFallback(img)) return;
       img.classList.add("xbg-gave-up");
       img.replaceWith(el("div", { class: "xbg-broken" }));
     },

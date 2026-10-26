@@ -38,8 +38,10 @@
   }
   const origFetch = window.fetch;
 
-  let template = null; // the page's own first bookmarks request: { key, url, method, headers, body }
+  let template = null; // the page's own first bookmarks request: { key, url, method, headers, body, first }
   let pagingKey = null;
+  let pagingQuick = false; // the load running now is only a quick top-up
+  let restartFull = false; // asked to reload everything while a top-up was running
   const doneKeys = new Set(); // bookmark lists already fully loaded in this visit
   let lastStatus = null;
 
@@ -78,7 +80,24 @@
       const cp = checkpoints.filter((c) => c.posts <= e.data.posts).pop();
       if (cp) writeResume(cp);
     }
+    // "Reload all bookmarks": from now on load everything, and if we're on the
+    // bookmarks already, start again from the first page without a page load.
+    if (e.data.__xbgAsk === "reload") {
+      plan = { mode: "full", known: new Set() };
+      planWaiters.forEach((r) => r(plan));
+      planWaiters = [];
+      doneKeys.clear();
+      if (!e.data.now || !template || !template.first) return;
+      if (pagingKey === template.key) restartFull = pagingQuick;
+      else startFromFirst(template);
+    }
   });
+
+  function startFromFirst(tpl) {
+    const f = tpl.first;
+    if (f.cursor && f.posts) loadAll(tpl, f.cursor, f.posts, readResume(tpl.key), f.items);
+    else status({ state: "done", pages: 1, posts: f.posts });
+  }
 
   // --- Reading media out of X's responses ---------------------------------
 
@@ -253,6 +272,7 @@
     pagingKey = tpl.key;
     const p = await getPlan();
     const quick = p.mode === "quick" && !resumeFrom;
+    pagingQuick = quick;
     if (quick) {
       // Top up only: stop once two pages in a row bring nothing new.
       // Only posts with pictures or videos matter to the gallery: compare those.
@@ -261,11 +281,17 @@
       let quiet = fresh ? 0 : 1;
       let posts = firstPosts || 0;
       let pages = 1;
+      let big = true;
       status({ state: "checking", pages, posts, fresh });
       try {
-        while (cursor && quiet < 2 && template === tpl && pages < 400) {
-          const req = withCursor(tpl, cursor, BIG_PAGE);
+        while (cursor && quiet < 2 && template === tpl && pages < 400 && !restartFull) {
+          const req = withCursor(tpl, cursor, big ? BIG_PAGE : 0);
           const res = await origFetch(req.url, { method: tpl.method, headers: tpl.headers, body: tpl.method === "GET" ? undefined : req.body, credentials: "include" });
+          if (!res.ok && big && res.status >= 400 && res.status < 500 && res.status !== 429) {
+            // X didn't like the bigger page: ask again at the page's own size.
+            big = false;
+            continue;
+          }
           if (!res.ok) break;
           const page = publish(await res.json());
           pages++;
@@ -281,11 +307,16 @@
       } catch (e) {
         /* the saved copy still stands */
       }
+      if (pagingKey === tpl.key) pagingKey = null;
+      if (restartFull) {
+        restartFull = false;
+        if (template === tpl) startFromFirst(tpl);
+        return;
+      }
       if (template === tpl) {
         doneKeys.add(tpl.key);
         status({ state: "done", quick: true, pages, posts, fresh });
       }
-      if (pagingKey === tpl.key) pagingKey = null;
       return;
     }
     const used = new Set();
@@ -355,9 +386,8 @@
     const key = requestKey(req.url);
     const isFirstPage = !/"cursor":/.test(new URL(req.url, location.origin).searchParams.get("variables") || req.body || "");
     if (!isFirstPage || pagingKey === key || doneKeys.has(key)) return;
-    template = { ...req, key };
-    if (page.cursor && page.posts) loadAll(template, page.cursor, page.posts, readResume(key), page.items);
-    else status({ state: "done", pages: 1, posts: page.posts });
+    template = { ...req, key, first: { cursor: page.cursor, posts: page.posts, items: page.items } };
+    startFromFirst(template);
   }
 
   // --- Hooks on the page's network calls ----------------------------------

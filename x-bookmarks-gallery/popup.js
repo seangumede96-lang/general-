@@ -17,7 +17,9 @@ async function findXTab() {
 
 async function focus(tab) {
   await ext.tabs.update(tab.id, { active: true });
-  if (tab.windowId !== undefined) ext.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  // Firefox for Android has no windows API: calling it would throw and make a
+  // message that did arrive look like it failed.
+  if (tab.windowId !== undefined && ext.windows) ext.windows.update(tab.windowId, { focused: true }).catch(() => {});
 }
 
 document.getElementById("open").addEventListener("click", async () => {
@@ -29,11 +31,12 @@ document.getElementById("open").addEventListener("click", async () => {
   }
   try {
     await ext.tabs.sendMessage(tab.id, { type: "xbg-open" });
-    await focus(tab);
-    window.close();
   } catch (e) {
     statusEl.textContent = "Reload your X tab, then try again.";
+    return;
   }
+  await focus(tab).catch(() => {});
+  window.close();
 });
 
 document.getElementById("goto").addEventListener("click", async () => {
@@ -43,10 +46,10 @@ document.getElementById("goto").addEventListener("click", async () => {
     // doesn't offer to open the X app); load the address only if that fails.
     try {
       await ext.tabs.sendMessage(tab.id, { type: "xbg-goto" });
-      await focus(tab);
     } catch (e) {
       await ext.tabs.update(tab.id, { url: BOOKMARKS, active: true });
     }
+    await focus(tab).catch(() => {});
   } else {
     await ext.tabs.create({ url: BOOKMARKS });
   }
@@ -55,10 +58,11 @@ document.getElementById("goto").addEventListener("click", async () => {
 
 // Floating button setting (shared with the gallery through extension storage).
 const fabBox = document.getElementById("fab");
+fabBox.checked = true;
 ext.storage.local.get("xbg_settings").then((data) => {
   fabBox.checked = !data.xbg_settings || data.xbg_settings.fab !== false;
   fabBox.dataset.ready = "1";
-});
+}, () => {});
 fabBox.addEventListener("change", async () => {
   const data = await ext.storage.local.get("xbg_settings");
   await ext.storage.local.set({ xbg_settings: { ...(data.xbg_settings || {}), fab: fabBox.checked } });
