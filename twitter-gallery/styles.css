@@ -291,7 +291,8 @@
 
 #xbg-overlay .xbg-tabs {
   display: flex;
-  margin: 0 -12px 2px;
+  /* Leave clear space between the tab underline and the buttons below it. */
+  margin: 0 -12px 6px;
   border-bottom: 1px solid #2f3336;
   width: calc(100% + 24px);
 }
@@ -635,6 +636,7 @@
 /* --- Sorting, months and years --------------------------------------------- */
 
 #xbg-overlay .xbg-controls {
+  padding-top: 4px;
   display: flex;
   flex-direction: column;
   gap: 8px;
