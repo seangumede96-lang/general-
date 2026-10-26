@@ -41,7 +41,8 @@ scrolls the bookmarks page for you while it's open.
   one to see only that month.
 - Tapping a post opens a scrolling feed starting at that post; scroll up or
   down freely and stop anywhere. Videos play (muted) while on screen.
-- Leave the feed with your phone's back gesture/button, by swiping the feed
+- Your phone's back gesture/button closes the feed (or a menu) and cancels
+  selecting. You can also leave the feed by swiping it
   to the right, or with the ‹ button.
 - **Long-press** a post to start selecting; tap more to add them.
 

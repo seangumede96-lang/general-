@@ -720,20 +720,57 @@
     lightbox.addEventListener("touchend", endSwipe);
     lightbox.addEventListener("touchcancel", endSwipe);
 
-    // The phone's own back gesture/button closes the feed instead of leaving
-    // the page: opening the feed adds a step to the browser history.
-    window.addEventListener("popstate", () => {
-      if (feedHistory.ignoreNext) {
-        // This was our own step back (after closing the feed another way).
-        feedHistory.ignoreNext = false;
-        if (feedHistory.pushLater && feedOpen()) pushFeedStep();
-        feedHistory.pushLater = false;
-        return;
+    window.addEventListener("popstate", onBack);
+  }
+
+  // The phone's own back gesture/button undoes the last thing opened (the post
+  // feed, or selecting posts) instead of leaving the page. Each of those adds
+  // one step to the browser history while it's open; closing it another way
+  // quietly removes that step again.
+  const backSteps = { pushed: 0, ignore: 0, pending: 0 };
+
+  function addBackStep() {
+    if (backSteps.ignore) return void backSteps.pending++; // wait for our own step back to finish
+    try {
+      history.pushState(history.state, "", location.href);
+      backSteps.pushed++;
+    } catch (e) {
+      /* the back gesture just won't be caught */
+    }
+  }
+
+  function removeBackStep() {
+    if (backSteps.pending) return void backSteps.pending--;
+    if (!backSteps.pushed) return;
+    backSteps.pushed--;
+    backSteps.ignore++;
+    history.back();
+  }
+
+  function onBack() {
+    if (backSteps.ignore) {
+      // One of our own quiet steps back.
+      if (--backSteps.ignore === 0) {
+        const n = backSteps.pending;
+        backSteps.pending = 0;
+        for (let i = 0; i < n; i++) addBackStep();
       }
-      if (!feedHistory.pushed) return;
-      feedHistory.pushed = false;
-      if (feedOpen()) closeLightbox(true);
-    });
+      return;
+    }
+    if (!backSteps.pushed) return;
+    backSteps.pushed--;
+    if (ui.sheet) {
+      // A menu was open: back just closes the menu. While selecting, keep the
+      // selection (the menu's "done" step would otherwise end it).
+      if (selectMode && !feedOpen()) {
+        closeSheet(true);
+        rebuild(false);
+      } else {
+        closeSheet();
+      }
+      if (feedOpen() || selectMode) addBackStep();
+    } else if (feedOpen()) closeLightbox(true);
+    else if (selectMode) setSelectMode(false, true);
   }
 
   function syncControls() {
@@ -800,7 +837,10 @@
     rebuild();
   }
 
-  function setSelectMode(on) {
+  // `fromHistory` is set when the phone's back gesture already took us back.
+  function setSelectMode(on, fromHistory = false) {
+    if (on && !selectMode) addBackStep();
+    else if (!on && selectMode && !fromHistory) removeBackStep();
     selectMode = on;
     selected.clear();
     ui.grid.querySelectorAll(".xbg-selected").forEach((t) => t.classList.remove("xbg-selected"));
@@ -1309,6 +1349,7 @@
   function openLightbox(key) {
     const index = current.findIndex((it) => it.key === key);
     if (index < 0) return;
+    const wasOpen = feedOpen();
     clearFeed();
     feedStart = Math.max(0, index - 3);
     feedEnd = Math.min(current.length, index + FEED_CHUNK);
@@ -1319,21 +1360,7 @@
     const target = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(key)}"]`);
     ui.feed.scrollTop = target ? target.offsetTop : 0;
     extendFeed();
-    if (feedHistory.ignoreNext) feedHistory.pushLater = true; // wait for our earlier step back to finish
-    else pushFeedStep();
-  }
-
-  // Our one extra history step while the feed is open (see wireLightbox).
-  const feedHistory = { pushed: false, ignoreNext: false, pushLater: false };
-
-  function pushFeedStep() {
-    if (feedHistory.pushed) return;
-    try {
-      history.pushState(history.state, "", location.href);
-      feedHistory.pushed = true;
-    } catch (e) {
-      /* the back gesture just won't close the feed */
-    }
+    if (!wasOpen) addBackStep();
   }
 
   function clearFeed() {
@@ -1351,13 +1378,7 @@
     ui.lightbox.classList.add("xbg-hidden");
     ui.lightbox.style.transition = "none";
     ui.lightbox.style.transform = "";
-    feedHistory.pushLater = false;
-    if (!fromHistory && feedHistory.pushed) {
-      // Remove the history step we added, without leaving the page.
-      feedHistory.pushed = false;
-      feedHistory.ignoreNext = true;
-      history.back();
-    }
+    if (!fromHistory) removeBackStep();
   }
 
   // After the "Save to…" sheet closes: update the buttons, and if the post was
