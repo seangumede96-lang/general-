@@ -90,6 +90,12 @@
 
   function clean(item) {
     if (!item || typeof item.key !== "string" || !["photo", "video"].includes(item.type)) return null;
+    if (!item.thumb) {
+      // The app sends a compact list: links follow from the key.
+      item.thumb = "/thumb/" + item.key;
+      item.full = "/media/" + item.key;
+      if (item.type === "video") item.video = item.full;
+    }
     const out = { key: item.key, type: item.type };
     for (const f of ["thumb", "full", "video"]) {
       out[f] = typeof item[f] === "string" && SAFE_MEDIA.test(item[f]) ? item[f] : null;
@@ -267,9 +273,12 @@
       const item = clean(raw);
       if (item) trash.set(item.key, item);
     }
+    const first = !gotData;
     gotData = true;
     if (ui) {
-      rebuild(false);
+      // First load draws the page; later loads only touch what changed.
+      if (first || view === "collections") rebuild(false);
+      else refresh();
       syncFeed();
       syncViewer();
     }
@@ -1378,15 +1387,17 @@
     return svg;
   }
   const BOOKMARK_PATH = "M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-4.6L5 21V4.5A1.5 1.5 0 0 1 6.5 3z";
-  const SHARE_PATH = "M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6";
+  const SHARE_PATH = "M12 3v11M8 7l4-4 4 4M8.5 10H6.5a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-8A1.5 1.5 0 0 0 17.5 10h-2";
   const STAR_PATH = "M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z";
-  const TRASH_PATH = "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6";
+  const TRASH_PATH = "M4 6.5h16M9.5 6.5V4.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6 6.5l.9 13a1.5 1.5 0 0 0 1.5 1.4h7.2a1.5 1.5 0 0 0 1.5-1.4l.9-13M10 10.5v7M14 10.5v7";
   const RESTORE_PATH = "M4 12a8 8 0 1 0 3-6.2M4 4v5h5";
   const MINUS_PATH = "M5 12h14";
   const VIDEO_PATH = "M3 7a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM16 10l5-3v10l-5-3";
   const GIF_PATH = "M4 6h16v12H4zM9 10H7v4h2v-1.5M12 10v4M15 14v-4h2M15 12h1.5";
-  const EDIT_PATH = "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4";
   const MORE_PATH = "M12 5.5v.01M12 12v.01M12 18.5v.01";
+  const MORE_H_PATH = "M5.5 12h.01M12 12h.01M18.5 12h.01";
+  const CHEVRON_PATH = "M15 5l-7 7 7 7";
+  const INFO_PATH = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.01";
   const BACK_PATH = "M19 12H5M11 6l-6 6 6 6";
 
   // The feed is just the pictures and videos, edge to edge, with nothing laid
@@ -1513,11 +1524,13 @@
     const stage = el("div", { class: "xbg-v-stage" });
     const title = el("div", { class: "xbg-v-title" });
     const sub = el("div", { class: "xbg-v-sub" });
+    // Like the iPhone's Photos app: round back and ⋯ buttons, the date in a pill.
     const top = el(
       "div",
       { class: "xbg-v-top" },
-      el("button", { class: "xbg-v-icon", "aria-label": "Back", onclick: () => closeViewer() }, icon(BACK_PATH, false)),
-      el("div", { class: "xbg-v-titles" }, title, sub)
+      el("button", { class: "xbg-glass xbg-round", "aria-label": "Back", onclick: () => closeViewer() }, icon(CHEVRON_PATH, false)),
+      el("div", { class: "xbg-glass xbg-pill xbg-v-titles" }, title, sub),
+      el("button", { class: "xbg-glass xbg-round", "aria-label": "More", onclick: () => viewerKey && viewerMenu(viewerKey) }, icon(MORE_H_PATH, false))
     );
     const bottom = el("div", { class: "xbg-v-bottom" });
     const viewer = el("div", { class: "xbg-viewer xbg-hidden" }, stage, top, bottom);
@@ -1560,19 +1573,41 @@
     if (!viewerOpen() || !viewerKey) return;
     const key = viewerKey;
     const btn = (label, path, onclick, filled = false, cls = "") =>
-      el("button", { class: "xbg-v-action " + cls, "aria-label": label, onclick }, icon(path, filled), el("small", {}, label));
+      el("button", { class: "xbg-v-btn " + cls, "aria-label": label, onclick }, icon(path, filled));
     if (view === "trash") {
-      ui.vBottom.replaceChildren(btn("Restore", RESTORE_PATH, () => restoreKeys([key])), btn("Delete", TRASH_PATH, () => deleteForever([key]), false, "xbg-danger-text"));
+      ui.vBottom.replaceChildren(
+        el("div", { class: "xbg-glass xbg-round" }, btn("Restore", RESTORE_PATH, () => restoreKeys([key]))),
+        el("div", { class: "xbg-glass xbg-round" }, btn("Delete forever", TRASH_PATH, () => deleteForever([key]), false, "xbg-danger-text"))
+      );
       return;
     }
     const starredNow = isStarred(key);
+    // Share on the left, Star · Info · Album in the middle, Delete on the right.
     ui.vBottom.replaceChildren(
-      btn("Share", SHARE_PATH, () => shareKeys([key])),
-      btn(starredNow ? "Starred" : "Star", STAR_PATH, () => toggleStar([key]), starredNow, starredNow ? "xbg-on" : ""),
-      btn("Album", BOOKMARK_PATH, () => openPicker([key], afterSave)),
-      btn("Edit", EDIT_PATH, () => Android.edit(key)),
-      btn("Delete", TRASH_PATH, () => deleteKeys([key])),
-      btn("More", MORE_PATH, () => viewerMore(key))
+      el("div", { class: "xbg-glass xbg-round" }, btn("Share", SHARE_PATH, () => shareKeys([key]))),
+      el(
+        "div",
+        { class: "xbg-glass xbg-pill xbg-v-group" },
+        btn(starredNow ? "Unstar" : "Star", STAR_PATH, () => toggleStar([key]), starredNow, starredNow ? "xbg-on" : ""),
+        btn("Info", INFO_PATH, () => viewerMore(key)),
+        btn("Add to album", BOOKMARK_PATH, () => openPicker([key], afterSave))
+      ),
+      el("div", { class: "xbg-glass xbg-round" }, btn("Delete", TRASH_PATH, () => deleteKeys([key])))
+    );
+  }
+
+  // ⋯ at the top of the full-screen view.
+  function viewerMenu(key) {
+    openSheet(
+      "",
+      el(
+        "div",
+        { class: "xbg-sheet-body" },
+        el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); Android.openWith(key); } }, "Open with another app"),
+        el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); openPicker([key], afterSave); } }, "Add to album"),
+        el("button", { class: "xbg-secondary", onclick: () => viewerMore(key) }, "Details"),
+        el("button", { class: "xbg-primary", onclick: () => closeSheet() }, "Close")
+      )
     );
   }
 
@@ -1705,11 +1740,43 @@
     ui.hbtn.classList.toggle("xbg-on", hidden);
   }
 
+  // --- Files the phone can't show -------------------------------------------
+  // Instead of the browser's broken-image symbol, show a dark tile with a
+  // cracked-Polaroid icon (and, full screen, a way to open it elsewhere).
+  document.addEventListener("error", (e) => {
+    const media = e.target;
+    if (!(media instanceof HTMLImageElement || media instanceof HTMLVideoElement) || !media.closest("#xbg-overlay")) return;
+    if (media.classList.contains("xbg-gave-up")) return;
+    media.classList.add("xbg-gave-up");
+    const broken = el("div", { class: "xbg-broken" });
+    if (media.closest(".xbg-v-stage") && viewerKey) {
+      const key = viewerKey;
+      broken.append(
+        el("p", {}, "This file can’t be shown here."),
+        el("button", { class: "xbg-secondary", onclick: (ev) => { ev.stopPropagation(); Android.openWith(key); } }, "Open with another app")
+      );
+    }
+    media.replaceWith(broken);
+  }, true);
+
   // --- Start ----------------------------------------------------------------
 
   // Called by the app after you grant access, and whenever it comes back to
   // the front (to pick up new photos).
-  window.galleryReload = () => loadMedia();
+  // Coming back to the app: only reload if photos were added, changed or
+  // deleted meanwhile (Android keeps a change counter), so it doesn't redraw.
+  let mediaStamp = "";
+  window.galleryReload = () => {
+    let stamp = "";
+    try {
+      stamp = Android.changeStamp ? Android.changeStamp() : "";
+    } catch (e) {
+      stamp = "";
+    }
+    if (stamp && stamp === mediaStamp && Android.hasAccess()) return;
+    mediaStamp = stamp;
+    loadMedia();
+  };
 
   async function start() {
     buildUi();
@@ -1720,7 +1787,7 @@
     if (settings.headerHidden) setHeaderHidden(true);
     rebuild();
     // Read the media after the first paint so the app opens instantly.
-    setTimeout(loadMedia, 0);
+    setTimeout(window.galleryReload, 0);
   }
 
   if (document.body) start();

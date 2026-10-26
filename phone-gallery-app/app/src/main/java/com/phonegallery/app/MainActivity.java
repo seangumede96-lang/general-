@@ -16,6 +16,7 @@ import android.content.res.AssetFileDescriptor;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.ImageDecoder;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -266,10 +267,7 @@ public class MainActivity extends Activity {
                 if (!first) json.append(',');
                 first = false;
                 json.append("{\"key\":\"").append(key)
-                        .append("\",\"type\":\"").append(video ? "video" : "photo")
-                        .append("\",\"thumb\":\"/thumb/").append(key)
-                        .append("\",\"full\":\"/media/").append(key).append('"');
-                if (video) json.append(",\"video\":\"/media/").append(key).append('"');
+                        .append("\",\"type\":\"").append(video ? "video" : "photo").append('"');
                 json.append(",\"saved\":").append(taken > 0 ? taken : added)
                         .append(",\"posted\":").append(added)
                         .append(",\"w\":").append(w)
@@ -321,8 +319,42 @@ public class MainActivity extends Activity {
         try {
             Bitmap bmp = getContentResolver().loadThumbnail(uri, new Size(THUMB_SIZE, THUMB_SIZE), null);
             return jpeg(bmp, 82);
-        } catch (IOException | SecurityException e) {
-            return notFound();
+        } catch (IOException | RuntimeException e) {
+            // Android couldn't make one: try decoding the file ourselves.
+            Bitmap bmp = key.charAt(0) == 'v' ? videoFrame(uri) : decodeSmall(uri);
+            return bmp != null ? jpeg(bmp, 82) : notFound();
+        }
+    }
+
+    private Bitmap decodeSmall(Uri uri) {
+        try {
+            return ImageDecoder.decodeBitmap(ImageDecoder.createSource(getContentResolver(), uri), (decoder, info, src) -> {
+                Size size = info.getSize();
+                int longest = Math.max(size.getWidth(), size.getHeight());
+                if (longest > THUMB_SIZE) {
+                    float scale = (float) THUMB_SIZE / longest;
+                    decoder.setTargetSize(Math.max(1, Math.round(size.getWidth() * scale)), Math.max(1, Math.round(size.getHeight() * scale)));
+                }
+                decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+            });
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private Bitmap videoFrame(Uri uri) {
+        MediaMetadataRetriever r = new MediaMetadataRetriever();
+        try {
+            r.setDataSource(this, uri);
+            return r.getScaledFrameAtTime(-1, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, THUMB_SIZE, THUMB_SIZE);
+        } catch (RuntimeException e) {
+            return null;
+        } finally {
+            try {
+                r.release();
+            } catch (IOException | RuntimeException ignored) {
+                /* nothing to release */
+            }
         }
     }
 
@@ -575,6 +607,13 @@ public class MainActivity extends Activity {
             prefs.edit().putString(key, json).apply();
         }
 
+        /** Changes whenever photos/videos are added, edited or deleted on the phone. */
+        @JavascriptInterface
+        public String changeStamp() {
+            return MediaStore.getVersion(MainActivity.this) + ":" + MediaStore.getGeneration(MainActivity.this, MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                    + ":" + MainActivity.this.hasAccess();
+        }
+
         @JavascriptInterface
         public String getTrash() {
             return mediaJson(true);
@@ -599,22 +638,6 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void deleteForever(String keys) {
             runOnUiThread(() -> changeMedia(DELETE, keys));
-        }
-
-        /** Open the photo/video in the phone's editor. */
-        @JavascriptInterface
-        public void edit(String key) {
-            Uri uri = uriFor(key);
-            if (uri == null) return;
-            Intent edit = new Intent(Intent.ACTION_EDIT).setDataAndType(uri, key.charAt(0) == 'v' ? "video/*" : "image/*")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            runOnUiThread(() -> {
-                try {
-                    startActivity(Intent.createChooser(edit, "Edit with"));
-                } catch (ActivityNotFoundException e) {
-                    /* no editor */
-                }
-            });
         }
 
         /** Open the photo/video in another app (choose which). */

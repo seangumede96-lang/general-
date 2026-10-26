@@ -9,8 +9,9 @@ the X Bookmarks Gallery (`../twitter-gallery`):
   or the bookmark button on a photo), plus the phone's own folders (Camera,
   Screenshots, WhatsApp…).
 - Tap a photo for a freely scrolling feed of just the pictures; tap one to
-  open it full screen, (just that one), where tapping shows/hides the Share ·
-  Star · Album · Edit · Delete · More bar.
+  open it full screen, (just that one), where tapping shows/hides iPhone-style
+  buttons (back, ⋯, Share, Star · Info · Album, Delete). Files that can't be
+  shown get a dark cracked-Polaroid tile with "Open with another app".
 - ★ Star photos (Starred album), share one or many, and delete to the
   phone's own recycle bin (kept 30 days) with a Recycle bin album to restore
   or delete forever. Android asks to confirm each delete unless you allow
@@ -22,6 +23,8 @@ the X Bookmarks Gallery (`../twitter-gallery`):
   combined into "Others"; Media types and Recycle bin).
 - Settings (⋯): dark/light mode, combining small folders, folders in All.
 - A floating AssistiveTouch-style button hides/shows the header.
+- Returning to the app only reloads when photos actually changed (Android's
+  media change counter), and then updates in place.
 - Swipe between tabs; the phone's back button closes menus, the feed,
   selection, then albums, then the app.
 - Albums can be backed up to Downloads and restored.

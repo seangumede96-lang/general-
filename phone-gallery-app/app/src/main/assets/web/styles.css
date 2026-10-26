@@ -1414,3 +1414,139 @@ html.xbg-light-page body {
 #xbg-overlay .xbg-badge {
   color: #fff;
 }
+
+/* --- v1.2.2 ------------------------------------------------------------------- */
+
+/* No blue flash when tapping */
+html,
+#xbg-overlay,
+#xbg-overlay * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Menus and messages appear above the full-screen view */
+#xbg-overlay .xbg-backdrop {
+  z-index: 9;
+}
+
+#xbg-overlay .xbg-toast {
+  z-index: 10;
+}
+
+/* Files that can't be shown: a dark tile with a cracked Polaroid */
+#xbg-overlay .xbg-broken {
+  width: 100%;
+  height: 100%;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj4KPGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjYjljMGM5Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNmQ3NDdkIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+CjxnIHRyYW5zZm9ybT0icm90YXRlKC02IDUwIDUwKSI+CjxwYXRoIGQ9Ik0yNCAxOGgyNWwtNCAxNCA2IDEwLTUgMTIgNCAxMC00IDE0SDI0YTMgMyAwIDAgMS0zLTNWMjFhMyAzIDAgMCAxIDMtM3oiIGZpbGw9InVybCgjZykiLz4KPHBhdGggZD0iTTMwIDI1aDE0bC0yIDcgNSAxMC00IDEyIDMgNkgzMHoiIGZpbGw9IiMyNjI5MmQiLz4KPHBhdGggZD0iTTU1IDE4aDIxYTMgMyAwIDAgMSAzIDN2NThhMyAzIDAgMCAxLTMgM0g1Nmw0LTE0LTQtMTAgNS0xMi02LTEweiIgZmlsbD0idXJsKCNnKSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNCAyKSByb3RhdGUoNCA2NiA1MCkiLz4KPHBhdGggZD0iTTYwIDI1aDE0djM1SDYybC0zLTYgNC0xMi01LTEweiIgZmlsbD0iIzI2MjkyZCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNCAyKSByb3RhdGUoNCA2NiA1MCkiLz4KPC9nPjwvc3ZnPg==") center / 46% no-repeat, linear-gradient(160deg, #2b2d31, #0d0e10);
+  color: #c9ced6;
+  text-align: center;
+}
+
+#xbg-overlay .xbg-v-stage .xbg-broken {
+  width: min(80vw, 420px);
+  height: min(80vw, 420px);
+  border-radius: 18px;
+  background-size: 36%, auto;
+  background-position: center 30%, center;
+  justify-content: flex-end;
+  padding: 0 20px 26px;
+  box-sizing: border-box;
+}
+
+#xbg-overlay .xbg-v-stage .xbg-broken .xbg-secondary {
+  width: auto;
+  padding: 10px 18px;
+  color: #fff;
+}
+
+/* Full-screen view: iPhone-style round "glass" buttons */
+#xbg-overlay .xbg-v-top {
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px 30px;
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+#xbg-overlay .xbg-v-bottom {
+  justify-content: space-between;
+  padding: 30px 14px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+#xbg-overlay .xbg-glass {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(14px) saturate(1.4);
+  color: #fff;
+}
+
+#xbg-overlay .xbg-round {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+#xbg-overlay .xbg-pill {
+  border-radius: 999px;
+}
+
+#xbg-overlay .xbg-v-titles {
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 22px;
+}
+
+#xbg-overlay .xbg-v-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-v-sub {
+  font-size: 12px;
+}
+
+#xbg-overlay .xbg-v-group {
+  gap: 6px;
+  padding: 0 10px;
+  height: 48px;
+}
+
+#xbg-overlay .xbg-v-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+#xbg-overlay .xbg-glass svg {
+  width: 24px;
+  height: 24px;
+}
+
+#xbg-overlay .xbg-glass svg path {
+  stroke: #fff;
+}
+
+#xbg-overlay .xbg-v-btn.xbg-on svg path {
+  fill: #fff;
+}
+
+#xbg-overlay .xbg-v-btn.xbg-danger-text svg path {
+  stroke: var(--xbg-red);
+}
