@@ -1776,3 +1776,13 @@ html,
 #xbg-overlay .xbg-seg button.xbg-on {
   color: var(--xbg-red);
 }
+
+/* Smaller broken-Polaroid icon */
+#xbg-overlay .xbg-broken {
+  background-size: 30%, auto;
+}
+
+#xbg-overlay .xbg-v-stage .xbg-broken {
+  background-size: 22%, auto;
+  background-position: center 34%, center;
+}
