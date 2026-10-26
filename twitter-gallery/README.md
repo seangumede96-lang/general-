@@ -1,8 +1,9 @@
 # X Bookmarks Gallery (browser extension)
 
 Shows the photos and videos from your X bookmarks in a 3-column, Instagram-style
-grid. Tap any item to open a feed of posts you can scroll freely, like Instagram,
-each with **＋ Save** and **Open post** buttons.
+grid. Tap any item to open a feed of posts you can scroll freely, like Instagram:
+posts run edge to edge, with the account name and date over each picture and
+round Save / Open post buttons in the corner.
 
 No X API is needed. When you open <https://x.com/i/bookmarks> while logged in,
 the extension notes how the page asks X for its first batch of bookmarks, then
@@ -40,6 +41,8 @@ scrolls the bookmarks page for you while it's open.
   one to see only that month.
 - Tapping a post opens a scrolling feed starting at that post; scroll up or
   down freely and stop anywhere. Videos play (muted) while on screen.
+- Leave the feed with your phone's back gesture/button, by swiping the feed
+  to the right, or with the ‹ button.
 - **Long-press** a post to start selecting; tap more to add them.
 
 ## Collections

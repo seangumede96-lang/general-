@@ -522,7 +522,7 @@
       el(
         "header",
         { class: "xbg-feed-bar" },
-        el("button", { class: "xbg-close", "aria-label": "Back to grid", onclick: closeLightbox }, "‹"),
+        el("button", { class: "xbg-close", "aria-label": "Back to grid", onclick: () => closeLightbox() }, "‹"),
         el("div", { class: "xbg-title" }, "Posts")
       ),
       feed
@@ -665,7 +665,7 @@
   // The feed adds posts above and below as you scroll, and plays videos
   // (muted) while they're on screen, like Instagram.
   function wireLightbox() {
-    const { feed } = ui;
+    const { feed, lightbox } = ui;
     let ticking = false;
     feed.addEventListener("scroll", () => {
       if (ticking) return;
@@ -685,6 +685,55 @@
       },
       { root: feed, threshold: 0.6 }
     );
+
+    // Swipe right to go back to the grid: the feed follows your finger and
+    // slides away if you drag far enough. Swipes on a video's control bar are
+    // left alone so seeking still works.
+    let swipe = null;
+    lightbox.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      const onControls = e.target.tagName === "VIDEO" && t.clientY > e.target.getBoundingClientRect().bottom - 60;
+      swipe = e.touches.length === 1 && !onControls && !ui.sheet ? { x: t.clientX, y: t.clientY, dx: 0, decided: false } : null;
+    }, { passive: true });
+    lightbox.addEventListener("touchmove", (e) => {
+      if (!swipe) return;
+      const t = e.touches[0];
+      const dx = t.clientX - swipe.x;
+      const dy = t.clientY - swipe.y;
+      if (!swipe.decided) {
+        if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+        swipe.decided = true;
+        if (!(dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.3)) return (swipe = null);
+      }
+      swipe.dx = Math.max(0, dx);
+      lightbox.style.transition = "none";
+      lightbox.style.transform = `translateX(${swipe.dx}px)`;
+    }, { passive: true });
+    const endSwipe = () => {
+      if (!swipe || !swipe.decided) return (swipe = null);
+      const far = swipe.dx > window.innerWidth * 0.3;
+      swipe = null;
+      lightbox.style.transition = "transform 0.2s ease-out";
+      lightbox.style.transform = far ? "translateX(100%)" : "";
+      if (far) setTimeout(() => closeLightbox(), 200);
+    };
+    lightbox.addEventListener("touchend", endSwipe);
+    lightbox.addEventListener("touchcancel", endSwipe);
+
+    // The phone's own back gesture/button closes the feed instead of leaving
+    // the page: opening the feed adds a step to the browser history.
+    window.addEventListener("popstate", () => {
+      if (feedHistory.ignoreNext) {
+        // This was our own step back (after closing the feed another way).
+        feedHistory.ignoreNext = false;
+        if (feedHistory.pushLater && feedOpen()) pushFeedStep();
+        feedHistory.pushLater = false;
+        return;
+      }
+      if (!feedHistory.pushed) return;
+      feedHistory.pushed = false;
+      if (feedOpen()) closeLightbox(true);
+    });
   }
 
   function syncControls() {
@@ -1165,6 +1214,29 @@
 
   const FEED_CHUNK = 10;
 
+  const feedOpen = () => ui && !ui.lightbox.classList.contains("xbg-hidden");
+
+  function icon(d, filled) {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("fill", filled ? "#fff" : "none");
+    path.setAttribute("stroke", "#fff");
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("stroke-linecap", "round");
+    svg.append(path);
+    return svg;
+  }
+  const BOOKMARK_PATH = "M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-4.6L5 21V4.5A1.5 1.5 0 0 1 6.5 3z";
+  const OPEN_PATH = "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5";
+
+  // Each post is just its picture or video, edge to edge, with the name and
+  // date laid over the top and Save / Open post as round buttons over the
+  // corner, like Instagram.
   function feedPost(item) {
     const user = ((item.tweet || "").match(/^https:\/\/x\.com\/([^/]+)\/status\//) || [])[1];
     const d = dateOf(item);
@@ -1176,11 +1248,12 @@
     );
     // Size the box from the media's real shape (when known) so the feed
     // doesn't jump as pictures load.
-    const ratio = item.w && item.h ? Math.min(Math.max(item.w / item.h, 0.6), 2) : 1;
-    const media = el("div", { class: "xbg-post-media", style: `aspect-ratio: ${ratio.toFixed(4)}` });
+    const ratio = item.w && item.h ? Math.min(Math.max(item.w / item.h, 0.56), 2) : 1;
+    const isVideo = item.type !== "photo" && item.video;
+    const media = el("div", { class: "xbg-post-media" + (isVideo ? " xbg-is-video" : ""), style: `aspect-ratio: ${ratio.toFixed(4)}` });
     if (item.type === "photo") {
       media.append(el("img", { src: item.full || item.thumb, loading: "lazy", decoding: "async", alt: "", referrerpolicy: "no-referrer" }));
-    } else if (item.video) {
+    } else if (isVideo) {
       const v = el("video", { src: item.video, poster: item.full || item.thumb, controls: true, muted: true, loop: true, playsinline: true, preload: "none" });
       v.muted = true;
       media.append(v);
@@ -1188,19 +1261,23 @@
     } else {
       media.append(
         el("img", { src: item.full || item.thumb, loading: "lazy", alt: "", referrerpolicy: "no-referrer" }),
-        el("p", { class: "xbg-note" }, "This video can’t play here. Tap “Open post” to watch it.")
+        el("p", { class: "xbg-note" }, "This video can’t play here. Tap the ↗ button to watch it on X.")
       );
     }
-    const save = el("button", { class: "xbg-save", onclick: () => openPicker([item.key], () => afterSave(item.key)) });
+    const save = el("button", { class: "xbg-fab-btn xbg-save-btn", onclick: () => openPicker([item.key], () => afterSave(item.key)) });
     paintSave(save, item.key);
     const actions = el("div", { class: "xbg-post-actions" }, save);
-    if (item.tweet) actions.append(el("a", { class: "xbg-open", href: item.tweet, target: "_blank", rel: "noopener noreferrer" }, "Open post ↗"));
-    return el("article", { class: "xbg-post", "data-key": item.key }, head, media, actions);
+    if (item.tweet) {
+      actions.append(el("a", { class: "xbg-fab-btn", href: item.tweet, target: "_blank", rel: "noopener noreferrer", "aria-label": "Open post on X" }, icon(OPEN_PATH, false)));
+    }
+    media.append(head, actions);
+    return el("article", { class: "xbg-post", "data-key": item.key }, media);
   }
 
   function paintSave(btn, key) {
     const saved = isSaved(key);
-    btn.textContent = saved ? "✓ Saved" : "＋ Save";
+    btn.replaceChildren(icon(BOOKMARK_PATH, saved));
+    btn.setAttribute("aria-label", saved ? "Saved to a collection" : "Save to a collection");
     btn.classList.toggle("xbg-on", saved);
   }
 
@@ -1232,30 +1309,61 @@
   function openLightbox(key) {
     const index = current.findIndex((it) => it.key === key);
     if (index < 0) return;
-    closeLightbox();
+    clearFeed();
     feedStart = Math.max(0, index - 3);
     feedEnd = Math.min(current.length, index + FEED_CHUNK);
     addFeedPosts(feedStart, feedEnd, false);
+    ui.lightbox.style.transition = "none";
+    ui.lightbox.style.transform = "";
     ui.lightbox.classList.remove("xbg-hidden");
     const target = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(key)}"]`);
     ui.feed.scrollTop = target ? target.offsetTop : 0;
     extendFeed();
+    if (feedHistory.ignoreNext) feedHistory.pushLater = true; // wait for our earlier step back to finish
+    else pushFeedStep();
   }
 
-  function closeLightbox() {
-    if (!ui) return;
+  // Our one extra history step while the feed is open (see wireLightbox).
+  const feedHistory = { pushed: false, ignoreNext: false, pushLater: false };
+
+  function pushFeedStep() {
+    if (feedHistory.pushed) return;
+    try {
+      history.pushState(history.state, "", location.href);
+      feedHistory.pushed = true;
+    } catch (e) {
+      /* the back gesture just won't close the feed */
+    }
+  }
+
+  function clearFeed() {
     ui.feed.querySelectorAll("video").forEach((v) => {
       v.pause();
       ui.feedVideos.unobserve(v);
     });
     ui.feed.replaceChildren();
+  }
+
+  // `fromHistory` is set when the phone's back gesture already took us back.
+  function closeLightbox(fromHistory = false) {
+    if (!ui || !feedOpen()) return;
+    clearFeed();
     ui.lightbox.classList.add("xbg-hidden");
+    ui.lightbox.style.transition = "none";
+    ui.lightbox.style.transform = "";
+    feedHistory.pushLater = false;
+    if (!fromHistory && feedHistory.pushed) {
+      // Remove the history step we added, without leaving the page.
+      feedHistory.pushed = false;
+      feedHistory.ignoreNext = true;
+      history.back();
+    }
   }
 
   // After the "Save to…" sheet closes: update the buttons, and if the post was
   // taken out of the collection being viewed, drop it from the feed too.
   function afterSave(key) {
-    for (const btn of ui.feed.querySelectorAll(".xbg-post .xbg-save")) paintSave(btn, btn.closest(".xbg-post").dataset.key);
+    for (const btn of ui.feed.querySelectorAll(".xbg-post .xbg-save-btn")) paintSave(btn, btn.closest(".xbg-post").dataset.key);
     const c = view === "collection" ? getCollection(openId) : null;
     if (!c) return;
     rebuild(false);

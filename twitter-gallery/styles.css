@@ -776,28 +776,11 @@
 
 #xbg-overlay .xbg-post {
   max-width: 600px;
-  margin: 0 auto 18px;
+  margin: 0 auto 2px;
 }
 
-#xbg-overlay .xbg-post-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-}
-
-#xbg-overlay .xbg-post-user {
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#xbg-overlay .xbg-post-date {
-  flex: none;
-  color: var(--xbg-muted);
-  font-size: 13px;
+#xbg-overlay .xbg-feed {
+  touch-action: pan-y pinch-zoom;
 }
 
 #xbg-overlay .xbg-post-media {
@@ -812,8 +795,74 @@
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   background: #000;
+}
+
+/* Name and date laid over the top of the picture */
+#xbg-overlay .xbg-post-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px 28px;
+  background: linear-gradient(rgba(0, 0, 0, 0.55), transparent);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+#xbg-overlay .xbg-post-user {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-post-date {
+  flex: none;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+}
+
+/* Save / Open post as round buttons over the bottom-right corner */
+#xbg-overlay .xbg-post-actions {
+  position: absolute;
+  right: 10px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Leave room for a video's own play/seek bar */
+#xbg-overlay .xbg-is-video .xbg-post-actions {
+  bottom: 64px;
+}
+
+#xbg-overlay .xbg-fab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  text-decoration: none;
+}
+
+#xbg-overlay .xbg-fab-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+#xbg-overlay .xbg-save-btn.xbg-on {
+  background: var(--xbg-accent);
 }
 
 #xbg-overlay .xbg-post-media .xbg-note {
@@ -822,13 +871,7 @@
   right: 0;
   bottom: 0;
   margin: 0;
-  padding: 10px;
+  padding: 10px 64px 10px 12px;
   background: rgba(0, 0, 0, 0.7);
-}
-
-#xbg-overlay .xbg-post-actions {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px 0;
+  text-align: left;
 }
