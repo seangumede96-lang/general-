@@ -12,7 +12,7 @@
   const cached = new Map(); // key -> item from the saved copy, shown until loading finishes
   const savedItems = new Map(); // key -> item, for every post in a collection
   let collections = []; // [{ id, name, keys: [newest first] }]
-  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid", theme: "dark", headerHidden: false, toggleBtn: { side: "right", y: 0.75 } };
+  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid", theme: "dark", headerHidden: false, filtersHidden: false, toggleBtn: { side: "right", y: 0.75 } };
   let cacheTime = 0;
   let lastTotal = 0; // how many bookmarks the last full load found, to show progress next time
   let partialInfo = null; // { posts, at } while an unfinished long load's progress is all that's saved
@@ -197,6 +197,7 @@
     if (ui && ui.hbtn) {
       placeHeaderButton();
       if (settings.headerHidden !== ui.overlay.classList.contains("xbg-header-off")) setHeaderHidden(settings.headerHidden);
+      ui.overlay.classList.toggle("xbg-filters-off", !!settings.filtersHidden);
     }
     syncControls();
     if (galleryOpen()) rebuild(false);
@@ -822,6 +823,7 @@
     document.addEventListener("keydown", onKey);
     new ResizeObserver(() => (scroller.style.paddingTop = settings.headerHidden ? "0px" : bar.offsetHeight + "px")).observe(bar);
     applyTheme();
+    if (settings.filtersHidden) ui.overlay.classList.add("xbg-filters-off");
     if (settings.headerHidden) setHeaderHidden(true);
     syncControls();
     updateHeader();
@@ -1005,7 +1007,8 @@
       inner.style.transform = `translateY(${-gridSnapshot.top}px)`;
     } else if (target === "collections") {
       // Room for the header as it will be on Collections (filters folded away).
-      const pad = settings.headerHidden ? 0 : ui.bar.offsetHeight - (ui.controls.classList.contains("xbg-collapsed") ? 0 : ui.controls.offsetHeight);
+      const folded = ui.controls.classList.contains("xbg-collapsed") || settings.filtersHidden;
+      const pad = settings.headerHidden ? 0 : ui.bar.offsetHeight - (folded ? 0 : ui.controls.offsetHeight);
       inner.style.paddingTop = pad + "px";
       inner.append(el("div", { class: "xbg-cards" }, ...collectionCards()));
       const top = view === "collection" && collectionsSpot ? collectionsSpot.top : 0;
@@ -1067,13 +1070,36 @@
       void ui.controls.offsetHeight;
       requestAnimationFrame(() => requestAnimationFrame(() => {
         ui.controls.style.transition = "";
-        endSlide();
+        endSlide(true);
       }));
     }, t * 1000);
   }
 
-  function endSlide() {
-    if (slide && slide.peek) slide.peek.remove();
+  // `handoff`: the real page has just been put under the copy. Keep the copy
+  // on top until the pictures on screen have faded in, then let it go, so the
+  // screen never flashes empty.
+  function endSlide(handoff) {
+    const peek = slide && slide.peek;
+    if (peek && !handoff) peek.remove();
+    if (peek && handoff) {
+      const t0 = Date.now();
+      const ready = () => {
+        const r = ui.scroller.getBoundingClientRect();
+        for (const img of ui.scroller.querySelectorAll("img")) {
+          const b = img.getBoundingClientRect();
+          if (b.bottom <= r.top || b.top >= r.bottom || !b.width) continue;
+          if (!img.complete || Number(getComputedStyle(img).opacity) < 0.99) return false;
+        }
+        return true;
+      };
+      const check = () => {
+        if (!ready() && Date.now() - t0 < 700) return setTimeout(check, 40);
+        peek.style.transition = "opacity 0.12s ease";
+        peek.style.opacity = "0";
+        setTimeout(() => peek.remove(), 130);
+      };
+      check();
+    }
     slide = null;
     ui.sliding = false;
     ui.scroller.style.transition = "";
@@ -1107,6 +1133,7 @@
       (list) => {
         for (const entry of list) {
           const v = entry.target;
+          if (v.closest(".xbg-vfull")) continue; // the big video isn't in the feed
           if (entry.isIntersecting) v.play().catch(() => {});
           else v.pause();
         }
@@ -1211,7 +1238,8 @@
         closeSheet();
       }
       if (feedOpen() || selectMode) addBackStep();
-    } else if (feedOpen()) closeLightbox(true);
+    } else if (ui.bigVideo) leaveBig(false);
+    else if (feedOpen()) closeLightbox(true);
     else if (selectMode) setSelectMode(false, true);
     else if (galleryOpen() && view === "collection") slideTo("collections", 1, true);
     else if (galleryOpen()) closeGallery(true);
@@ -2099,50 +2127,65 @@
       track.addEventListener("pointermove", move);
       track.addEventListener("pointerup", up);
     });
-    const isFull = () => document.fullscreenElement === media;
-    async function toggleFull() {
-      try {
-        if (isFull()) await document.exitFullscreen();
-        else {
-          await media.requestFullscreen({ navigationUI: "hide" });
-          // Stay upright; the rotate button turns it sideways if you want.
-          if (screen.orientation && screen.orientation.lock) screen.orientation.lock("portrait").catch(() => {});
-        }
-      } catch (e) {
-        /* not allowed here */
-      }
+    // Full screen is our own cover-the-screen view, not the browser's: Firefox
+    // turns the phone sideways for any video in browser full screen, so that
+    // is only used when you ask for it with the rotate button.
+    const isSideways = () => document.fullscreenElement === media;
+    function toggleFull() {
+      if (ui.bigVideo === media) leaveBig(true);
+      else enterBig(media);
     }
     async function rotate() {
       try {
-        if (!isFull()) await media.requestFullscreen({ navigationUI: "hide" });
-        const landscape = screen.orientation && screen.orientation.type.startsWith("landscape");
-        await screen.orientation.lock(landscape ? "portrait" : "landscape");
+        if (isSideways()) return await document.exitFullscreen(); // back upright
+        if (ui.bigVideo !== media) enterBig(media);
+        await media.requestFullscreen({ navigationUI: "hide" });
+        await screen.orientation.lock("landscape");
       } catch (e) {
         /* rotation isn't available */
       }
     }
-    media._onFull = () => setIcon(fullBtn, isFull() ? "exitFull" : "full");
+    media._onFull = () => setIcon(fullBtn, ui.bigVideo === media ? "exitFull" : "full");
     media.append(cover, v, bar);
     ui.feedVideos.observe(v);
   }
 
-  // One listener for every video: mark the one in full screen, and let the
-  // phone turn freely again once you leave it.
-  let fullMedia = null;
+  // A video "big": lifted out of the feed to cover the whole screen, upright.
+  // A placeholder keeps the feed's spot; the back gesture puts it back.
+  function enterBig(media) {
+    if (ui.bigVideo) leaveBig(true);
+    const hold = el("div", { class: "xbg-vhold" });
+    hold.style.aspectRatio = media.style.aspectRatio;
+    media.replaceWith(hold);
+    media._hold = hold;
+    media.classList.add("xbg-vfull");
+    ui.overlay.append(media); // moved in one go, so the video keeps playing
+    ui.bigVideo = media;
+    media._onFull();
+    addBackStep();
+  }
+
+  function leaveBig(dropStep) {
+    const media = ui.bigVideo;
+    if (!media) return;
+    ui.bigVideo = null;
+    if (document.fullscreenElement === media) document.exitFullscreen().catch(() => {});
+    media.classList.remove("xbg-vfull");
+    if (media._hold && media._hold.isConnected) media._hold.replaceWith(media);
+    else media.remove();
+    media._hold = null;
+    media._onFull();
+    if (dropStep) removeBackStep();
+  }
+
+  // Leaving the browser's full screen (sideways view) lets the phone turn
+  // freely again; the video stays big and upright.
   document.addEventListener("fullscreenchange", () => {
-    const now = document.fullscreenElement && document.fullscreenElement.classList.contains("xbg-post-media") ? document.fullscreenElement : null;
-    for (const m of [fullMedia, now]) {
-      if (!m) continue;
-      m.classList.toggle("xbg-vfull", m === now);
-      if (m._onFull) m._onFull();
-    }
-    fullMedia = now;
-    if (!now && screen.orientation && screen.orientation.unlock) {
-      try {
-        screen.orientation.unlock();
-      } catch (e) {
-        /* fine */
-      }
+    if (document.fullscreenElement || !screen.orientation || !screen.orientation.unlock) return;
+    try {
+      screen.orientation.unlock();
+    } catch (e) {
+      /* fine */
     }
   });
 
@@ -2212,6 +2255,7 @@
   }
 
   function clearFeed() {
+    if (ui.bigVideo) leaveBig(true);
     ui.feed.querySelectorAll("video").forEach((v) => {
       v.pause();
       ui.feedVideos.unobserve(v);
@@ -2471,7 +2515,7 @@
       drag = null;
       btn.classList.remove("xbg-dragging");
       wake();
-      if (!moved) return setHeaderHidden(!settings.headerHidden);
+      if (!moved) return stepHeader();
       // Snap to the nearest side.
       settings.toggleBtn = { side: btn.offsetLeft + size() / 2 < window.innerWidth / 2 ? "left" : "right", y: btn.offsetTop / window.innerHeight };
       placeHeaderButton();
@@ -2492,6 +2536,27 @@
     const s = btn.offsetWidth || 54;
     btn.style.top = Math.min(Math.max(settings.toggleBtn.y * window.innerHeight, 60), window.innerHeight - s - 60) + "px";
     btn.style.left = (settings.toggleBtn.side === "left" ? 8 : window.innerWidth - s - 8) + "px";
+  }
+
+  // Each tap: 1st hides the filters (bottom half of the header), 2nd hides
+  // the rest, 3rd brings it all back.
+  function stepHeader() {
+    if (settings.headerHidden) {
+      settings.filtersHidden = false;
+      ui.controls.style.transition = "none"; // full height right away, so the grid lines up
+      ui.overlay.classList.remove("xbg-filters-off");
+      setHeaderHidden(false);
+      void ui.controls.offsetHeight;
+      ui.controls.style.transition = "";
+    } else if (!settings.filtersHidden) {
+      settings.filtersHidden = true;
+      ui.overlay.classList.add("xbg-filters-off");
+      ui.hbtn.classList.add("xbg-half");
+      saveSettings();
+    } else {
+      setHeaderHidden(true);
+    }
+    ui.hbtn.classList.toggle("xbg-half", settings.filtersHidden && !settings.headerHidden);
   }
 
   function setHeaderHidden(hidden) {

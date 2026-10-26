@@ -2278,8 +2278,22 @@
   pointer-events: auto;
 }
 
+/* Save / open: top centre, smaller */
+#xbg-overlay .xbg-post-media .xbg-post-actions,
 #xbg-overlay .xbg-is-video .xbg-post-actions {
-  bottom: 84px;
+  top: 44px;
+  bottom: auto;
+  gap: 12px;
+}
+
+#xbg-overlay .xbg-post-actions .xbg-fab-btn {
+  width: 36px;
+  height: 36px;
+}
+
+#xbg-overlay .xbg-post-actions .xbg-fab-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* Video: black behind, cover picture until it really plays, then fade in */
@@ -2406,16 +2420,47 @@
   flex: 1;
 }
 
-/* Full screen keeps the whole picture visible, upright unless you rotate */
-.xbg-post-media.xbg-vfull,
-.xbg-post-media:fullscreen {
+/* Big video: covers the whole screen, upright (sideways only via rotate) */
+#xbg-overlay .xbg-post-media.xbg-vfull {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  width: auto;
   aspect-ratio: auto !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  background: #000 !important;
+  background: #000;
 }
 
-.xbg-post-media:fullscreen video,
-.xbg-post-media:fullscreen img.xbg-vcover {
-  object-fit: contain !important;
+#xbg-overlay .xbg-post-media.xbg-vfull video,
+#xbg-overlay .xbg-post-media.xbg-vfull img.xbg-vcover {
+  object-fit: contain;
+}
+
+#xbg-overlay .xbg-post-media.xbg-vfull .xbg-vbar {
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+#xbg-overlay .xbg-vhold {
+  width: 100%;
+  background: #000;
+}
+
+/* Header button, first tap: filters (bottom half of the header) folded away */
+#xbg-overlay.xbg-filters-off .xbg-controls {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  pointer-events: none;
+}
+
+#xbg-overlay.xbg-filters-off .xbg-tabs {
+  border-bottom: 0;
+  margin-bottom: -10px;
+}
+
+/* Button shows which step you're on: half-dimmed ring after the first tap */
+#xbg-overlay .xbg-hbtn.xbg-half .xbg-hbtn-ring {
+  opacity: 0.7;
 }
