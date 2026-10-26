@@ -2420,28 +2420,66 @@
   flex: 1;
 }
 
-/* Big video: covers the whole screen, upright (sideways only via rotate) */
-#xbg-overlay .xbg-post-media.xbg-vfull {
+/* Reels: full screen, one post at a time */
+#xbg-overlay .xbg-reels {
   position: fixed;
   inset: 0;
   z-index: 20;
+  overflow: hidden;
+  background: #000;
+  touch-action: none;
+  overscroll-behavior: contain;
+  opacity: 0;
+  transform: scale(0.94);
+  transition: opacity 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#xbg-overlay .xbg-reels.xbg-reels-in {
+  opacity: 1;
+  transform: none;
+}
+
+#xbg-overlay .xbg-reels-track {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+#xbg-overlay .xbg-reel {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  will-change: transform;
+}
+
+#xbg-overlay .xbg-reel .xbg-post-media {
+  position: absolute;
+  inset: 0;
   width: auto;
   aspect-ratio: auto !important;
   background: #000;
 }
 
-#xbg-overlay .xbg-post-media.xbg-vfull video,
-#xbg-overlay .xbg-post-media.xbg-vfull img.xbg-vcover {
+#xbg-overlay .xbg-reel .xbg-post-media > img,
+#xbg-overlay .xbg-reel .xbg-post-media video,
+#xbg-overlay .xbg-reel .xbg-post-media img.xbg-vcover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
-#xbg-overlay .xbg-post-media.xbg-vfull .xbg-vbar {
-  padding-bottom: max(8px, env(safe-area-inset-bottom));
+#xbg-overlay .xbg-reel .xbg-post-head {
+  padding-top: max(14px, env(safe-area-inset-top));
 }
 
-#xbg-overlay .xbg-vhold {
-  width: 100%;
-  background: #000;
+#xbg-overlay .xbg-reel .xbg-vbar {
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+#xbg-overlay .xbg-reel {
+  max-width: none;
 }
 
 /* Header button, first tap: filters (bottom half of the header) folded away */

@@ -1175,7 +1175,7 @@
       (list) => {
         for (const entry of list) {
           const v = entry.target;
-          if (v.closest(".xbg-vfull")) continue; // the big video isn't in the feed
+          if (v.closest(".xbg-reels")) continue; // reels play their own videos
           if (entry.isIntersecting) v.play().catch(() => {});
           else v.pause();
         }
@@ -1280,7 +1280,7 @@
         closeSheet();
       }
       if (feedOpen() || selectMode) addBackStep();
-    } else if (ui.bigVideo) leaveBig(false);
+    } else if (reels) closeReels(false);
     else if (feedOpen()) closeLightbox(true);
     else if (selectMode) setSelectMode(false, true);
     else if (galleryOpen() && view === "collection") slideTo("collections", 1, true);
@@ -2172,52 +2172,235 @@
     // Full screen is our own cover-the-screen view, not the browser's: Firefox
     // turns the phone sideways for any video in browser full screen, so that
     // is only used when you ask for it with the rotate button.
-    const isSideways = () => document.fullscreenElement === media;
+    const inReels = () => !!media.closest(".xbg-reels");
     function toggleFull() {
-      if (ui.bigVideo === media) leaveBig(true);
-      else enterBig(media);
+      if (inReels()) closeReels(true);
+      else openReels(item.key, v);
     }
     async function rotate() {
       try {
-        if (isSideways()) return await document.exitFullscreen(); // back upright
-        if (ui.bigVideo !== media) enterBig(media);
-        await media.requestFullscreen({ navigationUI: "hide" });
+        if (document.fullscreenElement) return await document.exitFullscreen(); // back upright
+        if (!inReels()) openReels(item.key, v);
+        await reels.root.requestFullscreen({ navigationUI: "hide" });
         await screen.orientation.lock("landscape");
       } catch (e) {
         /* rotation isn't available */
       }
     }
-    media._onFull = () => setIcon(fullBtn, ui.bigVideo === media ? "exitFull" : "full");
     media.append(cover, v, bar);
-    ui.feedVideos.observe(v);
+    if (buildingReel) setIcon(fullBtn, "exitFull");
+    else ui.feedVideos.observe(v);
   }
 
-  // A video "big": lifted out of the feed to cover the whole screen, upright.
-  // A placeholder keeps the feed's spot; the back gesture puts it back.
-  function enterBig(media) {
-    if (ui.bigVideo) leaveBig(true);
-    const hold = el("div", { class: "xbg-vhold" });
-    hold.style.aspectRatio = media.style.aspectRatio;
-    media.replaceWith(hold);
-    media._hold = hold;
-    media.classList.add("xbg-vfull");
-    ui.overlay.append(media); // moved in one go, so the video keeps playing
-    ui.bigVideo = media;
-    media._onFull();
+  // --- Reels: full screen, one post at a time, swipe up / down -------------
+  // Like Instagram Reels. The post under your finger moves with it; let go
+  // and it carries on at your finger's speed, settling like a spring onto the
+  // next or previous post (or back where it was). A quick flick is enough.
+  // You can catch a post mid-move and keep dragging. Past the first or last
+  // post it stretches and springs back. Only the post on screen plays.
+  let reels = null; // { root, track, cur, slots: Map(index -> node), off, anim }
+  let buildingReel = false;
+  let reelMuted = true;
+
+  function reelNode(i) {
+    buildingReel = true;
+    let post;
+    try {
+      post = feedPost(current[i]);
+    } finally {
+      buildingReel = false;
+    }
+    post.classList.add("xbg-reel");
+    // Load the posts just off screen now, so they're there as they slide in.
+    post.querySelectorAll("img").forEach((img) => (img.loading = "eager"));
+    const v = post.querySelector("video");
+    if (v) {
+      v.preload = "metadata";
+      v.addEventListener("volumechange", () => {
+        if (reels && reels.slots.get(reels.cur) === post) reelMuted = v.muted;
+      });
+    }
+    return post;
+  }
+
+  function placeReels() {
+    const { slots, cur, track } = reels;
+    const h = reels.root.clientHeight;
+    for (const [i, node] of slots) node.style.transform = `translate3d(0, ${(i - cur) * h}px, 0)`;
+    track.style.transform = `translate3d(0, ${reels.off}px, 0)`;
+  }
+
+  // Keep the posts just above and below ready; drop the rest.
+  function fillReels() {
+    const { slots, cur, track } = reels;
+    for (const [i, node] of slots) {
+      if (i < cur - 1 || i > cur + 2) {
+        const v = node.querySelector("video");
+        if (v) v.pause();
+        node.remove();
+        slots.delete(i);
+      }
+    }
+    for (let i = Math.max(0, cur - 1); i <= Math.min(current.length - 1, cur + 2); i++) {
+      if (slots.has(i)) continue;
+      const node = reelNode(i);
+      slots.set(i, node);
+      track.append(node);
+    }
+    placeReels();
+    for (const [i, node] of slots) {
+      const v = node.querySelector("video");
+      if (!v) continue;
+      if (i === cur) {
+        v.muted = reelMuted;
+        node.querySelector(".xbg-vbtn[aria-label=Sound]")?.replaceChildren(vicon(reelMuted ? "muted" : "sound"));
+        v.play().catch(() => {});
+      } else {
+        v.pause();
+        if (Math.abs(i - cur) > 1 || v.currentTime) v.currentTime = 0;
+        if (i === cur + 1) v.preload = "auto"; // the next one starts at once
+      }
+    }
+  }
+
+  function openReels(key, fromVideo) {
+    const index = current.findIndex((it) => it.key === key);
+    if (index < 0) return;
+    if (reels) closeReels(true, true);
+    const track = el("div", { class: "xbg-reels-track" });
+    const root = el("div", { class: "xbg-reels" }, track);
+    reels = { root, track, cur: index, slots: new Map(), off: 0, anim: null };
+    if (fromVideo) {
+      reelMuted = fromVideo.muted;
+      fromVideo.pause();
+    }
+    ui.overlay.append(root);
+    fillReels();
+    // Carry on from the same moment.
+    const v = fromVideo && reels.slots.get(index).querySelector("video");
+    if (v && fromVideo.currentTime) v.currentTime = fromVideo.currentTime;
+    wireReels(root);
+    requestAnimationFrame(() => root.classList.add("xbg-reels-in"));
     addBackStep();
   }
 
-  function leaveBig(dropStep) {
-    const media = ui.bigVideo;
-    if (!media) return;
-    ui.bigVideo = null;
-    if (document.fullscreenElement === media) document.exitFullscreen().catch(() => {});
-    media.classList.remove("xbg-vfull");
-    if (media._hold && media._hold.isConnected) media._hold.replaceWith(media);
-    else media.remove();
-    media._hold = null;
-    media._onFull();
+  // Back to the feed, at whichever post you ended on.
+  function closeReels(dropStep, instant) {
+    if (!reels) return;
+    const { root, cur } = reels;
+    reels = null;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    root.querySelectorAll("video").forEach((v) => v.pause());
+    if (instant) root.remove();
+    else {
+      root.classList.remove("xbg-reels-in");
+      setTimeout(() => root.remove(), 260);
+    }
     if (dropStep) removeBackStep();
+    const item = current[cur];
+    if (item && feedOpen()) {
+      const post = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(item.key)}"]`);
+      if (post) centrePost(post);
+      else openLightbox(item.key);
+      const fv = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(item.key)}"] video`);
+      if (fv) fv.play().catch(() => {});
+    }
+  }
+
+  function wireReels(root) {
+    let drag = null;
+    let frame = 0;
+    const h = () => root.clientHeight;
+    const offNow = () => new DOMMatrix(getComputedStyle(reels.track).transform).m42 || 0;
+    root.addEventListener("touchstart", (e) => {
+      if (!reels || e.touches.length !== 1 || e.target.closest(".xbg-vbar")) return (drag = null);
+      const t = e.touches[0];
+      // Caught mid-move: stop right where it is and follow the finger from there.
+      const caught = !!reels.anim;
+      if (reels.anim) {
+        clearTimeout(reels.anim);
+        reels.anim = null;
+        reels.off = offNow();
+        reels.track.style.transition = "none";
+        placeReels();
+      }
+      drag = { x: t.clientX, y: t.clientY, base: reels.off, on: false, track: [], caught };
+    }, { passive: true });
+    root.addEventListener("touchmove", (e) => {
+      if (!drag || !reels) return;
+      const t = e.touches[0];
+      const dx = t.clientX - drag.x;
+      const dy = t.clientY - drag.y;
+      if (!drag.on) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        if (Math.abs(dx) > Math.abs(dy)) return (drag = null); // sideways isn't ours
+        drag.on = true;
+        drag.y = t.clientY;
+      }
+      if (e.cancelable) e.preventDefault();
+      const raw = drag.base + (t.clientY - drag.y);
+      const now = performance.now();
+      drag.track.push([now, t.clientY]);
+      while (drag.track.length > 2 && now - drag.track[0][0] > 100) drag.track.shift();
+      // Nothing above the first post or below the last: stretch instead.
+      const atTop = reels.cur === 0 && raw > 0;
+      const atEnd = reels.cur === current.length - 1 && raw < 0;
+      reels.off = atTop || atEnd ? rubberBand(raw, h()) : raw;
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (reels) reels.track.style.transform = `translate3d(0, ${reels.off}px, 0)`;
+      });
+    }, { passive: false });
+    const end = () => {
+      const d = drag;
+      drag = null;
+      if (!d || !reels) return;
+      if (!d.on) {
+        // Caught and let go without dragging: settle on whichever post is nearer.
+        if (d.caught) settleReels(Math.max(-1, Math.min(1, Math.round(-reels.off / h()))), 0);
+        return;
+      }
+      const [t0, y0] = d.track[0] || [0, 0];
+      const [t1, y1] = d.track[d.track.length - 1] || [0, 0];
+      const v = t1 > t0 ? (y1 - y0) / (t1 - t0) : 0;
+      const H = h();
+      const projected = reels.off + v * 180;
+      let step = projected < -H * 0.22 ? 1 : projected > H * 0.22 ? -1 : 0;
+      if (reels.cur + step < 0 || reels.cur + step > current.length - 1) step = 0;
+      settleReels(step, v);
+    };
+    root.addEventListener("touchend", end);
+    root.addEventListener("touchcancel", end);
+  }
+
+  function settleReels(step, velocity) {
+    const r = reels;
+    const H = r.root.clientHeight;
+    const goal = -step * H;
+    const t = step ? 0.42 : 0.34;
+    r.track.style.transition = `transform ${t}s ${springEase(velocity, Math.abs(goal - r.off), t)}`;
+    r.off = goal;
+    r.track.style.transform = `translate3d(0, ${goal}px, 0)`;
+    // Start the next video as it arrives, not after it lands.
+    if (step) {
+      const next = r.slots.get(r.cur + step);
+      const nv = next && next.querySelector("video");
+      if (nv) {
+        nv.muted = reelMuted;
+        nv.play().catch(() => {});
+      }
+      const was = r.slots.get(r.cur);
+      const wv = was && was.querySelector("video");
+      if (wv) wv.pause();
+    }
+    r.anim = setTimeout(() => {
+      r.anim = null;
+      if (reels !== r) return;
+      r.track.style.transition = "none";
+      r.cur += step;
+      r.off = 0;
+      fillReels();
+    }, t * 1000);
   }
 
   // Leaving the browser's full screen (sideways view) lets the phone turn
@@ -2297,7 +2480,7 @@
   }
 
   function clearFeed() {
-    if (ui.bigVideo) leaveBig(true);
+    if (reels) closeReels(true, true);
     ui.feed.querySelectorAll("video").forEach((v) => {
       v.pause();
       ui.feedVideos.unobserve(v);
