@@ -1974,3 +1974,32 @@ html,
 #xbg-overlay.xbg-light .xbg-tab.xbg-on {
   border-bottom-color: var(--xbg-red);
 }
+
+/* The grid draws only the rows near the screen; each tile is placed exactly */
+#xbg-overlay .xbg-grid {
+  display: block;
+  position: relative;
+}
+
+#xbg-overlay .xbg-grid > .xbg-tile,
+#xbg-overlay .xbg-grid > .xbg-section {
+  position: absolute;
+  aspect-ratio: auto;
+  content-visibility: visible;
+  box-sizing: border-box;
+}
+
+#xbg-overlay .xbg-grid > .xbg-section {
+  overflow: hidden;
+}
+
+/* Swipe up/down to close a photo: the photo follows the finger, buttons step aside */
+#xbg-overlay .xbg-v-stage {
+  touch-action: pinch-zoom;
+}
+
+#xbg-overlay .xbg-viewer.xbg-v-dragging .xbg-v-top,
+#xbg-overlay .xbg-viewer.xbg-v-dragging .xbg-v-bottom {
+  opacity: 0;
+  pointer-events: none;
+}

@@ -671,6 +671,24 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** Exact colours for the status bar and the navigation bar (#RRGGBB). */
+        @JavascriptInterface
+        public void setBars(String status, String nav) {
+            runOnUiThread(() -> {
+                int top = parseColor(status, 0xFF000000);
+                int bottom = parseColor(nav, 0xFF000000);
+                getWindow().setStatusBarColor(top);
+                getWindow().setNavigationBarColor(bottom);
+                WindowInsetsController bars = getWindow().getInsetsController();
+                if (bars != null) {
+                    int flags = (isLight(top) ? WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS : 0)
+                            | (isLight(bottom) ? WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS : 0);
+                    bars.setSystemBarsAppearance(flags,
+                            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                }
+            });
+        }
+
         /** True when Android lets the app delete without asking each time. */
         @JavascriptInterface
         public boolean canSkipConfirm() {
@@ -709,4 +727,17 @@ public class MainActivity extends Activity {
             }
         }
     }
+    private static int parseColor(String hex, int fallback) {
+        try {
+            return 0xFF000000 | Integer.parseInt(hex.replace("#", ""), 16);
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+    }
+
+    private static boolean isLight(int color) {
+        int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
+        return r * 299 + g * 587 + b * 114 > 150000;
+    }
+
 }

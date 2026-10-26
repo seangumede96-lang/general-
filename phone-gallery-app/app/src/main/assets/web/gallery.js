@@ -49,7 +49,6 @@
   let entries = []; // what the grid shows: { item } or { header, label, count }
   let current = []; // the items in `entries`, in order (for the full-screen viewer)
   let totalCount = 0;
-  let shown = 0; // how many entries are in the page so far
   const headerEls = new Map();
   let feedStart = 0; // the feed shows current[feedStart .. feedEnd)
   let feedEnd = 0;
@@ -60,7 +59,6 @@
   let selectMode = false;
   const selected = new Set();
 
-  const PAGE = 60; // tiles added at a time as you scroll
   const SAFE_MEDIA = /^\/(thumb|media)\/[iv]\d+$/; // served by the app
   const K = { collections: "pg_albums", items: "pg_items", settings: "pg_settings", starred: "pg_starred" };
   const galleryOpen = () => ui && !ui.overlay.classList.contains("xbg-hidden");
@@ -414,6 +412,7 @@
     backdrop.__onClose = onClose;
     ui.overlay.append(backdrop);
     ui.sheet = backdrop;
+    syncBars();
   }
 
   // `replacing` is set when another sheet takes this one's place, so the
@@ -423,6 +422,7 @@
     const { __onClose } = ui.sheet;
     ui.sheet.remove();
     ui.sheet = null;
+    syncBars();
     if (__onClose && !replacing) __onClose();
   }
 
@@ -646,6 +646,7 @@
     });
     grid.addEventListener("touchcancel", cancel);
     grid.addEventListener("contextmenu", (e) => e.preventDefault());
+    window.addEventListener("resize", () => fillPage());
     grid.addEventListener("click", (e) => {
       const tile = e.target.closest(".xbg-tile");
       if (!tile || tile.dataset.key === swallowKey) return;
@@ -956,8 +957,19 @@
   }
 
   // Phone status and navigation bars: the theme's colour, but black while a photo is open.
+  // An open menu sheet colours the bottom bar too, so the sheet runs to the screen's edge.
   function syncBars() {
-    if (Android.setLightBars) Android.setLightBars(settings.theme === "light" && !viewerOpen());
+    const page = settings.theme === "light" ? "#f2f3f5" : "#000000";
+    const top = ui && viewerOpen() ? "#000000" : page;
+    const sheet = ui && ui.sheet && ui.sheet.querySelector(".xbg-sheet");
+    const bottom = sheet ? hexColor(getComputedStyle(sheet).backgroundColor) || top : top;
+    if (Android.setBars) Android.setBars(top, bottom);
+    else if (Android.setLightBars) Android.setLightBars(top !== "#000000");
+  }
+
+  function hexColor(rgb) {
+    const m = rgb.match(/\d+/g);
+    return m && m.length >= 3 ? "#" + m.slice(0, 3).map((n) => (+n).toString(16).padStart(2, "0")).join("") : "";
   }
 
   // Choose which folders appear in All.
@@ -1190,29 +1202,108 @@
     return el("div", { class: "xbg-section", "data-key": e.header }, el("span", {}, e.label), countEl);
   }
 
-  // Tiles are added a page at a time as you scroll, instead of all at once,
-  // so opening the gallery stays quick even with thousands of bookmarks.
-  function appendUpTo(n) {
-    const end = Math.min(n, entries.length);
-    if (shown >= end) return;
-    const frag = document.createDocumentFragment();
-    for (; shown < end; shown++) frag.append(makeEntry(entries[shown]));
-    ui.grid.append(frag);
+  // Only the rows near the screen exist in the page (like the iPhone's Photos
+  // app). Every tile's spot is worked out up front, so tens of thousands of
+  // photos scroll and fast-scroll smoothly.
+  const COLS = 4;
+  const GAP = 2;
+  const HEADER_H = 50;
+  const BUFFER = 900; // px drawn above and below the screen
+  let tops = [];
+  let lefts = []; // -1 for a month header (full width)
+  let tileSize = 0;
+  let laidWidth = 0;
+  let rendered = new Map(); // sig -> element on the page
+
+  function layoutGrid() {
+    const width = ui.grid.clientWidth || ui.scroller.clientWidth || window.innerWidth;
+    laidWidth = width;
+    tileSize = (width - GAP * (COLS - 1)) / COLS;
+    tops = new Array(entries.length);
+    lefts = new Array(entries.length);
+    let y = 0;
+    let col = 0;
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i].header) {
+        if (col) (y += tileSize + GAP), (col = 0);
+        tops[i] = y;
+        lefts[i] = -1;
+        y += HEADER_H;
+      } else {
+        tops[i] = y;
+        lefts[i] = col * (tileSize + GAP);
+        if (++col === COLS) (col = 0), (y += tileSize + GAP);
+      }
+    }
+    if (col) y += tileSize;
+    ui.grid.style.height = Math.ceil(y) + "px";
   }
 
-  function renderPrefix(n) {
+  // The first entry whose bottom edge is below `y` (grid coordinates).
+  function indexAt(y) {
+    let lo = 0;
+    let hi = entries.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (tops[mid] + (lefts[mid] < 0 ? HEADER_H : tileSize) <= y) lo = mid + 1;
+      else hi = mid;
+    }
+    return Math.max(lo, 0);
+  }
+
+  const gridTop = () => ui.grid.getBoundingClientRect().top - ui.scroller.getBoundingClientRect().top + ui.scroller.scrollTop;
+
+  function renderVisible() {
+    if (!ui || ui.grid.classList.contains("xbg-hidden")) return;
+    if (ui.grid.clientWidth && ui.grid.clientWidth !== laidWidth) layoutGrid();
+    const y = ui.scroller.scrollTop - gridTop();
+    const bottom = y + ui.scroller.clientHeight + BUFFER;
+    const next = new Map();
+    const frag = document.createDocumentFragment();
+    for (let i = entries.length ? indexAt(y - BUFFER) : 0; i < entries.length && tops[i] < bottom; i++) {
+      const e = entries[i];
+      const key = sig(e);
+      let node = rendered.get(key);
+      if (node) rendered.delete(key);
+      else frag.append((node = makeEntry(e)));
+      const pos = lefts[i] < 0 ? `${tops[i]}|h` : `${tops[i]}|${lefts[i]}|${tileSize}`;
+      if (node._pos !== pos) {
+        node._pos = pos;
+        const st = node.style;
+        st.top = tops[i] + "px";
+        if (lefts[i] < 0) {
+          st.left = "0";
+          st.width = "100%";
+          st.height = HEADER_H + "px";
+        } else {
+          st.left = lefts[i] + "px";
+          st.width = st.height = tileSize + "px";
+        }
+      }
+      next.set(key, node);
+    }
+    for (const node of rendered.values()) node.remove();
+    rendered = next;
+    if (frag.childNodes.length) ui.grid.append(frag);
+  }
+
+  // Start the grid afresh (new view, filter or sort).
+  function renderPrefix() {
     ui.grid.replaceChildren();
+    rendered.clear();
     headerEls.clear();
-    shown = 0;
-    appendUpTo(n);
+    layoutGrid();
+    renderVisible();
+  }
+
+  // Same view, updated list: keep the tiles that are still there.
+  function appendUpTo() {
+    layoutGrid();
+    renderVisible();
   }
 
   function fillPage() {
-    if (!ui || !entries.length) return;
-    for (let i = 0; i < 20 && shown < entries.length; i++) {
-      if (ui.sentinel.getBoundingClientRect().top > window.innerHeight + 1500) break;
-      appendUpTo(shown + PAGE);
-    }
+    if (ui && entries.length) renderVisible();
   }
 
   function rebuild(resetScroll = true) {
@@ -1236,7 +1327,7 @@
         renderYears();
         entries = [];
       }
-      renderPrefix(resetScroll ? PAGE : Math.max(shown, PAGE));
+      renderPrefix();
       fillPage();
     }
     updateHeader();
@@ -1261,15 +1352,10 @@
     if (settings.layout === "years") return rebuild(false);
     const next = computeEntries();
     renderPeriodBar();
-    let same = shown <= next.length;
-    for (let i = 0; same && i < shown; i++) if (sig(next[i]) !== sig(entries[i])) same = false;
     entries = next;
-    if (same) {
-      for (const e of entries) if (e.header && headerEls.has(e.header)) headerEls.get(e.header).textContent = plural(e.count, "item");
-      appendUpTo(Math.max(shown, PAGE));
-    } else {
-      renderPrefix(Math.max(shown, PAGE));
-    }
+    // Tiles that are still in the list stay on the page, so nothing flickers.
+    for (const e of entries) if (e.header && headerEls.has(e.header)) headerEls.get(e.header).textContent = plural(e.count, "item");
+    appendUpTo();
     fillPage();
     updateHeader();
     updateEmpty();
@@ -1574,6 +1660,54 @@
 
     // A tap shows or hides the bars.
     stage.addEventListener("click", () => viewer.classList.toggle("xbg-ui-on"));
+
+    // Swipe up or down to go back to the gallery; the photo follows your finger.
+    let swipe = null;
+    stage.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      const onControls = e.target.tagName === "VIDEO" && t.clientY > e.target.getBoundingClientRect().bottom - 70;
+      swipe = e.touches.length === 1 && !onControls ? { x: t.clientX, y: t.clientY, dy: 0, on: false } : null;
+    }, { passive: true });
+    stage.addEventListener("touchmove", (e) => {
+      if (!swipe || e.touches.length !== 1) return (swipe = null);
+      const dx = e.touches[0].clientX - swipe.x;
+      const dy = e.touches[0].clientY - swipe.y;
+      if (!swipe.on) {
+        if (Math.abs(dy) < 12) return;
+        if (Math.abs(dx) > Math.abs(dy)) return (swipe = null);
+        swipe.on = true;
+        viewer.classList.add("xbg-v-dragging");
+      }
+      swipe.dy = dy;
+      const p = Math.min(Math.abs(dy) / 450, 1);
+      stage.style.transform = `translateY(${dy}px) scale(${1 - p * 0.3})`;
+      viewer.style.backgroundColor = `rgba(0, 0, 0, ${1 - p * 0.85})`;
+    }, { passive: true });
+    const endSwipe = () => {
+      const s = swipe;
+      swipe = null;
+      if (!s || !s.on) return;
+      viewer.classList.remove("xbg-v-dragging");
+      stage.style.transition = viewer.style.transition = "transform 0.22s ease-out, opacity 0.22s ease-out, background-color 0.22s ease-out";
+      if (Math.abs(s.dy) > 90) {
+        stage.style.transform = `translateY(${Math.sign(s.dy) * window.innerHeight * 0.5}px) scale(0.6)`;
+        stage.style.opacity = "0";
+        viewer.style.backgroundColor = "rgba(0, 0, 0, 0)";
+        setTimeout(closeViewer, 200);
+      } else {
+        stage.style.transform = "";
+        viewer.style.backgroundColor = "";
+        setTimeout(resetViewerMotion, 230);
+      }
+    };
+    stage.addEventListener("touchend", endSwipe);
+    stage.addEventListener("touchcancel", endSwipe);
+  }
+
+  function resetViewerMotion() {
+    if (!ui.viewer) return;
+    ui.viewer.classList.remove("xbg-v-dragging");
+    for (const st of [ui.vStage.style, ui.viewer.style]) st.transition = st.transform = st.opacity = st.backgroundColor = "";
   }
 
   function friendlyDate(d) {
@@ -1681,6 +1815,7 @@
     ui.vStage.querySelectorAll("video").forEach((v) => v.pause());
     ui.vStage.replaceChildren();
     ui.viewer.classList.add("xbg-hidden");
+    resetViewerMotion();
     syncBars();
     // Leave the feed where you were in the full-screen view.
     const post = feedOpen() && viewerKey && ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(viewerKey)}"]`);
@@ -1726,12 +1861,9 @@
       if (!entries.length) return;
       // Jump to the photo at that point of the list (loading tiles up to it).
       const index = Math.round(f * (entries.length - 1));
-      appendUpTo(index + PAGE);
-      const target = ui.grid.children[index];
-      if (target) {
-        ui.jumped = true;
-        ui.scroller.scrollTop = f >= 1 ? ui.scroller.scrollHeight : target.offsetTop - (settings.headerHidden ? 0 : ui.bar.offsetHeight);
-      }
+      ui.jumped = true;
+      ui.scroller.scrollTop = f >= 1 ? ui.scroller.scrollHeight : gridTop() + tops[index] - (settings.headerHidden ? 0 : ui.bar.offsetHeight);
+      renderVisible();
       const text = labelFor(index);
       ui.scrubLabel.textContent = text;
       if (text !== lastLabel && lastLabel && navigator.vibrate) navigator.vibrate(4);
@@ -1790,10 +1922,8 @@
     if (!usable) return ui.scrub.classList.remove("xbg-on");
     // Where we are in the whole list, from the first tile on screen.
     const y = (settings.headerHidden ? 0 : ui.bar.getBoundingClientRect().bottom) + 4;
-    const hit = document.elementFromPoint(window.innerWidth / 2, Math.max(y, 1));
-    const tile = hit && hit.closest(".xbg-grid > *");
-    let index = tile ? Array.prototype.indexOf.call(ui.grid.children, tile) : 0;
-    if (ui.scroller.scrollTop + ui.scroller.clientHeight >= ui.scroller.scrollHeight - 4 && shown >= entries.length) index = entries.length - 1;
+    let index = indexAt(y - ui.grid.getBoundingClientRect().top);
+    if (ui.scroller.scrollTop + ui.scroller.clientHeight >= ui.scroller.scrollHeight - 4) index = entries.length - 1;
     placeThumb(index / Math.max(entries.length - 1, 1));
     ui.scrubLabel.textContent = labelFor(index);
     ui.scrub.classList.add("xbg-on");
