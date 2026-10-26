@@ -269,3 +269,368 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
+
+/* --- Collections --------------------------------------------------------- */
+
+#xbg-overlay .xbg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+#xbg-overlay .xbg-text-btn,
+#xbg-overlay .xbg-link {
+  border: 0;
+  background: transparent;
+  padding: 6px 4px;
+  color: var(--xbg-accent);
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-link {
+  font-weight: 400;
+  font-size: 14px;
+}
+
+#xbg-overlay .xbg-tabs {
+  display: flex;
+  margin: 0 -12px -10px;
+  width: calc(100% + 24px);
+}
+
+#xbg-overlay .xbg-tab {
+  flex: 1;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-tab.xbg-on {
+  color: var(--xbg-text);
+  border-bottom-color: var(--xbg-text);
+}
+
+#xbg-overlay .xbg-collections {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px 12px;
+  max-width: 935px;
+  margin: 0 auto;
+  padding: 16px 12px 0;
+}
+
+#xbg-overlay .xbg-card {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#xbg-overlay .xbg-card-cover {
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+}
+
+#xbg-overlay .xbg-card-name {
+  margin-top: 6px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-card-count {
+  color: var(--xbg-muted);
+  font-size: 13px;
+}
+
+/* Cover made of up to 4 thumbnails */
+#xbg-overlay .xbg-mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  overflow: hidden;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-mosaic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="1"] img {
+  grid-column: 1 / 3;
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="2"] img {
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="3"] img:first-child {
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #536471;
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 32px;
+}
+
+#xbg-overlay .xbg-backup {
+  display: block;
+  margin-top: 24px;
+}
+
+/* Select mode */
+#xbg-overlay .xbg-tile.xbg-selected::after {
+  content: "✓";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--xbg-accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected img {
+  opacity: 0.6;
+}
+
+#xbg-overlay.xbg-selecting .xbg-tile:not(.xbg-selected)::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+#xbg-overlay .xbg-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid #2f3336;
+  background: var(--xbg-bg);
+}
+
+#xbg-overlay .xbg-select-info {
+  flex: 1;
+  color: var(--xbg-muted);
+  font-size: 14px;
+}
+
+#xbg-overlay .xbg-select-bar .xbg-primary,
+#xbg-overlay .xbg-select-bar .xbg-secondary {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+}
+
+/* Buttons used in sheets and bars */
+#xbg-overlay .xbg-primary,
+#xbg-overlay .xbg-secondary {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-primary {
+  border: 0;
+  background: var(--xbg-text);
+  color: #000;
+}
+
+#xbg-overlay .xbg-secondary {
+  border: 1px solid #536471;
+  background: transparent;
+}
+
+#xbg-overlay .xbg-primary:disabled,
+#xbg-overlay .xbg-secondary:disabled {
+  opacity: 0.4;
+}
+
+#xbg-overlay .xbg-primary.xbg-danger {
+  background: #f4212e;
+  color: #fff;
+}
+
+#xbg-overlay .xbg-danger-text {
+  color: #f4212e;
+}
+
+/* Bottom sheet */
+#xbg-overlay .xbg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+#xbg-overlay .xbg-sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 8px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  border-radius: 16px 16px 0 0;
+  background: #16181c;
+}
+
+#xbg-overlay .xbg-sheet-handle {
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 2px;
+  background: #536471;
+}
+
+#xbg-overlay .xbg-sheet-title {
+  margin-bottom: 8px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+#xbg-overlay .xbg-sheet-text {
+  margin: 0 0 6px;
+  color: var(--xbg-muted);
+  text-align: center;
+}
+
+#xbg-overlay .xbg-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #536471;
+  border-radius: 8px;
+  background: #000;
+  color: var(--xbg-text);
+  font: inherit;
+  font-size: 16px;
+}
+
+#xbg-overlay .xbg-input:focus {
+  outline: none;
+  border-color: var(--xbg-accent);
+}
+
+#xbg-overlay .xbg-picker {
+  display: flex;
+  flex-direction: column;
+}
+
+#xbg-overlay .xbg-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#xbg-overlay .xbg-pick-cover {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  font-size: 22px;
+}
+
+#xbg-overlay .xbg-pick-name {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-pick-name small {
+  color: var(--xbg-muted);
+  font-weight: 400;
+  font-size: 13px;
+}
+
+#xbg-overlay .xbg-pick-check {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #536471;
+  text-align: center;
+  line-height: 22px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-pick.xbg-on .xbg-pick-check {
+  border-color: var(--xbg-accent);
+  background: var(--xbg-accent);
+  color: #fff;
+}
+
+/* Lightbox save button */
+#xbg-overlay .xbg-lb-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#xbg-overlay .xbg-save {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-save.xbg-on {
+  border-color: var(--xbg-text);
+  background: var(--xbg-text);
+  color: #000;
+}
+
+/* Small message at the bottom */
+#xbg-overlay .xbg-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 90px;
+  z-index: 4;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--xbg-accent);
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+}

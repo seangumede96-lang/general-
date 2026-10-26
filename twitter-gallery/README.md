@@ -24,6 +24,20 @@ scrolls the bookmarks page for you while it's open.
    and tap **Open gallery**. The header shows "Loading all bookmarks…" until
    everything is in, then "All loaded".
 
+## Collections
+
+Like Instagram's saved collections, but stored on your phone (inside the
+extension, not on X):
+
+- **Collections** tab → **New collection** to make one.
+- In **All posts**, tap **Select**, tap some posts, then **Add to collection**.
+- Or open any post and tap **＋ Save**.
+- Inside a collection: **Select** → **Remove** takes posts out; **⋯** renames
+  or deletes the collection (posts stay in your bookmarks).
+- **Back up collections** (bottom of the Collections tab) downloads a file;
+  **Restore from backup** loads it again. Back up before removing the
+  extension, because removing it deletes its saved data.
+
 ## Files
 
 `manifest.json`, `inject.js` (reads X's bookmark data), `content.js` (gallery),
