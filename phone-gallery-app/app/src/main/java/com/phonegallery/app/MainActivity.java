@@ -238,6 +238,7 @@ public class MainActivity extends Activity {
                 MediaStore.MediaColumns.DISPLAY_NAME,
                 MediaStore.MediaColumns.SIZE,
                 MediaStore.MediaColumns.MIME_TYPE,
+                MediaStore.MediaColumns.DATE_MODIFIED,
         };
         String where = MediaStore.Files.FileColumns.MEDIA_TYPE + " IN ("
                 + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE + ","
@@ -256,6 +257,7 @@ public class MainActivity extends Activity {
                 boolean video = c.getInt(1) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;
                 long added = c.getLong(3) * 1000L;
                 long taken = c.isNull(2) ? 0 : c.getLong(2);
+                if (taken <= 0) taken = bestGuessDate(c.getString(10), c.isNull(13) ? 0 : c.getLong(13) * 1000L, added);
                 int w = c.getInt(4);
                 int h = c.getInt(5);
                 if (c.getInt(6) % 180 == 90) { // stored sideways: swap so the shape is right
@@ -284,6 +286,42 @@ public class MainActivity extends Activity {
             return "[]";
         }
         return json.append(']').toString();
+    }
+
+    private static final long YEAR_2000 = 946684800000L;
+    private static final java.util.regex.Pattern NAME_DATE = java.util.regex.Pattern.compile(
+            "(?<!\\d)(20\\d{2})[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\\d|3[01])(?:[-_ T.]?([01]\\d|2[0-3])[-_.:]?([0-5]\\d)[-_.:]?([0-5]\\d))?");
+    private static final java.util.regex.Pattern NAME_MILLIS = java.util.regex.Pattern.compile("(?<!\\d)(1[3-9]\\d{11})(?!\\d)");
+
+    /**
+     * When a file has no "date taken" (downloads, screenshots from some apps,
+     * files copied from an old phone), its "date added" is just when it landed
+     * on this phone. Prefer a date in the file name (IMG_20230514_…,
+     * Screenshot_2024-01-02-…, 1696345678901.jpg), then the file's own
+     * modified time if that's earlier.
+     */
+    private static long bestGuessDate(String name, long modified, long added) {
+        long now = System.currentTimeMillis() + 86400000L;
+        if (name != null) {
+            java.util.regex.Matcher m = NAME_DATE.matcher(name);
+            if (m.find()) {
+                java.util.Calendar cal = java.util.Calendar.getInstance();
+                cal.clear();
+                cal.set(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)) - 1, Integer.parseInt(m.group(3)),
+                        m.group(4) != null ? Integer.parseInt(m.group(4)) : 12,
+                        m.group(5) != null ? Integer.parseInt(m.group(5)) : 0,
+                        m.group(6) != null ? Integer.parseInt(m.group(6)) : 0);
+                long t = cal.getTimeInMillis();
+                if (t > YEAR_2000 && t < now) return t;
+            }
+            m = NAME_MILLIS.matcher(name);
+            if (m.find()) {
+                long t = Long.parseLong(m.group(1));
+                if (t > YEAR_2000 && t < now) return t;
+            }
+        }
+        if (modified > YEAR_2000 && modified < now && (added <= 0 || modified < added)) return modified;
+        return added;
     }
 
     private static String jsonString(String text) {

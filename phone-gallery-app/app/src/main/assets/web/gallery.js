@@ -1201,7 +1201,8 @@
   // videos play in the full-screen viewer.
   function makeTile(item) {
     const tile = el("button", { class: "xbg-tile" + (selected.has(item.key) ? " xbg-selected" : ""), "data-key": item.key, "aria-label": item.type === "photo" ? "Photo" : "Video" });
-    tile.append(el("img", { src: item.thumb, loading: "lazy", decoding: "async", alt: "" }));
+    // The picture is asked for once the tile is on screen and the scrolling has slowed (see loadThumbs).
+    tile.append(el("img", { "data-src": item.thumb, decoding: "async", alt: "" }));
     if (item.type === "video") tile.append(el("span", { class: "xbg-badge xbg-badge-time" }, item.duration ? durationText(item.duration) : "▶"));
     else if (item.gif) tile.append(el("span", { class: "xbg-badge xbg-badge-time" }, "GIF"));
     if (view === "trash" && item.expires) {
@@ -1232,6 +1233,10 @@
   let tileSize = 0;
   let laidWidth = 0;
   let rendered = new Map(); // sig -> element on the page
+  const spare = new Map(); // recently scrolled-past tiles, kept so scrolling back is instant
+  const SPARE_MAX = 600;
+  let lastScroll = { y: 0, t: 0 };
+  let thumbTimer = null;
 
   function layoutGrid() {
     const width = ui.grid.clientWidth || ui.scroller.clientWidth || window.innerWidth;
@@ -1283,7 +1288,14 @@
       const key = sig(e);
       let node = rendered.get(key);
       if (node) rendered.delete(key);
-      else frag.append((node = makeEntry(e)));
+      else {
+        node = spare.get(key);
+        if (node) {
+          spare.delete(key);
+          node.classList.toggle("xbg-selected", selected.has(key));
+        } else node = makeEntry(e);
+        frag.append(node);
+      }
       const pos = lefts[i] < 0 ? `${tops[i]}|h` : `${tops[i]}|${lefts[i]}|${tileSize}`;
       if (node._pos !== pos) {
         node._pos = pos;
@@ -1300,15 +1312,46 @@
       }
       next.set(key, node);
     }
-    for (const node of rendered.values()) node.remove();
+    for (const [key, node] of rendered) {
+      node.remove();
+      if (node.classList.contains("xbg-tile")) spare.set(key, node);
+    }
+    for (const key of spare.keys()) {
+      if (spare.size <= SPARE_MAX) break;
+      spare.delete(key);
+    }
     rendered = next;
     if (frag.childNodes.length) ui.grid.append(frag);
+
+    // Flinging fast: wait until it slows before asking for pictures, so the
+    // phone isn't busy making thumbnails for photos that have already flown past.
+    const now = performance.now();
+    const speed = Math.abs(ui.scroller.scrollTop - lastScroll.y) / Math.max(now - lastScroll.t, 1);
+    lastScroll = { y: ui.scroller.scrollTop, t: now };
+    clearTimeout(thumbTimer);
+    if (speed < 2.5 && !scrubbing) loadThumbs();
+    else thumbTimer = setTimeout(loadThumbs, 90);
+  }
+
+  function loadThumbs() {
+    const y = ui.scroller.scrollTop - gridTop();
+    const lo = y - 300;
+    const hi = y + ui.scroller.clientHeight + 600;
+    for (const node of rendered.values()) {
+      const img = node.firstChild;
+      if (!img || img.tagName !== "IMG" || !img.dataset.src) continue;
+      const top = parseFloat(node.style.top);
+      if (top + tileSize < lo || top > hi) continue;
+      img.src = img.dataset.src;
+      delete img.dataset.src;
+    }
   }
 
   // Start the grid afresh (new view, filter or sort).
   function renderPrefix() {
     ui.grid.replaceChildren();
     rendered.clear();
+    spare.clear();
     headerEls.clear();
     layoutGrid();
     renderVisible();
@@ -1617,9 +1660,24 @@
     ui.lightbox.style.transform = "";
     ui.lightbox.classList.remove("xbg-hidden");
     const target = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(key)}"]`);
-    ui.feed.scrollTop = target ? target.offsetTop : 0;
+    centrePost(target);
     extendFeed();
     if (!wasOpen) addBackStep();
+  }
+
+  // Put the tapped photo in the exact middle of the screen, whatever its shape.
+  // The feed gets room above the first photo and below the last, so even
+  // those can sit in the middle.
+  function centrePost(post) {
+    const feed = ui.feed;
+    feed.style.paddingBottom = "50vh";
+    const first = feedStart === 0 && feed.querySelector(".xbg-post");
+    feed.style.paddingTop = first ? Math.max(0, (window.innerHeight - first.offsetHeight) / 2) + "px" : "";
+    if (!post) return (feed.scrollTop = 0);
+    feed.scrollTop = 0;
+    const r = post.getBoundingClientRect();
+    const fits = r.height <= window.innerHeight;
+    feed.scrollTop = fits ? r.top + r.height / 2 - window.innerHeight / 2 : r.top - feed.getBoundingClientRect().top;
   }
 
   function clearFeed() {
