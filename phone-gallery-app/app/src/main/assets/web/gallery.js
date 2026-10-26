@@ -834,11 +834,23 @@
     ui.refreshBtn.classList.toggle("xbg-hidden", !noAccess);
   }
 
+  // Where the Albums page was when you opened an album, so Back returns exactly there.
+  let albumsSpot = null;
+
   function setView(value, id = null, slide = null) {
+    const from = view;
+    if (from === "collections" && value !== "collections") {
+      albumsSpot = { top: ui.scroller.scrollTop, barHidden: ui.bar.classList.contains("xbg-bar-hidden") };
+    }
     view = value;
     openId = id;
     if (selectMode) setSelectMode(false);
     rebuild();
+    if (value === "collections" && insideViews.includes(from) && albumsSpot) {
+      ui.jumped = true; // our own scroll: leave the header as it was
+      ui.scroller.scrollTop = albumsSpot.top;
+      ui.bar.classList.toggle("xbg-bar-hidden", albumsSpot.barHidden && albumsSpot.top > 0);
+    }
     if (slide) {
       ui.scroller.classList.remove("xbg-slide-left", "xbg-slide-right");
       void ui.scroller.offsetWidth;
