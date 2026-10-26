@@ -345,7 +345,7 @@
 
   // --- Wiring --------------------------------------------------------------
 
-  chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+  (globalThis.browser || chrome).runtime.onMessage.addListener((msg, _sender, respond) => {
     if (msg && msg.type === "xbg-open") {
       openGallery();
       respond({ ok: true, count: items.size, onBookmarks: isBookmarks() });
