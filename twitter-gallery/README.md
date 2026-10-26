@@ -101,6 +101,15 @@ extension, not on X):
 - The saved copy is stored in pieces of 5,000, so saving and opening it never
   freezes the browser.
 
+## Coming back to the bookmarks page
+
+With a complete saved copy, opening the bookmarks page again (for example
+after Android paused the browser) only checks for new bookmarks: it fetches
+from the newest end until two pages bring nothing new, usually one or two
+requests, and adds anything new to the saved copy. A full reload runs when
+the saved copy is a week old, or from ⋯ → **Reload all bookmarks from X**
+(which also catches bookmarks you've removed).
+
 ## Sorting bookmarks into folders
 
 ⋯ → **Export all bookmarks for sorting** saves every loaded post once (its id,

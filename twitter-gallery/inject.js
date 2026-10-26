@@ -50,6 +50,17 @@
     post({ status: s });
   };
 
+  // content.js says how to load: "quick" (only fetch until we reach posts it
+  // already has saved) or "full". It answers within a moment of the page
+  // loading; without an answer we do a full load.
+  let plan = null;
+  let planWaiters = [];
+  const getPlan = () =>
+    plan ? Promise.resolve(plan) : new Promise((r) => {
+      planWaiters.push(r);
+      setTimeout(() => r(plan || { mode: "full" }), 30000);
+    });
+
   // Where each page of the current load started, so a later visit can carry on
   // from the last point content.js actually saved (it says so with "saved").
   let checkpoints = []; // [{ key, posts, pages, cursor }]
@@ -58,6 +69,11 @@
   window.addEventListener("message", (e) => {
     if (e.source !== window || !e.data) return;
     if (e.data.__xbgAsk === "status" && lastStatus) post({ status: lastStatus });
+    if (e.data.__xbgPlan && typeof e.data.__xbgPlan.mode === "string") {
+      plan = { mode: e.data.__xbgPlan.mode, known: new Set(e.data.__xbgPlan.known || []) };
+      planWaiters.forEach((r) => r(plan));
+      planWaiters = [];
+    }
     if (e.data.__xbgAsk === "saved" && Number.isFinite(e.data.posts)) {
       const cp = checkpoints.filter((c) => c.posts <= e.data.posts).pop();
       if (cp) writeResume(cp);
@@ -142,6 +158,7 @@
     const seen = new Set();
     let cursor = null;
     let posts = 0;
+    const ids = [];
     const walk = (node, depth, sortIndex) => {
       if (!node || typeof node !== "object" || depth > 80) return;
       if (Array.isArray(node)) {
@@ -150,6 +167,7 @@
       }
       if (typeof node.entryId === "string" && node.entryId.startsWith("tweet-")) {
         posts++;
+        ids.push(node.entryId.slice(6));
         if (typeof node.sortIndex === "string") sortIndex = node.sortIndex;
       }
       if (node.cursorType === "Bottom" && typeof node.value === "string") cursor = node.value;
@@ -166,7 +184,7 @@
       for (const k in node) walk(node[k], depth + 1, sortIndex);
     };
     walk(root, 0, null);
-    return { items, cursor, posts };
+    return { items, cursor, posts, ids };
   }
 
   function publish(json) {
@@ -220,9 +238,46 @@
     return Math.min(Math.max(untilReset / Math.max(left, 1), MIN_DELAY_MS), 60000);
   }
 
-  async function loadAll(tpl, cursor, firstPosts, resumeFrom) {
+  async function loadAll(tpl, cursor, firstPosts, resumeFrom, firstItems) {
     if (pagingKey === tpl.key) return;
     pagingKey = tpl.key;
+    const p = await getPlan();
+    const quick = p.mode === "quick" && !resumeFrom;
+    if (quick) {
+      // Top up only: stop once two pages in a row bring nothing new.
+      // Only posts with pictures or videos matter to the gallery: compare those.
+      const newIn = (items) => items.filter((it) => { const m = /\/status\/(\d+)/.exec(it.tweet || ""); return m && !p.known.has(m[1]); }).length;
+      let fresh = newIn(firstItems || []);
+      let quiet = fresh ? 0 : 1;
+      let posts = firstPosts || 0;
+      let pages = 1;
+      status({ state: "checking", pages, posts, fresh });
+      try {
+        while (cursor && quiet < 2 && template === tpl && pages < 400) {
+          const req = withCursor(tpl, cursor, BIG_PAGE);
+          const res = await origFetch(req.url, { method: tpl.method, headers: tpl.headers, body: tpl.method === "GET" ? undefined : req.body, credentials: "include" });
+          if (!res.ok) break;
+          const page = publish(await res.json());
+          pages++;
+          posts += page.posts;
+          const n = newIn(page.items);
+          fresh += n;
+          quiet = n ? 0 : quiet + 1;
+          status({ state: "checking", pages, posts, fresh });
+          if (!page.posts) break;
+          cursor = page.cursor;
+          await sleep(nextDelay(res));
+        }
+      } catch (e) {
+        /* the saved copy still stands */
+      }
+      if (template === tpl) {
+        doneKeys.add(tpl.key);
+        status({ state: "done", quick: true, pages, posts, fresh });
+      }
+      if (pagingKey === tpl.key) pagingKey = null;
+      return;
+    }
     const used = new Set();
     const resumed = !!resumeFrom;
     let pages = resumed ? resumeFrom.pages : 1;
@@ -291,7 +346,7 @@
     const isFirstPage = !/"cursor":/.test(new URL(req.url, location.origin).searchParams.get("variables") || req.body || "");
     if (!isFirstPage || pagingKey === key || doneKeys.has(key)) return;
     template = { ...req, key };
-    if (page.cursor && page.posts) loadAll(template, page.cursor, page.posts, readResume(key));
+    if (page.cursor && page.posts) loadAll(template, page.cursor, page.posts, readResume(key), page.items);
     else status({ state: "done", pages: 1, posts: page.posts });
   }
 
