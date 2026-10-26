@@ -26,7 +26,8 @@
   let totalCount = 0;
   let shown = 0; // how many entries are in the page so far
   const headerEls = new Map();
-  let lbKey = null;
+  let feedStart = 0; // the feed shows current[feedStart .. feedEnd)
+  let feedEnd = 0;
   let ui = null;
   let ball = null;
   let gotData = false; // inject.js has delivered media during this visit
@@ -67,7 +68,7 @@
     for (const f of ["thumb", "full", "video"]) {
       out[f] = typeof item[f] === "string" && SAFE_MEDIA.test(item[f]) ? item[f] : null;
     }
-    for (const f of ["saved", "posted"]) out[f] = Number.isFinite(item[f]) ? item[f] : null;
+    for (const f of ["saved", "posted", "w", "h"]) out[f] = Number.isFinite(item[f]) && item[f] > 0 ? item[f] : null;
     return out.thumb ? out : null;
   }
 
@@ -513,18 +514,18 @@
     const removeBtn = el("button", { class: "xbg-secondary", onclick: removeSelected }, "Remove");
     const selectBar = el("div", { class: "xbg-select-bar xbg-hidden" }, selectInfo, removeBtn, addBtn);
 
-    const stage = el("div", { class: "xbg-stage" });
-    const openLink = el("a", { class: "xbg-open", target: "_blank", rel: "noopener noreferrer" }, "Open post ↗");
-    const saveBtn = el("button", { class: "xbg-save", onclick: () => lbKey && openPicker([lbKey], () => updateSaveBtn(lbKey)) });
-    const counter = el("span", { class: "xbg-counter" });
+    // Tapping a post opens a feed you scroll freely, like Instagram.
+    const feed = el("div", { class: "xbg-feed" });
     const lightbox = el(
       "div",
       { class: "xbg-lightbox xbg-hidden" },
-      stage,
-      el("button", { class: "xbg-lb-close", "aria-label": "Close", onclick: closeLightbox }, "✕"),
-      el("button", { class: "xbg-nav xbg-prev", "aria-label": "Previous", onclick: () => slideTo(-1) }, "▲"),
-      el("button", { class: "xbg-nav xbg-next", "aria-label": "Next", onclick: () => slideTo(1) }, "▼"),
-      el("div", { class: "xbg-lb-bar" }, counter, el("div", { class: "xbg-lb-actions" }, saveBtn, openLink))
+      el(
+        "header",
+        { class: "xbg-feed-bar" },
+        el("button", { class: "xbg-close", "aria-label": "Back to grid", onclick: closeLightbox }, "‹"),
+        el("div", { class: "xbg-title" }, "Posts")
+      ),
+      feed
     );
 
     const bar = el(
@@ -541,7 +542,7 @@
     ui = {
       overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn,
       layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
-      lightbox, stage, openLink, saveBtn, counter, toast: toastEl, sheet: null,
+      lightbox, feed, toast: toastEl, sheet: null,
     };
 
     wireGrid();
@@ -559,8 +560,6 @@
       if (e.key === "Escape") closeSheet();
     } else if (!ui.lightbox.classList.contains("xbg-hidden")) {
       if (e.key === "Escape") closeLightbox();
-      else if (e.key === "ArrowDown" || e.key === "ArrowRight") slideTo(1);
-      else if (e.key === "ArrowUp" || e.key === "ArrowLeft") slideTo(-1);
     } else if (e.key === "Escape") {
       if (selectMode) setSelectMode(false);
       else if (view === "collection") setView("collections");
@@ -663,67 +662,29 @@
     });
   }
 
-  // In the full-screen viewer, swipe up for the next post and down for the
-  // previous one, like a feed: the post follows your finger, then slides away.
-  // Swipes that start on a video's control bar are left alone so seeking works.
+  // The feed adds posts above and below as you scroll, and plays videos
+  // (muted) while they're on screen, like Instagram.
   function wireLightbox() {
-    const { lightbox, stage } = ui;
-    let touch = null;
-    lightbox.addEventListener("touchstart", (e) => {
-      const t = e.touches[0];
-      const onControls = e.target.tagName === "VIDEO" && t.clientY > e.target.getBoundingClientRect().bottom - 60;
-      const onButtons = e.target.closest(".xbg-lb-bar, .xbg-nav, .xbg-lb-close");
-      touch = e.touches.length === 1 && !onControls && !onButtons && !sliding ? { x: t.clientX, y: t.clientY, at: Date.now(), dy: 0, vertical: false } : null;
+    const { feed } = ui;
+    let ticking = false;
+    feed.addEventListener("scroll", () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        extendFeed();
+      });
     }, { passive: true });
-    lightbox.addEventListener("touchmove", (e) => {
-      if (!touch) return;
-      const t = e.touches[0];
-      const dx = t.clientX - touch.x;
-      const dy = t.clientY - touch.y;
-      if (!touch.vertical) {
-        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-        if (Math.abs(dx) > Math.abs(dy)) return (touch = null);
-        touch.vertical = true;
-      }
-      touch.dy = dy;
-      stage.style.transition = "none";
-      stage.style.transform = `translateY(${dy}px)`;
-    }, { passive: true });
-    lightbox.addEventListener("touchend", () => {
-      if (!touch || !touch.vertical) return (touch = null);
-      const { dy, at } = touch;
-      touch = null;
-      const flick = Math.abs(dy) > 40 && Date.now() - at < 300;
-      if (Math.abs(dy) > window.innerHeight * 0.15 || flick) slideTo(dy < 0 ? 1 : -1);
-      else settle();
-    });
-  }
-
-  function settle() {
-    ui.stage.style.transition = "transform 0.2s ease";
-    ui.stage.style.transform = "";
-  }
-
-  let sliding = false;
-  function slideTo(delta) {
-    if (!lbKey || sliding) return;
-    const i = current.findIndex((it) => it.key === lbKey);
-    const target = current[i + delta];
-    if (!target) return settle(); // already at the first or last post
-    const { stage } = ui;
-    const h = window.innerHeight;
-    sliding = true;
-    stage.style.transition = "transform 0.18s ease-in";
-    stage.style.transform = `translateY(${delta > 0 ? -h : h}px)`;
-    setTimeout(() => {
-      openLightbox(target.key);
-      stage.style.transition = "none";
-      stage.style.transform = `translateY(${delta > 0 ? h : -h}px)`;
-      void stage.offsetHeight;
-      stage.style.transition = "transform 0.22s ease-out";
-      stage.style.transform = "";
-      setTimeout(() => (sliding = false), 220);
-    }, 180);
+    ui.feedVideos = new IntersectionObserver(
+      (list) => {
+        for (const entry of list) {
+          const v = entry.target;
+          if (entry.isIntersecting) v.play().catch(() => {});
+          else v.pause();
+        }
+      },
+      { root: feed, threshold: 0.6 }
+    );
   }
 
   function syncControls() {
@@ -923,31 +884,55 @@
     const show = view !== "collections" && (settings.layout === "months" || settings.layout === "years");
     ui.periodBar.classList.toggle("xbg-hidden", !show);
     if (!show) return;
-    const chip = (label, on, onclick, count) =>
-      el("button", { class: "xbg-pchip" + (on ? " xbg-on" : ""), onclick }, label, count != null ? el("small", {}, String(count)) : "");
+    const chip = (label, on, onclick, count, key) =>
+      el("button", { class: "xbg-pchip" + (on ? " xbg-on" : ""), onclick }, label, count != null ? el("small", { "data-k": key }, String(count)) : "");
     const yearLabel = (y) => (y === "unknown" ? "No date" : y);
+    const showMonths = settings.layout === "months" && periodYear && periodYear !== "unknown";
+    const selection = [settings.layout, periodYear, periodMonth].join("|");
+    const structure = [selection, ...periods.years.map((y) => y.year), "/", ...(showMonths ? periods.months.map((m) => m.key) : [])].join("|");
+
+    if (ui.periodBar.dataset.structure === structure) {
+      // Same chips as before (e.g. more bookmarks finished loading): just update
+      // the numbers, so the bar doesn't move while you're sliding it.
+      for (const y of periods.years) {
+        const n = ui.yearBar.querySelector(`small[data-k="${CSS.escape(y.year)}"]`);
+        if (n) n.textContent = String(y.count);
+      }
+      for (const m of periods.months) {
+        const n = ui.monthBar.querySelector(`small[data-k="${CSS.escape(m.key)}"]`);
+        if (n) n.textContent = String(m.count);
+      }
+      return;
+    }
+
     const yearChips = [chip("All years", !periodYear || settings.layout === "years", () => choosePeriod(null, null))];
     for (const { year, count } of periods.years) {
-      yearChips.push(chip(yearLabel(year), settings.layout === "months" && periodYear === year, () => choosePeriod(year, null), count));
+      yearChips.push(chip(yearLabel(year), settings.layout === "months" && periodYear === year, () => choosePeriod(year, null), count, year));
     }
     const monthChips = [];
-    if (settings.layout === "months" && periodYear && periodYear !== "unknown") {
+    if (showMonths) {
       monthChips.push(chip(`All of ${periodYear}`, !periodMonth, () => choosePeriod(periodYear, null)));
       for (const m of periods.months) {
         const label = new Date(m.d).toLocaleDateString(undefined, { month: "short" });
-        monthChips.push(chip(label, periodMonth === m.key, () => choosePeriod(periodYear, m.key), m.count));
+        monthChips.push(chip(label, periodMonth === m.key, () => choosePeriod(periodYear, m.key), m.count, m.key));
       }
     }
-    // Only redraw when something changed, so the bar keeps its scroll position.
-    const signature = [settings.layout, periodYear, periodMonth, ...periods.years.map((y) => y.year + y.count), ...periods.months.map((m) => m.key + m.count)].join("|");
-    if (ui.periodBar.dataset.sig === signature) return;
-    ui.periodBar.dataset.sig = signature;
+    const keep = [ui.yearBar.scrollLeft, ui.monthBar.scrollLeft];
+    ui.periodBar.dataset.structure = structure;
     ui.yearBar.replaceChildren(...yearChips);
     ui.monthBar.replaceChildren(...monthChips);
     ui.monthBar.classList.toggle("xbg-hidden", !monthChips.length);
+    if (ui.periodBar.dataset.selection === selection) {
+      // Same choice, new chips: stay exactly where you were.
+      ui.yearBar.scrollLeft = keep[0];
+      ui.monthBar.scrollLeft = keep[1];
+      return;
+    }
+    // A new year or month was picked: bring it into the middle.
+    ui.periodBar.dataset.selection = selection;
     for (const row of [ui.yearBar, ui.monthBar]) {
       const on = row.querySelector(".xbg-on");
-      if (on) row.scrollLeft = on.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
+      if (on) row.scrollTo({ left: on.offsetLeft - (row.clientWidth - on.offsetWidth) / 2, behavior: "smooth" });
     }
   }
 
@@ -1176,65 +1161,112 @@
     location.href = "https://x.com/i/bookmarks";
   }
 
-  // --- Full-screen viewer --------------------------------------------------
+  // --- Post feed --------------------------------------------------------------
 
-  function updateSaveBtn(key) {
-    // Taking the post out of the collection being viewed removes it from this view.
-    const c = view === "collection" ? getCollection(openId) : null;
-    if (c && !c.keys.includes(key)) {
-      closeLightbox();
-      rebuild(false);
-      return;
+  const FEED_CHUNK = 10;
+
+  function feedPost(item) {
+    const user = ((item.tweet || "").match(/^https:\/\/x\.com\/([^/]+)\/status\//) || [])[1];
+    const d = dateOf(item);
+    const head = el(
+      "div",
+      { class: "xbg-post-head" },
+      el("span", { class: "xbg-post-user" }, user && user !== "i" ? "@" + user : "Post"),
+      el("span", { class: "xbg-post-date" }, d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "")
+    );
+    // Size the box from the media's real shape (when known) so the feed
+    // doesn't jump as pictures load.
+    const ratio = item.w && item.h ? Math.min(Math.max(item.w / item.h, 0.6), 2) : 1;
+    const media = el("div", { class: "xbg-post-media", style: `aspect-ratio: ${ratio.toFixed(4)}` });
+    if (item.type === "photo") {
+      media.append(el("img", { src: item.full || item.thumb, loading: "lazy", decoding: "async", alt: "", referrerpolicy: "no-referrer" }));
+    } else if (item.video) {
+      const v = el("video", { src: item.video, poster: item.full || item.thumb, controls: true, muted: true, loop: true, playsinline: true, preload: "none" });
+      v.muted = true;
+      media.append(v);
+      ui.feedVideos.observe(v);
+    } else {
+      media.append(
+        el("img", { src: item.full || item.thumb, loading: "lazy", alt: "", referrerpolicy: "no-referrer" }),
+        el("p", { class: "xbg-note" }, "This video can’t play here. Tap “Open post” to watch it.")
+      );
     }
-    if (c) rebuild(false);
+    const save = el("button", { class: "xbg-save", onclick: () => openPicker([item.key], () => afterSave(item.key)) });
+    paintSave(save, item.key);
+    const actions = el("div", { class: "xbg-post-actions" }, save);
+    if (item.tweet) actions.append(el("a", { class: "xbg-open", href: item.tweet, target: "_blank", rel: "noopener noreferrer" }, "Open post ↗"));
+    return el("article", { class: "xbg-post", "data-key": item.key }, head, media, actions);
+  }
+
+  function paintSave(btn, key) {
     const saved = isSaved(key);
-    ui.saveBtn.textContent = saved ? "✓ Saved" : "＋ Save";
-    ui.saveBtn.classList.toggle("xbg-on", saved);
+    btn.textContent = saved ? "✓ Saved" : "＋ Save";
+    btn.classList.toggle("xbg-on", saved);
+  }
+
+  function addFeedPosts(from, to, atTop) {
+    const frag = document.createDocumentFragment();
+    for (let i = from; i < to; i++) frag.append(feedPost(current[i]));
+    if (atTop) ui.feed.prepend(frag);
+    else ui.feed.append(frag);
+  }
+
+  // Add posts below as you near the bottom and above as you near the top
+  // (keeping your place when adding above).
+  function extendFeed() {
+    const f = ui.feed;
+    if (feedEnd < current.length && f.scrollTop + f.clientHeight > f.scrollHeight - 2500) {
+      const to = Math.min(current.length, feedEnd + FEED_CHUNK);
+      addFeedPosts(feedEnd, to, false);
+      feedEnd = to;
+    }
+    if (feedStart > 0 && f.scrollTop < 2500) {
+      const from = Math.max(0, feedStart - FEED_CHUNK);
+      const before = f.scrollHeight;
+      addFeedPosts(from, feedStart, true);
+      f.scrollTop += f.scrollHeight - before;
+      feedStart = from;
+    }
   }
 
   function openLightbox(key) {
     const index = current.findIndex((it) => it.key === key);
     if (index < 0) return;
-    lbKey = key;
-    const item = current[index];
-    ui.stage.querySelectorAll("video").forEach((v) => v.pause());
-    ui.stage.replaceChildren();
-    if (item.type === "photo") {
-      ui.stage.append(el("img", { src: item.full || item.thumb, alt: "", referrerpolicy: "no-referrer" }));
-    } else if (item.video) {
-      const v = el("video", { src: item.video, poster: item.full || item.thumb, controls: true, autoplay: true, playsinline: true, loop: item.type === "gif", preload: "auto" });
-      if (item.type === "gif") v.muted = true;
-      ui.stage.append(v);
-      v.play().catch(() => {});
-    } else {
-      ui.stage.append(
-        el("img", { src: item.full || item.thumb, alt: "" }),
-        el("p", { class: "xbg-note" }, "This video can’t play here. Tap “Open post” to watch it.")
-      );
-    }
-    // Warm up the neighbours so swiping feels instant.
-    for (const n of [current[index + 1], current[index - 1]]) {
-      if (n && n.type === "photo") new Image().src = n.full || n.thumb;
-    }
-    ui.counter.textContent = `${index + 1} / ${current.length}`;
-    if (item.tweet) {
-      ui.openLink.href = item.tweet;
-      ui.openLink.classList.remove("xbg-hidden");
-    } else {
-      ui.openLink.classList.add("xbg-hidden");
-    }
-    const saved = isSaved(item.key);
-    ui.saveBtn.textContent = saved ? "✓ Saved" : "＋ Save";
-    ui.saveBtn.classList.toggle("xbg-on", saved);
+    closeLightbox();
+    feedStart = Math.max(0, index - 3);
+    feedEnd = Math.min(current.length, index + FEED_CHUNK);
+    addFeedPosts(feedStart, feedEnd, false);
     ui.lightbox.classList.remove("xbg-hidden");
+    const target = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(key)}"]`);
+    ui.feed.scrollTop = target ? target.offsetTop : 0;
+    extendFeed();
   }
 
   function closeLightbox() {
     if (!ui) return;
-    ui.stage.querySelectorAll("video").forEach((v) => v.pause());
-    ui.stage.replaceChildren();
+    ui.feed.querySelectorAll("video").forEach((v) => {
+      v.pause();
+      ui.feedVideos.unobserve(v);
+    });
+    ui.feed.replaceChildren();
     ui.lightbox.classList.add("xbg-hidden");
-    lbKey = null;
+  }
+
+  // After the "Save to…" sheet closes: update the buttons, and if the post was
+  // taken out of the collection being viewed, drop it from the feed too.
+  function afterSave(key) {
+    for (const btn of ui.feed.querySelectorAll(".xbg-post .xbg-save")) paintSave(btn, btn.closest(".xbg-post").dataset.key);
+    const c = view === "collection" ? getCollection(openId) : null;
+    if (!c) return;
+    rebuild(false);
+    if (!c.keys.includes(key)) {
+      const post = ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(key)}"]`);
+      if (post) post.remove();
+    }
+    const keys = [...ui.feed.querySelectorAll(".xbg-post")].map((p) => p.dataset.key);
+    if (!keys.length) return closeLightbox();
+    feedStart = current.findIndex((it) => it.key === keys[0]);
+    feedEnd = current.findIndex((it) => it.key === keys[keys.length - 1]) + 1;
   }
 
   // --- Floating ball (shown everywhere on X) -------------------------------

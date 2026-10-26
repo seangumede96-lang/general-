@@ -76,6 +76,8 @@
       thumb: sized(thumb, "small"),
       posted,
       saved: sortIndex ? bookmarkTime(sortIndex, posted) : null,
+      w: (media.original_info && media.original_info.width) || null,
+      h: (media.original_info && media.original_info.height) || null,
     };
     if (media.type === "photo") return { ...base, type: "photo", full: sized(thumb, "large") };
     const mp4s = ((media.video_info && media.video_info.variants) || [])
