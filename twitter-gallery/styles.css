@@ -2210,3 +2210,54 @@
 #xbg-overlay .xbg-sort-icon {
   flex: none;
 }
+
+/* Sliding between All posts and Collections: the destination page moves in
+   beside the current one; the header steps aside, leaving only the tabs and
+   the white line, then fades back in. */
+#xbg-overlay .xbg-peek {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--xbg-bg);
+  will-change: transform, opacity;
+}
+
+#xbg-overlay .xbg-peek-inner {
+  position: relative;
+}
+
+#xbg-overlay .xbg-scroll {
+  will-change: transform;
+}
+
+#xbg-overlay .xbg-bar {
+  transition: transform 0.22s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+#xbg-overlay .xbg-bar > .xbg-row,
+#xbg-overlay .xbg-bar > .xbg-controls {
+  transition: opacity 0.2s ease, max-height 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#xbg-overlay .xbg-bar.xbg-swiping {
+  background: transparent;
+  border-bottom-color: transparent;
+}
+
+#xbg-overlay .xbg-bar.xbg-swiping > .xbg-row,
+#xbg-overlay .xbg-bar.xbg-swiping > .xbg-controls {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+#xbg-overlay .xbg-bar.xbg-swiping .xbg-tab {
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+
+#xbg-overlay.xbg-light .xbg-bar.xbg-swiping .xbg-tab {
+  text-shadow: 0 1px 6px rgba(255, 255, 255, 0.8);
+}

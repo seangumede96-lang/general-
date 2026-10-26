@@ -927,17 +927,18 @@
     }, { passive: true });
 
     // Swiping sideways moves between All posts and Collections (and back out
-    // of a collection). The page follows your finger and the tab underline
-    // slides with it; letting go far enough (or with a flick) glides to the
-    // other tab, otherwise it springs back.
+    // of a collection). The drag is locked sideways; the page and the one
+    // you're heading to move together under your finger, the destination
+    // fading in, while the header steps aside (only the tabs and the white
+    // line stay). Let go far enough, or flick, to finish; otherwise it
+    // springs back.
     let swipe = null;
+    let frame = 0;
     const targetFor = (dx) => (dx < 0 && view === "all" ? "collections" : dx > 0 && view === "collections" ? "all" : dx > 0 && view === "collection" ? "collections" : null);
-    const inkBase = () => (view === "all" ? 0 : 1);
-    const moveInk = (pos) => ui.tabInk && (ui.tabInk.style.transform = `translateX(${pos * 100}%)`);
     scroller.addEventListener("touchstart", (e) => {
       const t = e.touches[0];
       const fromEdge = t.clientX < 28 || t.clientX > window.innerWidth - 28; // Android's back gesture
-      swipe = e.touches.length === 1 && !selectMode && !ui.sheet && !fromEdge ? { x: t.clientX, y: t.clientY, at: Date.now(), dx: 0, on: false } : null;
+      swipe = e.touches.length === 1 && !selectMode && !ui.sheet && !fromEdge && !ui.sliding ? { x: t.clientX, y: t.clientY, at: Date.now(), dx: 0, on: false } : null;
     }, { passive: true });
     scroller.addEventListener("touchmove", (e) => {
       if (!swipe) return;
@@ -945,21 +946,22 @@
       const dx = t.clientX - swipe.x;
       const dy = t.clientY - swipe.y;
       if (!swipe.on) {
-        if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
-        if (Math.abs(dx) < Math.abs(dy) * 1.5 || !targetFor(dx)) return (swipe = null);
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        if (Math.abs(dx) < Math.abs(dy) * 1.3 || !targetFor(dx)) return (swipe = null);
         swipe.on = true;
         swipe.target = targetFor(dx);
-        scroller.style.transition = "none";
-        if (ui.tabInk) ui.tabInk.style.transition = "none";
+        swipe.dir = dx < 0 ? -1 : 1;
+        swipe.x = t.clientX; // start following from here, so nothing jumps
+        startSlide(swipe.target, swipe.dir);
       }
-      // Follow the finger in the allowed direction only, a little damped.
-      swipe.dx = swipe.target === "collections" && view === "all" ? Math.min(0, dx) : Math.max(0, dx);
-      const w = window.innerWidth;
-      scroller.style.transform = `translateX(${swipe.dx * 0.85}px)`;
-      scroller.style.opacity = String(1 - Math.min(Math.abs(swipe.dx) / w, 1) * 0.35);
-      if (view !== "collection") moveInk(Math.min(1, Math.max(0, inkBase() - swipe.dx / w)));
-      if (view === "all") ui.controls.style.opacity = String(1 - Math.min(Math.abs(swipe.dx) / (w * 0.4), 1));
-    }, { passive: true });
+      if (e.cancelable) e.preventDefault(); // sideways only: no drifting up and down
+      const raw = t.clientX - swipe.x;
+      swipe.dx = swipe.dir < 0 ? Math.min(0, raw) : Math.max(0, raw);
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (swipe && swipe.on) moveSlide(swipe.dx);
+      });
+    }, { passive: false });
     const endSwipe = () => {
       const sw = swipe;
       swipe = null;
@@ -967,44 +969,123 @@
       const w = window.innerWidth;
       const speed = Math.abs(sw.dx) / Math.max(Date.now() - sw.at, 1);
       const go = Math.abs(sw.dx) > w * 0.25 || (speed > 0.45 && Math.abs(sw.dx) > 40);
-      if (ui.tabInk) ui.tabInk.style.transition = "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)";
-      if (!go) {
-        scroller.style.transition = "transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s";
-        scroller.style.transform = "";
-        scroller.style.opacity = "";
-        ui.controls.style.opacity = "";
-        moveInk(inkBase());
-        return;
-      }
-      slideTo(sw.target, sw.dx < 0 ? -1 : 1);
+      finishSlide(go);
     };
     scroller.addEventListener("touchend", endSwipe);
     scroller.addEventListener("touchcancel", endSwipe);
   }
 
-  // Glide the page out, switch view, glide the new one in from the other side.
-  // The filter rows fold away while leaving All posts and unfold smoothly on return.
-  function slideTo(target, dir, fromHistory = false) {
-    const scroller = ui.scroller;
-    const w = window.innerWidth;
-    scroller.style.transition = "transform 0.12s cubic-bezier(0.4, 0, 1, 1), opacity 0.12s";
-    scroller.style.transform = `translateX(${dir * w}px)`;
-    scroller.style.opacity = "0.3";
-    if (ui.tabInk && target !== "collection") {
-      ui.tabInk.style.transition = "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)";
-      ui.tabInk.style.transform = `translateX(${target === "all" ? 0 : 100}%)`;
+  // --- Sliding between All posts and Collections ------------------------------
+  // The page you're going to is shown beside the current one as a light copy
+  // (a snapshot of the grid where you left it, or the collection cards), so
+  // the two move together. When the slide finishes the real page takes over
+  // at exactly the same spot.
+  let gridSnapshot = null; // { node, top, gridTop } taken when leaving All posts
+  let allSpot = null;
+  let slide = null;
+
+  function snapshotGrid() {
+    if (!ui || view !== "all") return;
+    gridSnapshot = { node: ui.grid.cloneNode(true), top: ui.scroller.scrollTop, gridTop: gridTop(), left: ui.grid.offsetLeft, width: ui.grid.offsetWidth };
+  }
+
+  function buildPeek(target) {
+    const sc = ui.scroller;
+    const peek = el("div", { class: "xbg-peek" });
+    peek.style.top = sc.offsetTop + "px";
+    peek.style.height = sc.clientHeight + "px";
+    const inner = el("div", { class: "xbg-peek-inner" });
+    peek.append(inner);
+    if (target === "all" && gridSnapshot) {
+      const g = gridSnapshot.node;
+      g.classList.remove("xbg-hidden");
+      Object.assign(g.style, { position: "absolute", top: gridSnapshot.gridTop + "px", left: gridSnapshot.left + "px", width: gridSnapshot.width + "px", margin: "0" });
+      inner.append(g);
+      inner.style.transform = `translateY(${-gridSnapshot.top}px)`;
+    } else if (target === "collections") {
+      // Room for the header as it will be on Collections (filters folded away).
+      const pad = settings.headerHidden ? 0 : ui.bar.offsetHeight - (ui.controls.classList.contains("xbg-collapsed") ? 0 : ui.controls.offsetHeight);
+      inner.style.paddingTop = pad + "px";
+      inner.append(el("div", { class: "xbg-cards" }, ...collectionCards()));
+      const top = view === "collection" && collectionsSpot ? collectionsSpot.top : 0;
+      inner.style.transform = `translateY(${-top}px)`;
     }
+    ui.overlay.insertBefore(peek, ui.bar);
+    return peek;
+  }
+
+  function startSlide(target, dir) {
+    if (view === "all") snapshotGrid();
+    const peek = buildPeek(target);
+    slide = { target, dir, peek, w: window.innerWidth };
+    ui.sliding = true;
+    ui.bar.classList.add("xbg-swiping");
+    ui.scroller.style.transition = peek.style.transition = "none";
+    if (ui.tabInk) ui.tabInk.style.transition = "none";
+    moveSlide(0);
+  }
+
+  function moveSlide(dx) {
+    if (!slide) return;
+    const { w, dir, peek } = slide;
+    const p = Math.min(Math.abs(dx) / w, 1);
+    ui.scroller.style.transform = `translate3d(${dx}px, 0, 0)`;
+    peek.style.transform = `translate3d(${-dir * w + dx}px, 0, 0)`;
+    peek.style.opacity = String(0.25 + 0.75 * p);
+    if (ui.tabInk && view !== "collection") {
+      const base = view === "all" ? 0 : 1;
+      ui.tabInk.style.transform = `translateX(${Math.min(1, Math.max(0, base - dx / w)) * 100}%)`;
+    }
+  }
+
+  function finishSlide(go) {
+    if (!slide) return;
+    const { target, dir, peek, w } = slide;
+    const ease = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+    const t = go ? 0.2 : 0.22;
+    ui.scroller.style.transition = peek.style.transition = `transform ${t}s ${ease}, opacity ${t}s ${ease}`;
+    if (ui.tabInk) ui.tabInk.style.transition = `transform ${t}s ${ease}`;
+    if (!go) {
+      ui.scroller.style.transform = "";
+      peek.style.transform = `translate3d(${-dir * w}px, 0, 0)`;
+      peek.style.opacity = "0";
+      if (ui.tabInk && view !== "collection") ui.tabInk.style.transform = `translateX(${view === "all" ? 0 : 100}%)`;
+      setTimeout(() => endSlide(), t * 1000);
+      return;
+    }
+    ui.scroller.style.transform = `translate3d(${dir * w}px, 0, 0)`;
+    peek.style.transform = "translate3d(0, 0, 0)";
+    peek.style.opacity = "1";
+    if (ui.tabInk && target !== "collection") ui.tabInk.style.transform = `translateX(${target === "all" ? 0 : 100}%)`;
     setTimeout(() => {
-      setView(target, null, null, fromHistory);
-      ui.controls.style.opacity = "";
-      scroller.style.transition = "none";
-      scroller.style.transform = `translateX(${-dir * w * 0.3}px)`;
-      scroller.style.opacity = "0.4";
-      void scroller.offsetWidth;
-      scroller.style.transition = "transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.24s";
-      scroller.style.transform = "";
-      scroller.style.opacity = "";
-    }, 120);
+      // Swap in the real page under the copy, at the same spot, then drop the copy.
+      ui.controls.style.transition = "none";
+      setView(target, null, null, slide.fromHistory);
+      ui.scroller.style.transition = "none";
+      ui.scroller.style.transform = "";
+      void ui.controls.offsetHeight;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        ui.controls.style.transition = "";
+        endSlide();
+      }));
+    }, t * 1000);
+  }
+
+  function endSlide() {
+    if (slide && slide.peek) slide.peek.remove();
+    slide = null;
+    ui.sliding = false;
+    ui.scroller.style.transition = "";
+    ui.scroller.style.transform = "";
+    ui.bar.classList.remove("xbg-swiping"); // the header fades back in
+  }
+
+  // Back gesture / back button inside a collection uses the same slide.
+  function slideTo(target, dir, fromHistory = false) {
+    if (slide) return;
+    startSlide(target, dir);
+    slide.fromHistory = fromHistory;
+    requestAnimationFrame(() => finishSlide(true));
   }
 
   // The feed adds posts above and below as you scroll, and plays videos
@@ -1216,12 +1297,13 @@
     else if (from === "collection" && value !== "collection" && !fromHistory) removeBackStep();
     const here = { top: ui.scroller.scrollTop, barHidden: ui.bar.classList.contains("xbg-bar-hidden") };
     if (from === "collections" && value !== "collections") collectionsSpot = here;
+    if (from === "all" && value !== "all") allSpot = here;
     if (from === "collection") collectionSpots.set(openId, here);
     view = value;
     openId = id;
     if (selectMode) setSelectMode(false);
     rebuild();
-    const spot = value === "collections" && from === "collection" ? collectionsSpot : value === "collection" ? collectionSpots.get(id) : null;
+    const spot = value === "collections" && from === "collection" ? collectionsSpot : value === "collection" ? collectionSpots.get(id) : value === "all" && from !== "all" ? allSpot : null;
     if (spot) {
       ui.jumped = true; // our own scroll: leave the header as it was
       ui.bar.classList.toggle("xbg-bar-hidden", spot.barHidden && spot.top > 0);
@@ -1712,7 +1794,7 @@
     choosePeriod(year, null);
   }
 
-  function renderCollections() {
+  function collectionCards() {
     const cards = [
       el(
         "button",
@@ -1732,7 +1814,11 @@
         )
       );
     }
-    ui.collGrid.replaceChildren(...cards);
+    return cards;
+  }
+
+  function renderCollections() {
+    ui.collGrid.replaceChildren(...collectionCards());
     ui.empty.replaceChildren(
       collections.length ? "" : "Group your favourite posts into collections, like on Instagram.",
       el(
