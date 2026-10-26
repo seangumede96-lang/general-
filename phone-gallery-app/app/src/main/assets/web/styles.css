@@ -1938,3 +1938,30 @@ html,
 #xbg-overlay .xbg-viewer .xbg-v-sub {
   font-size: 11px;
 }
+
+/* Fast scrolling: soft grey placeholders, and photos fade in when ready */
+#xbg-overlay .xbg-tile,
+#xbg-overlay .xbg-post-media {
+  background: #1c1c1e;
+  contain-intrinsic-size: auto 100px;
+}
+
+#xbg-overlay.xbg-light .xbg-tile,
+#xbg-overlay.xbg-light .xbg-post-media {
+  background: #e5e5ea;
+}
+
+#xbg-overlay .xbg-tile img,
+#xbg-overlay .xbg-post-media img {
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
+}
+
+#xbg-overlay .xbg-tile img.xbg-in,
+#xbg-overlay .xbg-post-media img.xbg-in {
+  opacity: 1;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected img.xbg-in {
+  opacity: 0.72;
+}

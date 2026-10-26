@@ -1885,6 +1885,16 @@
   // --- Files the phone can't show -------------------------------------------
   // Instead of the browser's broken-image symbol, show a dark tile with a
   // cracked-Polaroid icon (and, full screen, a way to open it elsewhere).
+  // Photos fade in once they've loaded, so fast scrolling looks smooth instead of popping.
+  document.addEventListener(
+    "load",
+    (e) => {
+      const img = e.target;
+      if (img instanceof HTMLImageElement && img.parentNode && img.parentNode.matches(".xbg-tile, .xbg-post-media")) img.classList.add("xbg-in");
+    },
+    true
+  );
+
   document.addEventListener("error", (e) => {
     const media = e.target;
     if (!(media instanceof HTMLImageElement || media instanceof HTMLVideoElement) || !media.closest("#xbg-overlay")) return;
