@@ -1926,14 +1926,27 @@
     const thumb = el("div", { class: "xbg-scrub-thumb" });
     const label = el("div", { class: "xbg-scrub-label" });
     const track = el("div", { class: "xbg-scrubber" }, label, thumb);
-    ui.overlay.append(track);
-    Object.assign(ui, { scrub: track, scrubThumb: thumb, scrubLabel: label });
+    // Two small round buttons at the ends of the handle's path: ↑ jumps to the
+    // very top (shown in the lower half), ↓ to the very bottom (upper half).
+    const arrow = (d) => {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", d);
+      svg.append(path);
+      return svg;
+    };
+    const jumpUp = el("button", { class: "xbg-jump", "aria-label": "Go to the top", onclick: () => jumpToEnd(false) }, arrow("M12 19V5M6 11l6-6 6 6"));
+    const jumpDown = el("button", { class: "xbg-jump", "aria-label": "Go to the bottom", onclick: () => jumpToEnd(true) }, arrow("M12 5v14M6 13l6 6 6-6"));
+    ui.overlay.append(track, jumpUp, jumpDown);
+    Object.assign(ui, { scrub: track, scrubThumb: thumb, scrubLabel: label, jumpUp, jumpDown });
 
     let lastLabel = "";
     const dragTo = (clientY) => {
       const { top, height } = scrubArea();
       const f = Math.min(Math.max((clientY - top) / height, 0), 1);
       placeThumb(f);
+      placeJumps(f);
       if (!entries.length) return;
       // Jump to the photo at that point of the list (loading tiles up to it).
       const index = Math.round(f * (entries.length - 1));
@@ -1972,11 +1985,44 @@
     thumb.addEventListener("pointercancel", end);
   }
 
-  // The part of the screen the handle moves along (below the header).
-  function scrubArea() {
+  const JUMP_SIZE = 34;
+
+  // The part of the screen the handle moves along: below the header, between the two jump buttons.
+  function scrubEnds() {
     const top = (settings.headerHidden ? 0 : ui.bar.getBoundingClientRect().bottom) + 12;
     const bottom = window.innerHeight - (selectMode ? ui.selectBar.offsetHeight : 0) - 70;
-    return { top, height: Math.max(bottom - top, 1) };
+    return { top, bottom };
+  }
+
+  function scrubArea() {
+    const { top, bottom } = scrubEnds();
+    const room = JUMP_SIZE + 26;
+    return { top: top + room, height: Math.max(bottom - top - 2 * room, 1) };
+  }
+
+  function placeJumps(f) {
+    const { top, bottom } = scrubEnds();
+    ui.jumpUp.style.top = top + "px";
+    ui.jumpDown.style.top = bottom - JUMP_SIZE + "px";
+    ui.jumpUp.classList.toggle("xbg-on", f >= 0.5);
+    ui.jumpDown.classList.toggle("xbg-on", f < 0.5);
+  }
+
+  function hideJumps() {
+    ui.jumpUp.classList.remove("xbg-on");
+    ui.jumpDown.classList.remove("xbg-on");
+  }
+
+  function jumpToEnd(bottom) {
+    ui.jumped = true;
+    if (!bottom) ui.bar.classList.remove("xbg-bar-hidden");
+    ui.scroller.scrollTop = bottom ? ui.scroller.scrollHeight : 0;
+    renderVisible();
+    if (navigator.vibrate) navigator.vibrate(8);
+    placeThumb(bottom ? 1 : 0);
+    ui.scrubLabel.textContent = labelFor(bottom ? entries.length - 1 : 0);
+    placeJumps(bottom ? 1 : 0);
+    hideScrubberSoon();
   }
 
   function placeThumb(f) {
@@ -1995,12 +2041,17 @@
   function showScrubber() {
     if (!ui || !ui.scrub || scrubbing) return;
     const usable = view !== "collections" && settings.layout !== "years" && entries.length >= SCRUB_MIN_ITEMS && !feedOpen();
-    if (!usable) return ui.scrub.classList.remove("xbg-on");
+    if (!usable) {
+      hideJumps();
+      return ui.scrub.classList.remove("xbg-on");
+    }
     // Where we are in the whole list, from the first tile on screen.
     const y = (settings.headerHidden ? 0 : ui.bar.getBoundingClientRect().bottom) + 4;
     let index = indexAt(y - ui.grid.getBoundingClientRect().top);
     if (ui.scroller.scrollTop + ui.scroller.clientHeight >= ui.scroller.scrollHeight - 4) index = entries.length - 1;
-    placeThumb(index / Math.max(entries.length - 1, 1));
+    const f = index / Math.max(entries.length - 1, 1);
+    placeThumb(f);
+    placeJumps(f);
     ui.scrubLabel.textContent = labelFor(index);
     ui.scrub.classList.add("xbg-on");
     hideScrubberSoon();
@@ -2009,7 +2060,9 @@
   function hideScrubberSoon() {
     clearTimeout(scrubTimer);
     scrubTimer = setTimeout(() => {
-      if (!scrubbing) ui.scrub.classList.remove("xbg-on");
+      if (scrubbing) return;
+      ui.scrub.classList.remove("xbg-on");
+      hideJumps();
     }, 1400);
   }
 

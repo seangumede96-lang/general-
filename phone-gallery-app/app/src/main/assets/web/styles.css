@@ -2003,3 +2003,55 @@ html,
   opacity: 0;
   pointer-events: none;
 }
+
+/* Jump to the very top / bottom: small glass circles at the ends of the fast-scroll path */
+#xbg-overlay .xbg-jump {
+  position: fixed;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(30, 30, 32, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#xbg-overlay .xbg-jump.xbg-on {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-jump:active {
+  transform: scale(0.9);
+}
+
+#xbg-overlay .xbg-jump svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#xbg-overlay.xbg-light .xbg-jump {
+  border-color: rgba(60, 60, 67, 0.15);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+#xbg-overlay.xbg-light .xbg-jump svg {
+  stroke: #000;
+}
