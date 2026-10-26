@@ -3,7 +3,7 @@
 Shows the photos and videos from your X bookmarks in a 3-column, Instagram-style
 grid. Tap any item to open a feed of posts you can scroll freely, like Instagram:
 posts run edge to edge, with the account name and date over each picture and
-round Save / Open post buttons in the corner.
+round Save / Open post buttons side by side at the bottom.
 
 No X API is needed. When you open <https://x.com/i/bookmarks> while logged in,
 the extension notes how the page asks X for its first batch of bookmarks, then
