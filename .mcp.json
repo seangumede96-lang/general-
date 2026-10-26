@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "youtube-watcher": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--quiet", "--with-requirements", "youtube-watcher/requirements.txt", "python", "youtube-watcher/server.py", "--stdio"]
+    }
+  }
+}
