@@ -1795,3 +1795,40 @@ html,
 #xbg-overlay.xbg-light .xbg-seg button.xbg-on {
   color: var(--xbg-red);
 }
+
+/* Selection tick like the iPhone: small filled circle with a white ring in the
+   bottom-right corner; nothing on unselected photos. */
+#xbg-overlay.xbg-selecting .xbg-tile:not(.xbg-selected)::after {
+  display: none;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected::after {
+  content: "";
+  top: auto;
+  left: auto;
+  right: 5px;
+  bottom: 5px;
+  width: 21px;
+  height: 21px;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  box-sizing: border-box;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  background: var(--xbg-red)
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTYuNSAxMi41bDMuNSAzLjUgNy41LTgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=")
+    center / 15px no-repeat;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected img {
+  opacity: 0.72;
+}
+
+/* Keep the video length clear of the tick */
+#xbg-overlay .xbg-tile.xbg-selected .xbg-badge-time {
+  opacity: 0.9;
+}
+
+#xbg-overlay.xbg-light .xbg-tile.xbg-selected::after {
+  background-color: var(--xbg-red);
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTYuNSAxMi41bDMuNSAzLjUgNy41LTgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=");
+}
