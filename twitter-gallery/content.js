@@ -1036,7 +1036,17 @@
     const peek = target ? buildPeek(target) : null;
     slide = { target, dir, peek, w: window.innerWidth };
     ui.sliding = true;
-    if (target) ui.bar.classList.add("xbg-swiping");
+    if (target) {
+      // The header stays put through the whole swipe and after it: if
+      // scrolling had tucked it away, bring it back now, without sliding.
+      if (ui.bar.classList.contains("xbg-bar-hidden")) {
+        ui.bar.style.transition = "none";
+        ui.bar.classList.remove("xbg-bar-hidden");
+        void ui.bar.offsetHeight;
+        ui.bar.style.transition = "";
+      }
+      ui.bar.classList.add("xbg-swiping");
+    }
     ui.scroller.style.transition = "none";
     if (peek) peek.style.transition = "none";
     if (ui.tabInk) ui.tabInk.style.transition = "none";
