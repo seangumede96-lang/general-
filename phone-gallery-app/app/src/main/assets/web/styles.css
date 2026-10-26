@@ -1771,3 +1771,8 @@ html,
 #xbg-overlay.xbg-light .xbg-alert-buttons button:active {
   background: rgba(0, 0, 0, 0.08);
 }
+
+/* Grid / Months / Years: the selected one is red */
+#xbg-overlay .xbg-seg button.xbg-on {
+  color: var(--xbg-red);
+}
