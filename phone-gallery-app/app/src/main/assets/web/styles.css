@@ -896,3 +896,102 @@ body {
   border-bottom: 0;
   margin-bottom: -10px;
 }
+
+/* --- Star, delete, recycle bin, hidden folders ------------------------------ */
+
+/* Selection bar: icon buttons with small labels */
+#xbg-overlay .xbg-select-actions {
+  display: flex;
+  gap: 2px;
+}
+
+#xbg-overlay .xbg-bar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 52px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+}
+
+#xbg-overlay .xbg-bar-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+#xbg-overlay .xbg-bar-btn small {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#xbg-overlay .xbg-bar-btn:disabled {
+  opacity: 0.35;
+}
+
+#xbg-overlay .xbg-danger-text svg path {
+  stroke: #f4212e;
+}
+
+/* Grid badges */
+#xbg-overlay .xbg-badge-left {
+  right: auto;
+  left: 6px;
+}
+
+#xbg-overlay .xbg-star-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 4px;
+  color: #ffd400;
+  font-size: 16px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+/* Feed buttons */
+#xbg-overlay .xbg-star-btn.xbg-on {
+  background: #f5b400;
+}
+
+#xbg-overlay .xbg-danger-btn {
+  background: rgba(244, 33, 46, 0.75);
+}
+
+/* Recycle bin cover */
+#xbg-overlay .xbg-dim img {
+  opacity: 0.55;
+}
+
+/* On/off switch in "Show in All" */
+#xbg-overlay .xbg-switch {
+  flex: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border-radius: 12px;
+  background: #536471;
+  transition: background 0.15s ease;
+}
+
+#xbg-overlay .xbg-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+#xbg-overlay .xbg-switch.xbg-on {
+  background: var(--xbg-accent);
+}
+
+#xbg-overlay .xbg-switch.xbg-on::after {
+  transform: translateX(18px);
+}

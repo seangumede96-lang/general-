@@ -33,9 +33,11 @@
   const cached = new Map(); // unused here (kept so shared code reads the same)
   const savedItems = new Map(); // key -> item, for everything in an album
   let collections = []; // [{ id, name, keys: [newest first] }]
-  let settings = { sort: "newest", dateMode: "saved", layout: "grid" };
+  let settings = { sort: "newest", dateMode: "saved", layout: "grid", hiddenFolders: [] };
+  let starred = []; // keys of starred photos/videos, most recently starred first
+  const trash = new Map(); // key -> item in the phone's recycle bin (with `expires`)
 
-  let view = "all"; // "all" | "collections" (the Albums tab) | "collection" (an album) | "folder"
+  let view = "all"; // "all" | "collections" (the Albums tab) | "collection" (an album) | "folder" | "starred" | "trash"
   let openId = null; // album id, or folder name when view === "folder"
   let filter = "all";
   let periodYear = null; // Months view: only this year ("2026"), or all years when null
@@ -57,9 +59,12 @@
 
   const PAGE = 60; // tiles added at a time as you scroll
   const SAFE_MEDIA = /^\/(thumb|media)\/[iv]\d+$/; // served by the app
-  const K = { collections: "pg_albums", items: "pg_items", settings: "pg_settings" };
+  const K = { collections: "pg_albums", items: "pg_items", settings: "pg_settings", starred: "pg_starred" };
   const galleryOpen = () => ui && !ui.overlay.classList.contains("xbg-hidden");
-  const getItem = (key) => fresh.get(key) || cached.get(key) || savedItems.get(key);
+  // Only what's on the phone right now (deleted items drop out of albums and Starred).
+  const getItem = (key) => fresh.get(key) || (view === "trash" ? trash.get(key) : undefined);
+  const isStarred = (key) => starred.includes(key);
+  const insideViews = ["collection", "folder", "starred", "trash"];
   const getCollection = (id) => collections.find((c) => c.id === id);
   const isSaved = (key) => collections.some((c) => c.keys.includes(key));
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -82,7 +87,7 @@
     for (const f of ["thumb", "full", "video"]) {
       out[f] = typeof item[f] === "string" && SAFE_MEDIA.test(item[f]) ? item[f] : null;
     }
-    for (const f of ["saved", "posted", "w", "h", "duration"]) out[f] = Number.isFinite(item[f]) && item[f] > 0 ? item[f] : null;
+    for (const f of ["saved", "posted", "w", "h", "duration", "expires"]) out[f] = Number.isFinite(item[f]) && item[f] > 0 ? item[f] : null;
     out.folder = typeof item.folder === "string" ? item.folder.slice(0, 100) : "";
     return out.thumb ? out : null;
   }
@@ -103,12 +108,11 @@
     scheduleRefresh();
   }
 
-  // Everything to show in "All posts": this visit's items first, then anything
-  // from the saved copy that hasn't been reloaded yet.
+  // Everything on the phone, and what the All tab shows (minus hidden folders).
+  const phoneItems = () => [...fresh.values()];
   function allItems() {
-    const out = [...fresh.values()];
-    for (const [k, it] of cached) if (!fresh.has(k)) out.push(it);
-    return out;
+    const hidden = new Set(settings.hiddenFolders);
+    return phoneItems().filter((it) => !hidden.has(it.folder || "Other"));
   }
 
   // --- Storage -------------------------------------------------------------
@@ -131,6 +135,8 @@
       const data = await store.get(Object.values(K));
       const s = data[K.settings] || {};
       settings = { ...settings, ...s };
+      if (!Array.isArray(settings.hiddenFolders)) settings.hiddenFolders = [];
+      starred = (data[K.starred] || []).filter((k) => typeof k === "string");
       collections = (data[K.collections] || []).map(cleanCollection).filter(Boolean);
       for (const raw of Object.values(data[K.items] || {})) {
         const item = clean(raw);
@@ -156,6 +162,10 @@
     store
       .set({ [K.collections]: collections, [K.items]: Object.fromEntries(savedItems) })
       .catch(() => toast("Couldn’t save your albums"));
+  }
+
+  function saveStarred() {
+    store.set({ [K.starred]: starred }).catch(() => toast("Couldn’t save your stars"));
   }
 
   function createCollection(name) {
@@ -235,9 +245,53 @@
       const item = clean(raw);
       if (item) fresh.set(item.key, item);
     }
+    let binList = [];
+    try {
+      binList = Android.hasAccess() ? JSON.parse(Android.getTrash() || "[]") : [];
+    } catch (e) {
+      binList = [];
+    }
+    trash.clear();
+    for (const raw of binList) {
+      const item = clean(raw);
+      if (item) trash.set(item.key, item);
+    }
     gotData = true;
-    if (ui) rebuild(false);
+    if (ui) {
+      rebuild(false);
+      syncFeed();
+    }
   }
+
+  // --- Star, share, delete, restore ----------------------------------------
+
+  function toggleStar(keys) {
+    const all = keys.every(isStarred);
+    if (all) starred = starred.filter((k) => !keys.includes(k));
+    else for (const k of [...keys].reverse()) if (!isStarred(k)) starred.unshift(k);
+    saveStarred();
+    toast(all ? `Removed ${plural(keys.length, "star")}` : `Starred ${plural(keys.length, "item")}`);
+    if (selectMode) setSelectMode(false);
+    rebuild(false);
+    paintFeedButtons();
+    syncFeed();
+  }
+
+  const shareKeys = (keys) => Android.share(keys.join(","));
+  // These open Android's own confirmation; the result comes back in galleryActionDone.
+  const deleteKeys = (keys) => Android.trash(keys.join(","));
+  const restoreKeys = (keys) => Android.restore(keys.join(","));
+  const deleteForever = (keys) => Android.deleteForever(keys.join(","));
+
+  window.galleryActionDone = (kind, ok, count) => {
+    if (!ok) return;
+    const n = plural(count || 1, "item");
+    toast(kind === "trash" ? `Moved ${n} to the recycle bin` : kind === "restore" ? `Restored ${n}` : `Deleted ${n} forever`);
+    if (selectMode) setSelectMode(false);
+    loadMedia();
+  };
+
+
 
   const durationText = (ms) => {
     const s = Math.round(ms / 1000);
@@ -247,7 +301,7 @@
     return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
   };
 
-  // The phone's own folders (Camera, Screenshots, WhatsApp…), busiest/newest first.
+  // The phone's own folders (Camera, Screenshots, WhatsApp…), newest first.
   function phoneFolders() {
     const byName = new Map();
     for (const item of fresh.values()) {
@@ -417,7 +471,7 @@
     const refreshBtn = el("button", { class: "xbg-link xbg-hidden", onclick: () => Android.requestAccess() }, "Allow access");
     const status = el("div", { class: "xbg-status" }, statusText, refreshBtn);
     const selectBtn = el("button", { class: "xbg-text-btn", onclick: () => setSelectMode(!selectMode) }, "Select");
-    const menuBtn = el("button", { class: "xbg-close", "aria-label": "Album options", onclick: collectionMenu }, "⋯");
+    const menuBtn = el("button", { class: "xbg-close", "aria-label": "Options", onclick: () => (view === "collection" ? collectionMenu() : view === "trash" ? trashMenu() : galleryMenu()) }, "⋯");
 
     const tabs = el("div", { class: "xbg-tabs" });
     for (const [value, label] of [["all", "▦  All"], ["collections", "▢  Albums"]]) {
@@ -445,9 +499,8 @@
     const scroller = el("div", { class: "xbg-scroll" }, grid, years, collGrid, empty, sentinel);
 
     const selectInfo = el("span", { class: "xbg-select-info" });
-    const addBtn = el("button", { class: "xbg-primary", onclick: () => openPicker([...selected], () => { setSelectMode(false); rebuild(false); }) }, "Add to album");
-    const removeBtn = el("button", { class: "xbg-secondary", onclick: removeSelected }, "Remove");
-    const selectBar = el("div", { class: "xbg-select-bar xbg-hidden" }, selectInfo, removeBtn, addBtn);
+    const selectActions = el("div", { class: "xbg-select-actions" });
+    const selectBar = el("div", { class: "xbg-select-bar xbg-hidden" }, selectInfo, selectActions);
 
     // Tapping a post opens a feed you scroll freely, like Instagram.
     const feed = el("div", { class: "xbg-feed" });
@@ -476,7 +529,7 @@
 
     ui = {
       overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn,
-      layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
+      layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, selectActions,
       lightbox, feed, toast: toastEl, sheet: null,
     };
 
@@ -497,7 +550,7 @@
       if (e.key === "Escape") closeLightbox();
     } else if (e.key === "Escape") {
       if (selectMode) setSelectMode(false);
-      else if (view === "collection" || view === "folder") setView("collections");
+      else if (insideViews.includes(view)) setView("collections");
     }
   }
 
@@ -592,7 +645,7 @@
       if (!quick || Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 2) return;
       if (dx < 0 && view === "all") setView("collections", null, "left");
       else if (dx > 0 && view === "collections") setView("all", null, "right");
-      else if (dx > 0 && (view === "collection" || view === "folder")) setView("collections", null, "right");
+      else if (dx > 0 && insideViews.includes(view)) setView("collections", null, "right");
     });
   }
 
@@ -674,7 +727,7 @@
       }
     } else if (feedOpen()) closeLightbox(true);
     else if (selectMode) setSelectMode(false, true);
-    else if (view === "collection" || view === "folder") setView("collections", null, "right");
+    else if (insideViews.includes(view)) setView("collections", null, "right");
     else if (view === "collections") setView("all", null, "right");
     else return false;
     return true;
@@ -690,20 +743,27 @@
   function updateHeader() {
     if (!ui) return;
     const c = view === "collection" ? getCollection(openId) : null;
-    const folder = view === "folder" ? openId : null;
-    const inside = !!c || folder !== null;
+    const inside = insideViews.includes(view);
     ui.back.classList.toggle("xbg-hidden", !inside);
     ui.close.classList.add("xbg-hidden"); // the gallery is the whole app: nothing to close
-    ui.menuBtn.classList.toggle("xbg-hidden", !c);
+    ui.menuBtn.classList.toggle("xbg-hidden", !(c || view === "all" || (view === "trash" && trash.size)));
     ui.tabs.classList.toggle("xbg-hidden", inside);
     ui.controls.classList.toggle("xbg-hidden", view === "collections");
     ui.selectBtn.classList.toggle("xbg-hidden", view === "collections" || settings.layout === "years");
     ui.selectBtn.textContent = selectMode ? "Cancel" : "Select";
-    ui.titleName.textContent = c ? c.name : folder !== null ? folder : "Gallery";
+    ui.titleName.textContent = c ? c.name
+      : view === "folder" ? openId
+      : view === "starred" ? "Starred"
+      : view === "trash" ? "Recycle bin"
+      : "Gallery";
     ui.count.textContent = String(c ? c.keys.length : view === "collections" ? collections.length + phoneFolders().length : totalCount || allItems().length);
     ui.tabs.querySelectorAll(".xbg-tab").forEach((t) => t.classList.toggle("xbg-on", t.dataset.view === view));
     const noAccess = !Android.hasAccess();
-    ui.statusText.textContent = noAccess ? "No access to photos" : "";
+    const hiddenCount = settings.hiddenFolders.length;
+    ui.statusText.textContent = noAccess ? "No access to photos"
+      : view === "trash" ? "Deleted for good after 30 days"
+      : view === "all" && hiddenCount ? `${plural(hiddenCount, "folder")} hidden`
+      : "";
     ui.refreshBtn.classList.toggle("xbg-hidden", !noAccess);
   }
 
@@ -756,11 +816,26 @@
   function updateSelectBar() {
     if (!ui) return;
     ui.selectBar.classList.toggle("xbg-hidden", !selectMode);
-    ui.selectInfo.textContent = selected.size ? `${selected.size} selected` : "Tap posts to select";
-    ui.addBtn.disabled = !selected.size;
-    ui.removeBtn.disabled = !selected.size;
-    ui.removeBtn.classList.toggle("xbg-hidden", view !== "collection");
-    ui.addBtn.textContent = "Add to album";
+    ui.selectInfo.textContent = selected.size ? `${selected.size} selected` : "Tap to select";
+    const keys = () => [...selected];
+    const none = !selected.size;
+    const btn = (label, path, onclick, opts = {}) =>
+      el("button", { class: "xbg-bar-btn" + (opts.danger ? " xbg-danger-text" : ""), "aria-label": label, disabled: none, onclick: () => onclick(keys()) },
+        icon(path, !!opts.filled), el("small", {}, label));
+    const actions = [];
+    if (view === "trash") {
+      actions.push(btn("Restore", RESTORE_PATH, restoreKeys), btn("Delete", TRASH_PATH, deleteForever, { danger: true }));
+    } else {
+      const allStarred = !none && keys().every(isStarred);
+      actions.push(
+        btn(allStarred ? "Unstar" : "Star", STAR_PATH, toggleStar, { filled: allStarred }),
+        btn("Album", BOOKMARK_PATH, (k) => openPicker(k, () => { setSelectMode(false); rebuild(false); })),
+        btn("Share", SHARE_PATH, shareKeys)
+      );
+      if (view === "collection") actions.push(btn("Remove", MINUS_PATH, () => removeSelected()));
+      actions.push(btn("Delete", TRASH_PATH, deleteKeys, { danger: true }));
+    }
+    ui.selectActions.replaceChildren(...actions);
   }
 
   function removeSelected() {
@@ -771,6 +846,48 @@
     setSelectMode(false);
     rebuild(false);
     toast(`Removed ${plural(n, "item")}`);
+  }
+
+  // ⋯ on the All tab: choose which folders appear in All.
+  function galleryMenu() {
+    const list = el("div", { class: "xbg-picker" });
+    const draw = () => {
+      const hidden = new Set(settings.hiddenFolders);
+      list.replaceChildren(
+        ...phoneFolders().map((f) => {
+          const shown = !hidden.has(f.name);
+          return el(
+            "button",
+            {
+              class: "xbg-pick" + (shown ? " xbg-on" : ""),
+              onclick: () => {
+                settings.hiddenFolders = shown ? [...settings.hiddenFolders, f.name] : settings.hiddenFolders.filter((n) => n !== f.name);
+                saveSettings();
+                draw();
+              },
+            },
+            mosaic(f.items, "xbg-pick-cover"),
+            el("span", { class: "xbg-pick-name" }, f.name, el("small", {}, shown ? plural(f.items.length, "item") : "Hidden from All")),
+            el("span", { class: "xbg-switch" + (shown ? " xbg-on" : "") })
+          );
+        })
+      );
+    };
+    draw();
+    const extra = [];
+    if (Android.canSkipConfirm && !Android.canSkipConfirm()) {
+      extra.push(el("button", { class: "xbg-secondary", onclick: () => Android.openManageMedia() }, "Delete without asking each time…"));
+    }
+    openSheet(
+      "Show in All",
+      el("div", { class: "xbg-sheet-body" }, el("p", { class: "xbg-sheet-text" }, "Turn a folder off to keep it out of All. It still opens from Albums."), list, ...extra,
+        el("button", { class: "xbg-primary", onclick: () => closeSheet() }, "Done")),
+      () => rebuild(false)
+    );
+  }
+
+  function trashMenu() {
+    confirmSheet("Empty the recycle bin?", `${plural(trash.size, "item")} will be deleted forever.`, "Delete all", () => deleteForever([...trash.keys()]));
   }
 
   function collectionMenu() {
@@ -816,12 +933,12 @@
 
   function computeEntries() {
     const c = view === "collection" ? getCollection(openId) : null;
-    const base = c
-      ? c.keys.map(getItem).filter(Boolean)
-      : view === "folder"
-        ? allItems().filter((it) => (it.folder || "Other") === openId)
-        : allItems();
-    totalCount = c ? c.keys.length : base.length;
+    const base = c ? c.keys.map(getItem).filter(Boolean)
+      : view === "folder" ? phoneItems().filter((it) => (it.folder || "Other") === openId)
+      : view === "starred" ? starred.map(getItem).filter(Boolean)
+      : view === "trash" ? [...trash.values()]
+      : allItems();
+    totalCount = base.length;
     const dir = settings.sort === "oldest" ? -1 : 1;
     // Dated posts first, by date; ties and undated posts keep their bookmark order.
     let list = base.filter(matches).map((item, i) => ({ item, i, d: dateOf(item) }));
@@ -941,6 +1058,12 @@
     const tile = el("button", { class: "xbg-tile" + (selected.has(item.key) ? " xbg-selected" : ""), "data-key": item.key, "aria-label": item.type === "photo" ? "Photo" : "Video" });
     tile.append(el("img", { src: item.thumb, loading: "lazy", decoding: "async", alt: "" }));
     if (item.type !== "photo") tile.append(el("span", { class: "xbg-badge" }, item.duration ? "▶ " + durationText(item.duration) : "▶"));
+    if (view === "trash" && item.expires) {
+      const days = Math.max(0, Math.ceil((item.expires - Date.now()) / 86400000));
+      tile.append(el("span", { class: "xbg-badge xbg-badge-left" }, plural(days, "day") + " left"));
+    } else if (isStarred(item.key)) {
+      tile.append(el("span", { class: "xbg-star-badge" }, "★"));
+    }
     return tile;
   }
 
@@ -1040,6 +1163,8 @@
     const c = view === "collection" ? getCollection(openId) : null;
     if (view === "collections") return;
     if (current.length) ui.empty.textContent = "";
+    else if (view === "trash") ui.empty.textContent = "The recycle bin is empty.";
+    else if (view === "starred") ui.empty.textContent = "Nothing starred yet. Tap ★ on a photo, or long-press photos and tap Star.";
     else if (c) ui.empty.textContent = c.keys.length ? "Nothing here for this filter." : "Nothing in this album yet. Go to All, long-press a photo, pick some more, then tap “Add to album”.";
     else if (!Android.hasAccess()) {
       ui.empty.replaceChildren("This app needs permission to show your photos and videos. ", el("button", { class: "xbg-link", onclick: () => Android.requestAccess() }, "Allow access"));
@@ -1085,7 +1210,22 @@
 
   // The Albums tab: albums you made, then the phone's own folders.
   function renderCollections() {
+    const starredItems = starred.map(getItem).filter(Boolean);
     const cards = [
+      el(
+        "button",
+        { class: "xbg-card", onclick: () => setView("starred", null, "left") },
+        starredItems.length ? mosaic(starredItems, "xbg-card-cover") : el("div", { class: "xbg-card-cover xbg-plus" }, "★"),
+        el("div", { class: "xbg-card-name" }, "★ Starred"),
+        el("div", { class: "xbg-card-count" }, plural(starredItems.length, "item"))
+      ),
+      el(
+        "button",
+        { class: "xbg-card", onclick: () => setView("trash", null, "left") },
+        trash.size ? mosaic([...trash.values()], "xbg-card-cover xbg-dim") : el("div", { class: "xbg-card-cover xbg-plus" }, "🗑"),
+        el("div", { class: "xbg-card-name" }, "Recycle bin"),
+        el("div", { class: "xbg-card-count" }, plural(trash.size, "item"))
+      ),
       el("div", { class: "xbg-cards-title" }, "Your albums"),
       el(
         "button",
@@ -1108,6 +1248,7 @@
     const folders = phoneFolders();
     if (folders.length) {
       cards.push(el("div", { class: "xbg-cards-title" }, "On this phone"));
+      const hidden = new Set(settings.hiddenFolders);
       for (const f of folders) {
         cards.push(
           el(
@@ -1115,7 +1256,7 @@
             { class: "xbg-card", onclick: () => setView("folder", f.name, "left") },
             mosaic(f.items, "xbg-card-cover"),
             el("div", { class: "xbg-card-name" }, f.name),
-            el("div", { class: "xbg-card-count" }, plural(f.items.length, "item"))
+            el("div", { class: "xbg-card-count" }, plural(f.items.length, "item") + (hidden.has(f.name) ? " · hidden from All" : ""))
           )
         );
       }
@@ -1155,6 +1296,10 @@
   }
   const BOOKMARK_PATH = "M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-4.6L5 21V4.5A1.5 1.5 0 0 1 6.5 3z";
   const SHARE_PATH = "M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6";
+  const STAR_PATH = "M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z";
+  const TRASH_PATH = "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6";
+  const RESTORE_PATH = "M4 12a8 8 0 1 0 3-6.2M4 4v5h5";
+  const MINUS_PATH = "M5 12h14";
 
   // Each post is just its picture or video, edge to edge, with the name and
   // date laid over the top and Save / Open post as round buttons over the
@@ -1179,11 +1324,47 @@
     } else {
       media.append(el("img", { src: item.full || item.thumb, loading: "lazy", decoding: "async", alt: "" }));
     }
-    const save = el("button", { class: "xbg-fab-btn xbg-save-btn", onclick: () => openPicker([item.key], () => afterSave(item.key)) });
-    paintSave(save, item.key);
-    const share = el("button", { class: "xbg-fab-btn", "aria-label": "Share", onclick: () => Android.share(item.key) }, icon(SHARE_PATH, false));
-    media.append(head, el("div", { class: "xbg-post-actions" }, save, share));
-    return el("article", { class: "xbg-post", "data-key": item.key }, media);
+    const fab = (label, path, onclick, cls = "") => el("button", { class: "xbg-fab-btn " + cls, "aria-label": label, onclick }, icon(path, false));
+    const actions = el("div", { class: "xbg-post-actions" });
+    if (view === "trash") {
+      actions.append(fab("Restore", RESTORE_PATH, () => restoreKeys([item.key])), fab("Delete forever", TRASH_PATH, () => deleteForever([item.key]), "xbg-danger-btn"));
+    } else {
+      const star = fab("Star", STAR_PATH, () => toggleStar([item.key]), "xbg-star-btn");
+      const save = el("button", { class: "xbg-fab-btn xbg-save-btn", onclick: () => openPicker([item.key], () => afterSave(item.key)) });
+      actions.append(star, save, fab("Share", SHARE_PATH, () => shareKeys([item.key])), fab("Delete", TRASH_PATH, () => deleteKeys([item.key])));
+    }
+    media.append(head, actions);
+    const post = el("article", { class: "xbg-post", "data-key": item.key }, media);
+    paintPostButtons(post);
+    return post;
+  }
+
+  function paintPostButtons(post) {
+    const key = post.dataset.key;
+    const save = post.querySelector(".xbg-save-btn");
+    if (save) paintSave(save, key);
+    const star = post.querySelector(".xbg-star-btn");
+    if (star) {
+      const on = isStarred(key);
+      star.replaceChildren(icon(STAR_PATH, on));
+      star.setAttribute("aria-label", on ? "Unstar" : "Star");
+      star.classList.toggle("xbg-on", on);
+    }
+  }
+
+  const paintFeedButtons = () => ui.feed.querySelectorAll(".xbg-post").forEach(paintPostButtons);
+
+  // After deleting/restoring/unstarring: drop posts that no longer belong in
+  // this view from the feed (and close it if nothing is left).
+  function syncFeed() {
+    if (!feedOpen()) return;
+    const keep = new Set(current.map((it) => it.key));
+    for (const post of [...ui.feed.querySelectorAll(".xbg-post")]) if (!keep.has(post.dataset.key)) post.remove();
+    const keys = [...ui.feed.querySelectorAll(".xbg-post")].map((p) => p.dataset.key);
+    if (!keys.length) return closeLightbox();
+    feedStart = current.findIndex((it) => it.key === keys[0]);
+    feedEnd = current.findIndex((it) => it.key === keys[keys.length - 1]) + 1;
+    extendFeed();
   }
 
   function paintSave(btn, key) {

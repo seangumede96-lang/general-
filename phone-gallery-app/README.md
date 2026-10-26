@@ -10,6 +10,12 @@ the X Bookmarks Gallery (`../twitter-gallery`):
   Screenshots, WhatsApp…).
 - Tap a photo for a freely scrolling feed with Add to album and Share buttons;
   videos play muted while on screen and show their length in the grid.
+- ★ Star photos (Starred album), share one or many, and delete to the
+  phone's own recycle bin (kept 30 days) with a Recycle bin album to restore
+  or delete forever. Android asks to confirm each delete unless you allow
+  "media management" (⋯ on the All tab → "Delete without asking each time").
+- ⋯ on the All tab: switch folders (e.g. Screenshots) off to keep them out of
+  All; they still open from Albums.
 - Swipe between tabs; the phone's back button closes menus, the feed,
   selection, then albums, then the app.
 - Albums can be backed up to Downloads and restored.
@@ -26,7 +32,7 @@ JPEG), album storage, sharing and saving backups.
 
 ## Build
 
-Needs JDK 17+, Gradle 8.9+, the Android SDK (platform 35), and the signing key
+Needs Android 11+ on the phone. To build: JDK 17+, Gradle 8.9+, the Android SDK (platform 35), and the signing key
 in `keystore/` (kept out of git):
 
 ```

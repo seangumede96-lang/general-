@@ -3,11 +3,13 @@ package com.phonegallery.app;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.IntentSender;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
@@ -18,6 +20,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.util.Size;
 import android.view.View;
 import android.view.ViewGroup;
@@ -41,7 +44,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -62,6 +67,9 @@ public class MainActivity extends Activity {
     private static final String START_URL = "https://" + HOST + "/assets/web/index.html";
     private static final int PICK_FILE = 1;
     private static final int ASK_ACCESS = 2;
+    private static final int TRASH = 3;
+    private static final int RESTORE = 4;
+    private static final int DELETE = 5;
     private static final int THUMB_SIZE = 360;
     private static final int MAX_CONVERTED_SIZE = 2048;
     private static final Pattern RANGE = Pattern.compile("bytes=(\\d*)-(\\d*)");
@@ -73,6 +81,7 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private WebViewAssetLoader assetLoader;
     private boolean pageLoaded;
+    private int pendingCount; // how many items the current delete/restore request covers
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
@@ -207,6 +216,11 @@ public class MainActivity extends Activity {
 
     /** Every photo and video as JSON, newest first. */
     String mediaJson() {
+        return mediaJson(false);
+    }
+
+    /** With `trashed`, only what's in the phone's recycle bin (with when it expires). */
+    String mediaJson(boolean trashed) {
         Uri files = MediaStore.Files.getContentUri("external");
         String[] cols = {
                 MediaStore.Files.FileColumns._ID,
@@ -218,13 +232,18 @@ public class MainActivity extends Activity {
                 MediaStore.MediaColumns.ORIENTATION,
                 MediaStore.MediaColumns.DURATION,
                 MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
+                MediaStore.MediaColumns.DATE_EXPIRES,
         };
         String where = MediaStore.Files.FileColumns.MEDIA_TYPE + " IN ("
                 + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE + ","
                 + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO + ")";
         String order = MediaStore.MediaColumns.DATE_TAKEN + " DESC, " + MediaStore.MediaColumns.DATE_ADDED + " DESC";
         StringBuilder json = new StringBuilder("[");
-        try (Cursor c = getContentResolver().query(files, cols, where, null, order)) {
+        Bundle args = new Bundle();
+        args.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, where);
+        args.putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, order);
+        args.putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, trashed ? MediaStore.MATCH_ONLY : MediaStore.MATCH_EXCLUDE);
+        try (Cursor c = getContentResolver().query(files, cols, args, null)) {
             if (c == null) return "[]";
             boolean first = true;
             while (c.moveToNext()) {
@@ -252,8 +271,9 @@ public class MainActivity extends Activity {
                         .append(",\"w\":").append(w)
                         .append(",\"h\":").append(h)
                         .append(",\"duration\":").append(c.getLong(7))
-                        .append(",\"folder\":").append(jsonString(c.getString(8)))
-                        .append('}');
+                        .append(",\"folder\":").append(jsonString(c.getString(8)));
+                if (trashed && !c.isNull(9)) json.append(",\"expires\":").append(c.getLong(9) * 1000L);
+                json.append('}');
             }
         } catch (SecurityException e) {
             return "[]";
@@ -415,6 +435,64 @@ public class MainActivity extends Activity {
         }
     }
 
+    // --- Delete, restore, share -------------------------------------------------
+
+    private static List<Uri> urisFor(String keys) {
+        List<Uri> uris = new ArrayList<>();
+        if (keys == null) return uris;
+        for (String key : keys.split(",")) {
+            Uri uri = uriFor(key.trim());
+            if (uri != null) uris.add(uri);
+        }
+        return uris;
+    }
+
+    /**
+     * Ask Android to move items to (or out of) the recycle bin, or delete them
+     * for good. Android shows its own confirmation unless the app has "media
+     * management" access; the answer arrives in onActivityResult.
+     */
+    void changeMedia(int what, String keys) {
+        List<Uri> uris = urisFor(keys);
+        if (uris.isEmpty()) return;
+        ContentResolver resolver = getContentResolver();
+        PendingIntent request = what == TRASH ? MediaStore.createTrashRequest(resolver, uris, true)
+                : what == RESTORE ? MediaStore.createTrashRequest(resolver, uris, false)
+                : MediaStore.createDeleteRequest(resolver, uris);
+        pendingCount = uris.size();
+        try {
+            startIntentSenderForResult(request.getIntentSender(), what, null, 0, 0, 0);
+        } catch (IntentSender.SendIntentException e) {
+            actionDone(what, false);
+        }
+    }
+
+    private void actionDone(int what, boolean ok) {
+        String kind = what == TRASH ? "trash" : what == RESTORE ? "restore" : "delete";
+        webView.evaluateJavascript("window.galleryActionDone && window.galleryActionDone('" + kind + "', " + ok + ", " + pendingCount + ")", null);
+    }
+
+    void shareItems(String keys) {
+        List<Uri> uris = urisFor(keys);
+        if (uris.isEmpty()) return;
+        boolean allVideos = keys.matches("(v\\d+,?)+");
+        boolean allPhotos = keys.matches("(i\\d+,?)+");
+        String type = allVideos ? "video/*" : allPhotos ? "image/*" : "*/*";
+        Intent send;
+        if (uris.size() == 1) {
+            send = new Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris.get(0));
+        } else {
+            send = new Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, new ArrayList<>(uris));
+        }
+        send.setType(type);
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivity(Intent.createChooser(send, "Share"));
+        } catch (ActivityNotFoundException e) {
+            /* nothing to share with */
+        }
+    }
+
     // --- Phone features --------------------------------------------------------
 
     private void exitFullscreen() {
@@ -451,6 +529,10 @@ public class MainActivity extends Activity {
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == TRASH || requestCode == RESTORE || requestCode == DELETE) {
+            actionDone(requestCode, resultCode == RESULT_OK);
+            return;
+        }
         if (requestCode != PICK_FILE || fileCallback == null) return;
         Uri picked = resultCode == RESULT_OK && data != null ? data.getData() : null;
         fileCallback.onReceiveValue(picked != null ? new Uri[]{picked} : null);
@@ -486,20 +568,47 @@ public class MainActivity extends Activity {
             prefs.edit().putString(key, json).apply();
         }
 
-        /** Open the phone's share menu for one photo or video. */
         @JavascriptInterface
-        public void share(String key) {
-            Uri uri = uriFor(key);
-            if (uri == null) return;
-            Intent send = new Intent(Intent.ACTION_SEND);
-            send.setType(key.charAt(0) == 'v' ? "video/*" : "image/*");
-            send.putExtra(Intent.EXTRA_STREAM, uri);
-            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        public String getTrash() {
+            return mediaJson(true);
+        }
+
+        /** Share one or more photos/videos (comma-separated keys). */
+        @JavascriptInterface
+        public void share(String keys) {
+            runOnUiThread(() -> shareItems(keys));
+        }
+
+        @JavascriptInterface
+        public void trash(String keys) {
+            runOnUiThread(() -> changeMedia(TRASH, keys));
+        }
+
+        @JavascriptInterface
+        public void restore(String keys) {
+            runOnUiThread(() -> changeMedia(RESTORE, keys));
+        }
+
+        @JavascriptInterface
+        public void deleteForever(String keys) {
+            runOnUiThread(() -> changeMedia(DELETE, keys));
+        }
+
+        /** True when Android lets the app delete without asking each time. */
+        @JavascriptInterface
+        public boolean canSkipConfirm() {
+            return Build.VERSION.SDK_INT < 31 || MediaStore.canManageMedia(MainActivity.this);
+        }
+
+        /** Open the setting that lets the app delete without asking each time. */
+        @JavascriptInterface
+        public void openManageMedia() {
+            if (Build.VERSION.SDK_INT < 31) return;
             runOnUiThread(() -> {
                 try {
-                    startActivity(Intent.createChooser(send, "Share"));
+                    startActivity(new Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:" + getPackageName())));
                 } catch (ActivityNotFoundException e) {
-                    /* nothing to share with */
+                    /* not available on this phone */
                 }
             });
         }
