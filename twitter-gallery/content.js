@@ -222,7 +222,18 @@
     // A load that carried on from an earlier visit only fetched the rest itself: keep the start too.
     const list = loadState.resumed ? allItems() : [...fresh.values()];
     cacheTime = Date.now();
-    if (!loadState.resumed) cached.clear();
+    if (!loadState.resumed) {
+      // Posts that left your bookmarks but sit in a collection keep their own copy.
+      let kept = false;
+      for (const c of collections)
+        for (const key of c.keys)
+          if (!fresh.has(key) && cached.has(key) && !savedItems.has(key)) {
+            savedItems.set(key, { ...cached.get(key) });
+            kept = true;
+          }
+      cached.clear();
+      if (kept) saveCollections();
+    }
     partialInfo = null;
     writeChunks("main", list, { posts: lastTotal }).then(clearPartial);
     scheduleRefresh();
@@ -238,9 +249,15 @@
     writeChunks("partial", loadState.resumed ? allItems() : [...fresh.values()], { posts }).then(() => window.postMessage({ __xbgAsk: "saved", posts }, location.origin));
   }
 
+  // Collections keep their own copy only of posts that aren't in the saved
+  // copy of your bookmarks, so even huge collections save in a moment.
   function saveCollections() {
     const used = new Set(collections.flatMap((c) => c.keys));
     for (const key of used) {
+      if (fresh.has(key) || cached.has(key)) {
+        savedItems.delete(key);
+        continue;
+      }
       const item = getItem(key);
       if (item) savedItems.set(key, { ...item });
     }
