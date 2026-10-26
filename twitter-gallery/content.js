@@ -954,6 +954,7 @@
         swipe.target = targetFor(dx);
         swipe.dir = dx < 0 ? -1 : 1;
         swipe.x = t.clientX; // start following from here, so nothing jumps
+        foldFiltersNow(); // same as the header button's first tap, instantly
         startSlide(swipe.target, swipe.dir);
       }
       if (e.cancelable) e.preventDefault(); // sideways only: no drifting up and down
@@ -2557,6 +2558,27 @@
       setHeaderHidden(true);
     }
     ui.hbtn.classList.toggle("xbg-half", settings.filtersHidden && !settings.headerHidden);
+  }
+
+  // Fold the filters away at once (no animation), keeping the same photos on
+  // screen. Used when you start swiping between the tabs.
+  function foldFiltersNow() {
+    if (settings.filtersHidden || settings.headerHidden) return;
+    const { bar, scroller, controls } = ui;
+    const before = bar.offsetHeight;
+    controls.style.transition = "none";
+    settings.filtersHidden = true;
+    ui.overlay.classList.add("xbg-filters-off");
+    ui.hbtn.classList.add("xbg-half");
+    const after = bar.offsetHeight; // also applies the change before transitions come back
+    controls.style.transition = "";
+    saveSettings();
+    scroller.style.paddingTop = after + "px";
+    const d = before - after;
+    if (d > 0 && scroller.scrollTop > 0) {
+      ui.jumped = true;
+      scroller.scrollTop = Math.max(0, scroller.scrollTop - d);
+    }
   }
 
   function setHeaderHidden(hidden) {
