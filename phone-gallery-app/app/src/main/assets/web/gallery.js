@@ -834,22 +834,28 @@
     ui.refreshBtn.classList.toggle("xbg-hidden", !noAccess);
   }
 
-  // Where the Albums page was when you opened an album, so Back returns exactly there.
+  // Where you were on the Albums page and inside each album, so going back
+  // to either one returns you exactly there.
   let albumsSpot = null;
+  const albumSpots = new Map(); // "folder:Camera" etc. -> spot
 
   function setView(value, id = null, slide = null) {
     const from = view;
-    if (from === "collections" && value !== "collections") {
-      albumsSpot = { top: ui.scroller.scrollTop, barHidden: ui.bar.classList.contains("xbg-bar-hidden") };
-    }
+    const here = { top: ui.scroller.scrollTop, barHidden: ui.bar.classList.contains("xbg-bar-hidden") };
+    if (from === "collections" && value !== "collections") albumsSpot = here;
+    if (insideViews.includes(from)) albumSpots.set(from + ":" + openId, here);
     view = value;
     openId = id;
     if (selectMode) setSelectMode(false);
     rebuild();
-    if (value === "collections" && insideViews.includes(from) && albumsSpot) {
+    const spot = value === "collections" && insideViews.includes(from) ? albumsSpot : insideViews.includes(value) ? albumSpots.get(value + ":" + id) : null;
+    if (spot) {
       ui.jumped = true; // our own scroll: leave the header as it was
-      ui.scroller.scrollTop = albumsSpot.top;
-      ui.bar.classList.toggle("xbg-bar-hidden", albumsSpot.barHidden && albumsSpot.top > 0);
+      ui.bar.classList.toggle("xbg-bar-hidden", spot.barHidden && spot.top > 0);
+      // Room for the header now (it can be taller in an album), not a frame later.
+      ui.scroller.style.paddingTop = settings.headerHidden ? "0px" : ui.bar.offsetHeight + "px";
+      ui.scroller.scrollTop = spot.top;
+      fillPage();
     }
     if (slide) {
       ui.scroller.classList.remove("xbg-slide-left", "xbg-slide-right");
