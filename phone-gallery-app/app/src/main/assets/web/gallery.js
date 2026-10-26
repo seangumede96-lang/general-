@@ -563,8 +563,6 @@
       if (e.key === "Escape") closeSheet();
     } else if (viewerOpen()) {
       if (e.key === "Escape") closeViewer();
-      else if (e.key === "ArrowRight") slideViewer(1);
-      else if (e.key === "ArrowLeft") slideViewer(-1);
     } else if (!ui.lightbox.classList.contains("xbg-hidden")) {
       if (e.key === "Escape") closeLightbox();
     } else if (e.key === "Escape") {
@@ -1331,15 +1329,8 @@
       .filter((f) => !["Camera", "Screenshots"].includes(f.name) && !isSmallFolder(f))
       .map((f) => albumCard(f.name, count(f.items.length) + (hidden.has(f.name) ? " · hidden" : ""), coverOf(f.items[0]), () => setView("folder", f.name, "left")));
     if (small.length) {
-      const total = small.reduce((n, f) => n + f.items.length, 0);
-      const cover = el("div", { class: "xbg-album-cover xbg-others" });
-      small.slice(0, 4).forEach((f, i) => {
-        const cell = el("div", {}, el("img", { src: f.items[0].thumb, loading: "lazy", alt: "" }));
-        if (i === 3 && small.length > 4) cell.append(el("span", {}, "+" + (small.length - 3)));
-        cover.append(cell);
-      });
-      more.push(albumCard("Others", small.map((f) => f.name).join(", "), cover, () => setView("others", null, "left"), "xbg-album-others"));
-      void total;
+      const otherItems = small.flatMap((f) => f.items).sort((a, b) => dateOf(b) - dateOf(a));
+      more.push(albumCard("Others", count(otherItems.length), coverOf(otherItems[0]), () => setView("others", null, "left")));
     }
 
     const row = (iconPath, label, n, onclick) =>
@@ -1511,8 +1502,8 @@
   }
 
   // --- Full-screen view of one photo or video ------------------------------
-  // Opens from the feed. The bars stay hidden until you tap; tap again to hide
-  // them. Swipe left/right for the next/previous one.
+  // Opens from the feed and shows just that one photo or video. The bars stay
+  // hidden until you tap; tap again to hide them.
 
   let viewerKey = null;
   const viewerOpen = () => ui && ui.viewer && !ui.viewer.classList.contains("xbg-hidden");
@@ -1533,35 +1524,6 @@
     ui.overlay.append(viewer);
     Object.assign(ui, { viewer, vStage: stage, vTitle: title, vSub: sub, vBottom: bottom });
 
-    let t = null;
-    stage.addEventListener("touchstart", (e) => {
-      if (e.touches.length !== 1) return (t = null);
-      const p = e.touches[0];
-      const onControls = e.target.tagName === "VIDEO" && p.clientY > e.target.getBoundingClientRect().bottom - 60;
-      t = onControls ? null : { x: p.clientX, y: p.clientY, dx: 0, decided: false, sideways: false, at: Date.now() };
-    }, { passive: true });
-    stage.addEventListener("touchmove", (e) => {
-      if (!t) return;
-      const p = e.touches[0];
-      const dx = p.clientX - t.x;
-      const dy = p.clientY - t.y;
-      if (!t.decided) {
-        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-        t.decided = true;
-        t.sideways = Math.abs(dx) > Math.abs(dy);
-      }
-      if (!t.sideways) return;
-      t.dx = dx;
-      stage.style.transition = "none";
-      stage.style.transform = `translateX(${dx}px)`;
-    }, { passive: true });
-    stage.addEventListener("touchend", () => {
-      if (!t || !t.sideways) return (t = null);
-      const { dx, at } = t;
-      t = null;
-      if (Math.abs(dx) > window.innerWidth * 0.25 || (Math.abs(dx) > 40 && Date.now() - at < 300)) slideViewer(dx < 0 ? 1 : -1);
-      else settleViewer();
-    });
     // A tap shows or hides the bars.
     stage.addEventListener("click", () => viewer.classList.toggle("xbg-ui-on"));
   }
@@ -1592,9 +1554,6 @@
     ui.vTitle.textContent = friendlyDate(d);
     ui.vSub.textContent = [d ? new Date(d).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "", item.folder].filter(Boolean).join(" · ");
     paintViewer();
-    // Warm up the neighbours so swiping feels instant.
-    const i = current.indexOf(item);
-    for (const n of [current[i + 1], current[i - 1]]) if (n && n.type === "photo") new Image().src = n.full || n.thumb;
   }
 
   function paintViewer() {
@@ -1643,8 +1602,6 @@
     buildViewer();
     ui.feed.querySelectorAll("video").forEach((v) => v.pause());
     ui.viewer.classList.remove("xbg-hidden", "xbg-ui-on"); // bars start hidden
-    ui.vStage.style.transition = "none";
-    ui.vStage.style.transform = "";
     showViewerItem(key);
   }
 
@@ -1657,33 +1614,6 @@
     const post = feedOpen() && viewerKey && ui.feed.querySelector(`.xbg-post[data-key="${CSS.escape(viewerKey)}"]`);
     if (post) ui.feed.scrollTop = post.offsetTop;
     viewerKey = null;
-  }
-
-  function settleViewer() {
-    ui.vStage.style.transition = "transform 0.2s ease";
-    ui.vStage.style.transform = "";
-  }
-
-  let viewerSliding = false;
-  function slideViewer(delta) {
-    if (viewerSliding) return;
-    const i = current.findIndex((it) => it.key === viewerKey);
-    const target = current[i + delta];
-    if (!target) return settleViewer(); // first or last one
-    const stage = ui.vStage;
-    const w = window.innerWidth;
-    viewerSliding = true;
-    stage.style.transition = "transform 0.16s ease-in";
-    stage.style.transform = `translateX(${delta > 0 ? -w : w}px)`;
-    setTimeout(() => {
-      showViewerItem(target.key);
-      stage.style.transition = "none";
-      stage.style.transform = `translateX(${delta > 0 ? w : -w}px)`;
-      void stage.offsetWidth;
-      stage.style.transition = "transform 0.2s ease-out";
-      stage.style.transform = "";
-      setTimeout(() => (viewerSliding = false), 200);
-    }, 160);
   }
 
   // After deleting/restoring: if the open item is gone, show the next one.

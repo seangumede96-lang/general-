@@ -9,8 +9,8 @@ the X Bookmarks Gallery (`../twitter-gallery`):
   or the bookmark button on a photo), plus the phone's own folders (Camera,
   Screenshots, WhatsApp…).
 - Tap a photo for a freely scrolling feed of just the pictures; tap one to
-  open it full screen, where tapping shows/hides the Share · Star · Album ·
-  Edit · Delete · More bar and swiping left/right moves between photos.
+  open it full screen, (just that one), where tapping shows/hides the Share ·
+  Star · Album · Edit · Delete · More bar.
 - ★ Star photos (Starred album), share one or many, and delete to the
   phone's own recycle bin (kept 30 days) with a Recycle bin album to restore
   or delete forever. Android asks to confirm each delete unless you allow
