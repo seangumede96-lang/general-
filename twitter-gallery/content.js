@@ -186,6 +186,11 @@
 
   function backup() {
     const data = JSON.stringify({ app: "x-bookmarks-gallery", version: 1, collections, items: Object.fromEntries(savedItems) });
+    // In the Android app, the app saves the file to Downloads itself.
+    if (window.XbgAndroid && window.XbgAndroid.saveFile) {
+      toast(window.XbgAndroid.saveFile("bookmark-collections.json", data) ? "Backup saved to your Downloads" : "Couldn’t save the backup");
+      return;
+    }
     const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
     const a = el("a", { href: url, download: "bookmark-collections.json" });
     document.body.append(a);
@@ -1308,7 +1313,17 @@
     paintSave(save, item.key);
     const actions = el("div", { class: "xbg-post-actions" }, save);
     if (item.tweet) {
-      actions.append(el("a", { class: "xbg-fab-btn", href: item.tweet, target: "_blank", rel: "noopener noreferrer", "aria-label": "Open post on X" }, icon(OPEN_PATH, false)));
+      const open = el("a", { class: "xbg-fab-btn", href: item.tweet, target: "_blank", rel: "noopener noreferrer", "aria-label": "Open post on X" }, icon(OPEN_PATH, false));
+      // In the Android app the post opens in the same screen; reopen the
+      // gallery when you come back to your bookmarks.
+      if (window.XbgAndroid) open.addEventListener("click", () => {
+        try {
+          sessionStorage.setItem("xbg_open", "1");
+        } catch (e) {
+          /* fine */
+        }
+      });
+      actions.append(open);
     }
     media.append(head, actions);
     return el("article", { class: "xbg-post", "data-key": item.key }, media);
@@ -1509,14 +1524,18 @@
       watchPage();
       updateHeader();
     }, 1000);
+    // Reopen the gallery if we asked to (e.g. after "Refresh", or coming back
+    // from a post in the Android app). Other pages leave the request for later.
     let autoOpen = false;
-    try {
-      autoOpen = sessionStorage.getItem("xbg_open") === "1";
-      sessionStorage.removeItem("xbg_open");
-    } catch (e) {
-      /* fine */
+    if (isBookmarks()) {
+      try {
+        autoOpen = sessionStorage.getItem("xbg_open") === "1";
+        sessionStorage.removeItem("xbg_open");
+      } catch (e) {
+        /* fine */
+      }
     }
-    if (autoOpen && isBookmarks()) openGallery();
+    if (autoOpen) openGallery();
   }
 
   if (document.body) start();

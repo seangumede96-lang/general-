@@ -1,0 +1,63 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.xbookmarks.gallery"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.xbookmarks.gallery"
+        minSdk 26
+        // 34 keeps the classic layout (Android 15 forces edge-to-edge drawing at 35).
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    // Every version must be signed with the same key so it installs over the
+    // last one (Android refuses updates signed with a different key). The key
+    // and its password live in keystore/, which is kept out of git.
+    def keyProps = new Properties()
+    def keyPropsFile = rootProject.file("keystore/keystore.properties")
+    if (keyPropsFile.exists()) keyPropsFile.withInputStream { keyProps.load(it) }
+    signingConfigs {
+        release {
+            if (keyPropsFile.exists()) {
+                storeFile rootProject.file("keystore/" + keyProps["storeFile"])
+                storePassword keyProps["storePassword"]
+                keyAlias keyProps["keyAlias"]
+                keyPassword keyProps["keyPassword"]
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.assets.srcDirs += "$buildDir/generated/galleryScripts"
+    }
+}
+
+// The gallery itself is shared with the browser extension: copy its scripts in.
+def copyGalleryScripts = tasks.register("copyGalleryScripts", Copy) {
+    from(file("../../twitter-gallery")) {
+        include "inject.js", "content.js", "styles.css"
+    }
+    into "$buildDir/generated/galleryScripts"
+}
+preBuild.dependsOn copyGalleryScripts
+
+dependencies {
+    implementation "androidx.webkit:webkit:1.12.1"
+}
