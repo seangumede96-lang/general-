@@ -35,7 +35,9 @@ scrolls the bookmarks page for you while it's open.
   shows the saved copy from last time (tap **Refresh** to update). Turn it
   off in the extension's popup.
 - **Swipe** left/right to switch between **All posts** and **Collections**.
-- The header hides as you scroll down and comes back when you scroll up.
+- The header hides as you scroll down and comes back when you scroll up. A
+  round button (drag it to either side) switches the header off completely and
+  back on; the choice is remembered.
 - **⇅ Newest / Oldest** sorts posts, by when you bookmarked them or when they
   were posted.
 - **Grid / Months / Years**: Months groups posts under month headings; Years

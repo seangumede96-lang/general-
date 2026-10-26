@@ -12,7 +12,7 @@
   const cached = new Map(); // key -> item from the saved copy, shown until loading finishes
   const savedItems = new Map(); // key -> item, for every post in a collection
   let collections = []; // [{ id, name, keys: [newest first] }]
-  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid", theme: "dark" };
+  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid", theme: "dark", headerHidden: false, toggleBtn: { side: "right", y: 0.75 } };
   let cacheTime = 0;
   let lastTotal = 0; // how many bookmarks the last full load found, to show progress next time
 
@@ -114,7 +114,7 @@
     try {
       const data = await store.get(Object.values(K));
       const s = data[K.settings] || {};
-      settings = { ...settings, ...s, ball: { ...settings.ball, ...(s.ball || {}) } };
+      settings = { ...settings, ...s, ball: { ...settings.ball, ...(s.ball || {}) }, toggleBtn: { ...settings.toggleBtn, ...(s.toggleBtn || {}) } };
       collections = (data[K.collections] || []).map(cleanCollection).filter(Boolean);
       for (const raw of Object.values(data[K.items] || {})) {
         const item = clean(raw);
@@ -134,6 +134,10 @@
     }
     updateBall();
     applyTheme();
+    if (ui && ui.hbtn) {
+      placeHeaderButton();
+      if (settings.headerHidden !== ui.overlay.classList.contains("xbg-header-off")) setHeaderHidden(settings.headerHidden);
+    }
     syncControls();
     if (galleryOpen()) rebuild(false);
   }
@@ -597,9 +601,11 @@
     wireScroller();
     wireLightbox();
     buildScrubber();
+    buildHeaderButton();
     document.addEventListener("keydown", onKey);
-    new ResizeObserver(() => (scroller.style.paddingTop = bar.offsetHeight + "px")).observe(bar);
+    new ResizeObserver(() => (scroller.style.paddingTop = settings.headerHidden ? "0px" : bar.offsetHeight + "px")).observe(bar);
     applyTheme();
+    if (settings.headerHidden) setHeaderHidden(true);
     syncControls();
     updateHeader();
   }
@@ -687,6 +693,12 @@
           return;
         }
         const dy = y - lastY;
+        if (settings.headerHidden) {
+          lastY = y;
+          fillPage();
+          showScrubber();
+          return;
+        }
         if (y < bar.offsetHeight) bar.classList.remove("xbg-bar-hidden");
         else if (dy > 6) bar.classList.add("xbg-bar-hidden");
         else if (dy < -6) bar.classList.remove("xbg-bar-hidden");
@@ -907,7 +919,7 @@
       ui.jumped = true; // our own scroll: leave the header as it was
       ui.bar.classList.toggle("xbg-bar-hidden", spot.barHidden && spot.top > 0);
       // Room for the header now (it can be a different height here), not a frame later.
-      ui.scroller.style.paddingTop = ui.bar.offsetHeight + "px";
+      ui.scroller.style.paddingTop = settings.headerHidden ? "0px" : ui.bar.offsetHeight + "px";
       ui.scroller.scrollTop = spot.top;
       fillPage();
     }
@@ -1673,7 +1685,7 @@
       // Jump to the photo at that point of the list (loading tiles up to it).
       const index = Math.round(f * (entries.length - 1));
       ui.jumped = true;
-      ui.scroller.scrollTop = f >= 1 ? ui.scroller.scrollHeight : gridTop() + tops[index] - ui.bar.offsetHeight;
+      ui.scroller.scrollTop = f >= 1 ? ui.scroller.scrollHeight : gridTop() + tops[index] - (settings.headerHidden ? 0 : ui.bar.offsetHeight);
       renderVisible();
       const text = labelFor(index);
       ui.scrubLabel.textContent = text;
@@ -1711,7 +1723,7 @@
 
   // The part of the screen the handle moves along: below the header, between the two jump buttons.
   function scrubEnds() {
-    const top = ui.bar.getBoundingClientRect().bottom + 12;
+    const top = (settings.headerHidden ? 0 : ui.bar.getBoundingClientRect().bottom) + 12;
     const bottom = window.innerHeight - (selectMode ? ui.selectBar.offsetHeight : 0) - 70;
     return { top, bottom };
   }
@@ -1768,7 +1780,7 @@
       return ui.scrub.classList.remove("xbg-on");
     }
     // Where we are in the whole list, from the first tile on screen.
-    const y = ui.bar.getBoundingClientRect().bottom + 4;
+    const y = (settings.headerHidden ? 0 : ui.bar.getBoundingClientRect().bottom) + 4;
     let index = indexAt(y - ui.grid.getBoundingClientRect().top);
     if (ui.scroller.scrollTop + ui.scroller.clientHeight >= ui.scroller.scrollHeight - 4) index = entries.length - 1;
     const f = index / Math.max(entries.length - 1, 1);
@@ -1809,6 +1821,84 @@
     },
     true
   );
+
+  // --- Show/hide-header button ------------------------------------------------
+  // A floating button you can drag to either side; tap it to hide or show the
+  // header (tabs, filters, sorting).
+
+  function buildHeaderButton() {
+    const btn = el("button", { class: "xbg-hbtn", "aria-label": "Show or hide the header" }, el("span", { class: "xbg-hbtn-ring" }));
+    ui.overlay.append(btn);
+    ui.hbtn = btn;
+    const size = () => btn.offsetWidth || 54;
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+    let drag = null;
+    let idle = null;
+    const wake = () => {
+      btn.classList.add("xbg-awake");
+      clearTimeout(idle);
+      idle = setTimeout(() => btn.classList.remove("xbg-awake"), 2500);
+    };
+    btn.addEventListener("pointerdown", (e) => {
+      drag = { sx: e.clientX, sy: e.clientY, ox: btn.offsetLeft, oy: btn.offsetTop, moved: false };
+      btn.setPointerCapture(e.pointerId);
+      wake();
+    });
+    btn.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.sx;
+      const dy = e.clientY - drag.sy;
+      if (!drag.moved && Math.hypot(dx, dy) < 8) return;
+      drag.moved = true;
+      btn.classList.add("xbg-dragging");
+      btn.style.left = clamp(drag.ox + dx, 0, window.innerWidth - size()) + "px";
+      btn.style.top = clamp(drag.oy + dy, 0, window.innerHeight - size()) + "px";
+    });
+    btn.addEventListener("pointerup", () => {
+      if (!drag) return;
+      const moved = drag.moved;
+      drag = null;
+      btn.classList.remove("xbg-dragging");
+      wake();
+      if (!moved) return setHeaderHidden(!settings.headerHidden);
+      // Snap to the nearest side.
+      settings.toggleBtn = { side: btn.offsetLeft + size() / 2 < window.innerWidth / 2 ? "left" : "right", y: btn.offsetTop / window.innerHeight };
+      placeHeaderButton();
+      saveSettings();
+    });
+    btn.addEventListener("pointercancel", () => {
+      drag = null;
+      btn.classList.remove("xbg-dragging");
+      placeHeaderButton();
+    });
+    window.addEventListener("resize", placeHeaderButton);
+    placeHeaderButton();
+    wake();
+  }
+
+  function placeHeaderButton() {
+    const btn = ui.hbtn;
+    const s = btn.offsetWidth || 54;
+    btn.style.top = Math.min(Math.max(settings.toggleBtn.y * window.innerHeight, 60), window.innerHeight - s - 60) + "px";
+    btn.style.left = (settings.toggleBtn.side === "left" ? 8 : window.innerWidth - s - 8) + "px";
+  }
+
+  function setHeaderHidden(hidden) {
+    const { bar, scroller } = ui;
+    const h = bar.offsetHeight;
+    settings.headerHidden = hidden;
+    saveSettings();
+    ui.overlay.classList.toggle("xbg-header-off", hidden);
+    bar.classList.remove("xbg-bar-hidden");
+    // Keep the same photos on screen as the space at the top opens or closes.
+    scroller.style.paddingTop = hidden ? "0px" : h + "px";
+    const target = Math.max(0, scroller.scrollTop + (hidden ? -h : h));
+    if (target !== scroller.scrollTop) {
+      ui.jumped = true; // this scroll is ours: don't treat it as scrolling down
+      scroller.scrollTop = target;
+    }
+    ui.hbtn.classList.toggle("xbg-on", hidden);
+  }
 
   // --- Floating ball (shown everywhere on X) -------------------------------
 

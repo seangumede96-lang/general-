@@ -678,6 +678,7 @@
         if (settings.headerHidden) {
           lastY = y;
           fillPage();
+          showScrubber();
           return;
         }
         if (y < bar.offsetHeight) bar.classList.remove("xbg-bar-hidden");
@@ -2136,8 +2137,11 @@
     bar.classList.remove("xbg-bar-hidden");
     // Keep the same photos on screen as the space at the top opens or closes.
     scroller.style.paddingTop = hidden ? "0px" : h + "px";
-    ui.jumped = true; // this scroll is ours: don't treat it as scrolling down
-    scroller.scrollTop = Math.max(0, scroller.scrollTop + (hidden ? -h : h));
+    const target = Math.max(0, scroller.scrollTop + (hidden ? -h : h));
+    if (target !== scroller.scrollTop) {
+      ui.jumped = true; // this scroll is ours: don't treat it as scrolling down
+      scroller.scrollTop = target;
+    }
     ui.hbtn.classList.toggle("xbg-on", hidden);
   }
 
