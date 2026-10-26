@@ -2199,3 +2199,14 @@
   text-align: center;
   min-width: 0;
 }
+
+/* Sort chip: spaced up/down arrows before the label */
+#xbg-overlay .xbg-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#xbg-overlay .xbg-sort-icon {
+  flex: none;
+}

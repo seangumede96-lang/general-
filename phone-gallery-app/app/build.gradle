@@ -11,8 +11,8 @@ android {
         minSdk 30
         // 34 keeps the classic layout (Android 15 forces edge-to-edge drawing at 35).
         targetSdk 34
-        versionCode 21
-        versionName "1.5.2"
+        versionCode 22
+        versionName "1.5.3"
     }
 
     // Every version must be signed with the same key so it installs over the

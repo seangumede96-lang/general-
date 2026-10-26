@@ -2055,3 +2055,14 @@ html,
 #xbg-overlay.xbg-light .xbg-jump svg {
   stroke: #000;
 }
+
+/* Sort chip: spaced up/down arrows before the label */
+#xbg-overlay .xbg-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#xbg-overlay .xbg-sort-icon {
+  flex: none;
+}
