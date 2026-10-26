@@ -802,7 +802,7 @@
     ui.filters.querySelectorAll(".xbg-chip").forEach((b) => b.classList.toggle("xbg-on", b.dataset.filter === filter));
     ui.layouts.querySelectorAll("button").forEach((b) => b.classList.toggle("xbg-on", b.dataset.layout === settings.layout));
     // Up and down arrows drawn apart (the ⇅ character squeezes them together).
-    ui.sortBtn.innerHTML = '<svg class="xbg-sort-icon" viewBox="0 0 28 24" width="21" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20V4M2.5 7.5 6 4l3.5 3.5"/><path d="M22 4v16M18.5 16.5 22 20l3.5-3.5"/></svg><span>' + (settings.sort === "oldest" ? "Oldest" : "Newest") + "</span>";
+    ui.sortBtn.innerHTML = '<svg class="xbg-sort-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20V4M2.5 7.5 6 4l3.5 3.5"/><path d="M18 4v16M14.5 16.5 18 20l3.5-3.5"/></svg><span>' + (settings.sort === "oldest" ? "Oldest" : "Newest") + "</span>";
   }
 
   function updateHeader() {
