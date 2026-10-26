@@ -2243,8 +2243,12 @@
 }
 
 #xbg-overlay .xbg-bar.xbg-swiping {
-  background: transparent;
+  background: #000;
   border-bottom-color: transparent;
+}
+
+#xbg-overlay.xbg-light .xbg-bar.xbg-swiping {
+  background: var(--xbg-bg);
 }
 
 #xbg-overlay .xbg-bar.xbg-swiping > .xbg-row,
@@ -2260,4 +2264,158 @@
 
 #xbg-overlay.xbg-light .xbg-bar.xbg-swiping .xbg-tab {
   text-shadow: 0 1px 6px rgba(255, 255, 255, 0.8);
+}
+
+/* Feed: the save / open buttons only appear after you tap the post */
+#xbg-overlay .xbg-post-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+#xbg-overlay .xbg-post-media.xbg-ui-on .xbg-post-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-is-video .xbg-post-actions {
+  bottom: 84px;
+}
+
+/* Video: black behind, cover picture until it really plays, then fade in */
+#xbg-overlay .xbg-is-video {
+  background: #000;
+}
+
+#xbg-overlay .xbg-post-media img.xbg-vcover {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  object-fit: cover;
+}
+
+#xbg-overlay .xbg-post-media video {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: transparent;
+  transition: opacity 0.25s ease;
+}
+
+#xbg-overlay .xbg-post-media.xbg-vready video {
+  opacity: 1;
+}
+
+/* Once the video shows, the cover steps away so it never peeks round it */
+#xbg-overlay .xbg-post-media.xbg-vready img.xbg-vcover {
+  opacity: 0;
+  transition: opacity 0s linear 0.3s;
+}
+
+/* Player controls, like the X app: a thin bar and white icons at the bottom */
+#xbg-overlay .xbg-vbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 18px 8px 4px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+#xbg-overlay .xbg-post-media.xbg-ui-on .xbg-vbar,
+#xbg-overlay .xbg-post-media:not(.xbg-vready) .xbg-vbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-vtrack {
+  position: relative;
+  height: 20px;
+  margin: 0 6px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+#xbg-overlay .xbg-vtrack::before,
+#xbg-overlay .xbg-vfill {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+#xbg-overlay .xbg-vtrack::before {
+  right: 0;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+#xbg-overlay .xbg-vfill {
+  width: 0;
+  background: #fff;
+}
+
+#xbg-overlay .xbg-vfill::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+#xbg-overlay .xbg-vrow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#xbg-overlay .xbg-vbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+}
+
+#xbg-overlay .xbg-vbtn svg {
+  width: 22px;
+  height: 22px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+
+#xbg-overlay .xbg-vtime {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+#xbg-overlay .xbg-vspace {
+  flex: 1;
+}
+
+/* Full screen keeps the whole picture visible, upright unless you rotate */
+.xbg-post-media.xbg-vfull,
+.xbg-post-media:fullscreen {
+  aspect-ratio: auto !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: #000 !important;
+}
+
+.xbg-post-media:fullscreen video,
+.xbg-post-media:fullscreen img.xbg-vcover {
+  object-fit: contain !important;
 }

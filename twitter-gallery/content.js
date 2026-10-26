@@ -980,6 +980,7 @@
   // (a snapshot of the grid where you left it, or the collection cards), so
   // the two move together. When the slide finishes the real page takes over
   // at exactly the same spot.
+  const PAGE_GAP = 36; // dark space between the two pages while they slide
   let gridSnapshot = null; // { node, top, gridTop } taken when leaving All posts
   let allSpot = null;
   let slide = null;
@@ -1030,7 +1031,7 @@
     const { w, dir, peek } = slide;
     const p = Math.min(Math.abs(dx) / w, 1);
     ui.scroller.style.transform = `translate3d(${dx}px, 0, 0)`;
-    peek.style.transform = `translate3d(${-dir * w + dx}px, 0, 0)`;
+    peek.style.transform = `translate3d(${-dir * (w + PAGE_GAP) + dx}px, 0, 0)`;
     peek.style.opacity = String(0.25 + 0.75 * p);
     if (ui.tabInk && view !== "collection") {
       const base = view === "all" ? 0 : 1;
@@ -1047,13 +1048,13 @@
     if (ui.tabInk) ui.tabInk.style.transition = `transform ${t}s ${ease}`;
     if (!go) {
       ui.scroller.style.transform = "";
-      peek.style.transform = `translate3d(${-dir * w}px, 0, 0)`;
+      peek.style.transform = `translate3d(${-dir * (w + PAGE_GAP)}px, 0, 0)`;
       peek.style.opacity = "0";
       if (ui.tabInk && view !== "collection") ui.tabInk.style.transform = `translateX(${view === "all" ? 0 : 100}%)`;
       setTimeout(() => endSlide(), t * 1000);
       return;
     }
-    ui.scroller.style.transform = `translate3d(${dir * w}px, 0, 0)`;
+    ui.scroller.style.transform = `translate3d(${dir * (w + PAGE_GAP)}px, 0, 0)`;
     peek.style.transform = "translate3d(0, 0, 0)";
     peek.style.opacity = "1";
     if (ui.tabInk && target !== "collection") ui.tabInk.style.transform = `translateX(${target === "all" ? 0 : 100}%)`;
@@ -1119,7 +1120,7 @@
     let swipe = null;
     lightbox.addEventListener("touchstart", (e) => {
       const t = e.touches[0];
-      const onControls = e.target.tagName === "VIDEO" && t.clientY > e.target.getBoundingClientRect().bottom - 60;
+      const onControls = !!e.target.closest(".xbg-vbar") || !!document.fullscreenElement;
       // Swipes from the very edge are Android's own back gesture: leave them to it.
       const fromEdge = t.clientX < 28 || t.clientX > window.innerWidth - 28;
       swipe = e.touches.length === 1 && !onControls && !ui.sheet && !fromEdge ? { x: t.clientX, y: t.clientY, dx: 0, at: Date.now(), decided: false } : null;
@@ -1984,10 +1985,7 @@
     if (item.type === "photo") {
       media.append(el("img", { src: item.full || item.thumb, loading: "lazy", decoding: "async", alt: "", referrerpolicy: "no-referrer" }));
     } else if (isVideo) {
-      const v = el("video", { src: item.video, poster: item.full || item.thumb, controls: true, muted: true, loop: true, playsinline: true, preload: "none" });
-      v.muted = true;
-      media.append(v);
-      ui.feedVideos.observe(v);
+      videoPlayer(item, media);
     } else {
       media.append(
         el("img", { src: item.full || item.thumb, loading: "lazy", alt: "", referrerpolicy: "no-referrer" }),
@@ -2011,8 +2009,142 @@
       actions.append(open);
     }
     media.append(head, actions);
+    // The buttons (and a video's controls) stay hidden until you tap the post.
+    media.addEventListener("click", (e) => {
+      if (e.target.closest("button, a, .xbg-vbar")) return;
+      showPostUi(media, !media.classList.contains("xbg-ui-on"));
+    });
     return el("article", { class: "xbg-post", "data-key": item.key }, media);
   }
+
+  function showPostUi(media, on) {
+    media.classList.toggle("xbg-ui-on", on);
+    clearTimeout(media._hide);
+    const v = media.querySelector("video");
+    // While a video plays, its controls tuck away again after a few seconds.
+    if (on && v && !v.paused) media._hide = setTimeout(() => showPostUi(media, false), 3500);
+  }
+
+  // --- Video player (laid out like the X app's) ------------------------------
+  // The cover picture shows until the video is actually playing, then the
+  // video fades in over it: no white flash. Controls: play/pause, a thin
+  // progress bar you can drag, time, sound, rotate and full screen. Full
+  // screen keeps the phone upright; the rotate button turns it sideways.
+  const VPATH = {
+    play: "M7 5.4v13.2c0 .8.9 1.3 1.6.8l10.3-6.6c.6-.4.6-1.3 0-1.7L8.6 4.6C7.9 4.2 7 4.6 7 5.4z",
+    pause: "M6 4h4v16H6zM14 4h4v16h-4z",
+    sound: "M3 9h4l5-4v14l-5-4H3zM15.5 8.5a5 5 0 010 7M18 6a8.5 8.5 0 010 12",
+    muted: "M3 9h4l5-4v14l-5-4H3zM16 9.5l5 5M21 9.5l-5 5",
+    full: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
+    exitFull: "M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5",
+    rotate: "M7.5 3h9A1.5 1.5 0 0118 4.5v15a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 016 19.5v-15A1.5 1.5 0 017.5 3zM20.5 9.5a8 8 0 010 5M3.5 14.5a8 8 0 010-5",
+  };
+  function vicon(name, filled) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", VPATH[name]);
+    if (filled) path.setAttribute("fill", "currentColor");
+    else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "currentColor");
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    svg.append(path);
+    return svg;
+  }
+  const clock = (t) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}` : "0:00");
+
+  function videoPlayer(item, media) {
+    const cover = el("img", { class: "xbg-vcover", src: item.full || item.thumb, alt: "", referrerpolicy: "no-referrer" });
+    const v = el("video", { src: item.video, muted: true, loop: true, playsinline: true, preload: "none", disablepictureinpicture: true });
+    v.muted = true;
+    v.addEventListener("playing", () => media.classList.add("xbg-vready"));
+    const btn = (name, label, onclick, filled) => {
+      const b = el("button", { class: "xbg-vbtn", "aria-label": label, onclick: (e) => { e.stopPropagation(); onclick(); showPostUi(media, true); } });
+      b.append(vicon(name, filled));
+      return b;
+    };
+    const setIcon = (b, name, filled) => b.replaceChildren(vicon(name, filled));
+    const playBtn = btn("play", "Play or pause", () => (v.paused ? v.play().catch(() => {}) : v.pause()), true);
+    const soundBtn = btn("muted", "Sound", () => { v.muted = !v.muted; setIcon(soundBtn, v.muted ? "muted" : "sound"); });
+    const rotateBtn = btn("rotate", "Rotate", () => rotate());
+    const fullBtn = btn("full", "Full screen", () => toggleFull());
+    const time = el("span", { class: "xbg-vtime" }, "0:00 / " + clock(item.duration ? item.duration / 1000 : NaN));
+    const fill = el("div", { class: "xbg-vfill" });
+    const track = el("div", { class: "xbg-vtrack" }, fill);
+    const bar = el("div", { class: "xbg-vbar" }, track, el("div", { class: "xbg-vrow" }, playBtn, time, el("span", { class: "xbg-vspace" }), soundBtn, rotateBtn, fullBtn));
+    v.addEventListener("play", () => setIcon(playBtn, "pause", true));
+    v.addEventListener("pause", () => setIcon(playBtn, "play", true));
+    v.addEventListener("timeupdate", () => {
+      fill.style.width = (v.duration ? (v.currentTime / v.duration) * 100 : 0) + "%";
+      time.textContent = clock(v.currentTime) + " / " + clock(v.duration);
+    });
+    // Drag along the bar to seek.
+    const seek = (e) => {
+      const r = track.getBoundingClientRect();
+      if (v.duration) v.currentTime = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * v.duration;
+    };
+    track.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      track.setPointerCapture(e.pointerId);
+      seek(e);
+      const move = (ev) => seek(ev);
+      const up = () => {
+        track.removeEventListener("pointermove", move);
+        track.removeEventListener("pointerup", up);
+      };
+      track.addEventListener("pointermove", move);
+      track.addEventListener("pointerup", up);
+    });
+    const isFull = () => document.fullscreenElement === media;
+    async function toggleFull() {
+      try {
+        if (isFull()) await document.exitFullscreen();
+        else {
+          await media.requestFullscreen({ navigationUI: "hide" });
+          // Stay upright; the rotate button turns it sideways if you want.
+          if (screen.orientation && screen.orientation.lock) screen.orientation.lock("portrait").catch(() => {});
+        }
+      } catch (e) {
+        /* not allowed here */
+      }
+    }
+    async function rotate() {
+      try {
+        if (!isFull()) await media.requestFullscreen({ navigationUI: "hide" });
+        const landscape = screen.orientation && screen.orientation.type.startsWith("landscape");
+        await screen.orientation.lock(landscape ? "portrait" : "landscape");
+      } catch (e) {
+        /* rotation isn't available */
+      }
+    }
+    media._onFull = () => setIcon(fullBtn, isFull() ? "exitFull" : "full");
+    media.append(cover, v, bar);
+    ui.feedVideos.observe(v);
+  }
+
+  // One listener for every video: mark the one in full screen, and let the
+  // phone turn freely again once you leave it.
+  let fullMedia = null;
+  document.addEventListener("fullscreenchange", () => {
+    const now = document.fullscreenElement && document.fullscreenElement.classList.contains("xbg-post-media") ? document.fullscreenElement : null;
+    for (const m of [fullMedia, now]) {
+      if (!m) continue;
+      m.classList.toggle("xbg-vfull", m === now);
+      if (m._onFull) m._onFull();
+    }
+    fullMedia = now;
+    if (!now && screen.orientation && screen.orientation.unlock) {
+      try {
+        screen.orientation.unlock();
+      } catch (e) {
+        /* fine */
+      }
+    }
+  });
 
   function paintSave(btn, key) {
     const saved = isSaved(key);
