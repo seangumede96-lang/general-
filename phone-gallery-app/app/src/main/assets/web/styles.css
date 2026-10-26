@@ -1748,3 +1748,26 @@ html,
   background: rgba(255, 255, 255, 0.92);
   color: #000;
 }
+
+/* Confirmation: see-through frosted glass, with a press highlight on the buttons */
+#xbg-overlay .xbg-alert-backdrop {
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(3px);
+}
+
+#xbg-overlay .xbg-alert {
+  background: rgba(44, 44, 46, 0.6);
+  backdrop-filter: blur(28px) saturate(1.8);
+}
+
+#xbg-overlay.xbg-light .xbg-alert {
+  background: rgba(242, 242, 247, 0.62);
+}
+
+#xbg-overlay .xbg-alert-buttons button:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#xbg-overlay.xbg-light .xbg-alert-buttons button:active {
+  background: rgba(0, 0, 0, 0.08);
+}
