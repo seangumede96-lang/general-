@@ -1786,3 +1786,12 @@ html,
   background-size: 22%, auto;
   background-position: center 34%, center;
 }
+
+/* Selected Grid / Months / Years: white in dark mode, red in light mode */
+#xbg-overlay .xbg-seg button.xbg-on {
+  color: #fff;
+}
+
+#xbg-overlay.xbg-light .xbg-seg button.xbg-on {
+  color: var(--xbg-red);
+}
