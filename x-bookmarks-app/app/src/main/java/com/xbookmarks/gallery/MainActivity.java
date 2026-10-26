@@ -77,7 +77,7 @@ public class MainActivity extends Activity {
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false); // muted videos play while on screen
         // Look like the phone's normal Chrome so X treats this as a regular browser.
-        s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replaceAll("Version/\\S+ ", ""));
+        s.setUserAgentString(chromeUserAgent(s.getUserAgentString()));
         behaveLikeABrowser(s);
 
         CookieManager.getInstance().setAcceptCookie(true);
@@ -178,6 +178,17 @@ public class MainActivity extends Activity {
                 WebSettingsCompat.setUserAgentMetadata(s, metadata);
             }
         }
+    }
+
+    /**
+     * The short form current Chrome on Android sends ("Android 10; K", no
+     * phone model or build number), using this phone's Chrome version.
+     */
+    static String chromeUserAgent(String webViewUserAgent) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("Chrome/(\\d+)").matcher(webViewUserAgent);
+        String major = m.find() ? m.group(1) : "130";
+        return "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/"
+                + major + ".0.0.0 Mobile Safari/537.36";
     }
 
     private static UserAgentMetadata.BrandVersion brand(String name, String major, String full) {
