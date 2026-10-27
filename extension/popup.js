@@ -25,8 +25,10 @@ async function focus(tab) {
 document.getElementById("open").addEventListener("click", async () => {
   const tab = await findXTab();
   if (!tab) {
-    statusEl.textContent = "Opening your bookmarks… tap the extension again once they load.";
-    await ext.tabs.create({ url: BOOKMARKS });
+    // The new tab opens the gallery itself once it has loaded (see #xbg-open in content.js).
+    statusEl.textContent = "Opening your bookmarks…";
+    await ext.tabs.create({ url: BOOKMARKS + "#xbg-open" });
+    window.close();
     return;
   }
   try {

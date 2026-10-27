@@ -3143,6 +3143,16 @@
       } catch (e) {
         /* fine */
       }
+      // The toolbar popup opens a new bookmarks tab with #xbg-open when there
+      // was no X tab to ask; tidy it out of the address once seen.
+      if (location.hash === "#xbg-open") {
+        autoOpen = true;
+        try {
+          history.replaceState(history.state, "", location.pathname + location.search);
+        } catch (e) {
+          /* fine */
+        }
+      }
     }
     if (!restoreSpot() && autoOpen) openGallery();
   }
