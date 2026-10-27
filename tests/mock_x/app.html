@@ -126,7 +126,14 @@
     history.pushState({}, "", a.getAttribute("href"));
     render();
   });
-  window.addEventListener("popstate", render);
+  // Like the `history` package X's router uses: read the key and state off
+  // the event. (In Firefox an object made by an extension's content script
+  // can't be read here: "Permission denied to access property".)
+  window.addEventListener("popstate", (e) => {
+    const { key, state } = e.state || {};
+    window.__lastPop = { key: key || null, path: location.pathname };
+    render();
+  });
   window.addEventListener("scroll", () => {
     if (window.innerHeight + window.scrollY > document.body.scrollHeight - 400) loadMore();
   }, { passive: true });

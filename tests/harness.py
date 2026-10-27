@@ -97,7 +97,8 @@ class Browser:
             prefs["browser.privatebrowsing.autostart"] = True
         for k, v in prefs.items():
             o.set_preference(k, v)
-        self.service = Service(executable_path=shutil.which("geckodriver"), log_output=self.log_path, service_args=["--log", "info"])
+        # Lets the harness reach Firefox's own chrome code (to open extension pages).
+        self.service = Service(executable_path=shutil.which("geckodriver"), log_output=self.log_path, service_args=["--log", "info"], env={**os.environ, "MOZ_REMOTE_ALLOW_SYSTEM_ACCESS": "1"})
         self.driver = webdriver.Firefox(options=o, service=self.service)
         self.driver.set_window_size(width, height)
         self.driver.set_script_timeout(30)
@@ -189,26 +190,41 @@ class Browser:
     def ext_url(self, path):
         return f"moz-extension://{UUID}/{path}"
 
-    def storage(self):
-        """Everything in the extension's storage.local (read from an extension page)."""
+    def open_ext_page(self, path="popup.html", background=False):
+        """Open one of the extension's pages in a new tab and switch to it.
+        (Marionette refuses to navigate to moz-extension: URLs itself, so the
+        tab is opened from Firefox's own chrome code.)"""
+        before = set(self.d.window_handles)
+        with self.d.context(self.d.CONTEXT_CHROME):
+            self.d.execute_script(
+                "const t = gBrowser.addTab(arguments[0], {triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()});"
+                "if (!arguments[1]) gBrowser.selectedTab = t;",
+                self.ext_url(path), background,
+            )
+        self.wait(lambda d: len(set(d.window_handles) - before) == 1, 10)
+        handle = (set(self.d.window_handles) - before).pop()
+        self.d.switch_to.window(handle)
+        self.wait(lambda d: d.execute_script("return document.readyState") == "complete" and d.current_url.startswith("moz-extension"), 10)
+        return handle
+
+    def _in_ext_page(self, script, *args):
         main = self.d.current_window_handle
-        self.d.switch_to.new_window("tab")
+        self.open_ext_page(background=True)
         try:
-            self.d.get(self.ext_url("popup.html"))
-            return self.d.execute_async_script("const done=arguments[0]; browser.storage.local.get(null).then(done, e=>done({__error:String(e)}))")
+            return self.d.execute_async_script(script, *args)
         finally:
             self.d.close()
             self.d.switch_to.window(main)
 
+    def storage(self):
+        """Everything in the extension's storage.local (read from an extension page)."""
+        return self._in_ext_page("const done=arguments[0]; browser.storage.local.get(null).then(done, e=>done({__error:String(e)}))")
+
     def set_storage(self, data):
-        main = self.d.current_window_handle
-        self.d.switch_to.new_window("tab")
-        try:
-            self.d.get(self.ext_url("popup.html"))
-            self.d.execute_async_script("const done=arguments[1]; browser.storage.local.set(arguments[0]).then(()=>done(1), e=>done(String(e)))", data)
-        finally:
-            self.d.close()
-            self.d.switch_to.window(main)
+        return self._in_ext_page("const done=arguments[1]; browser.storage.local.set(arguments[0]).then(()=>done(1), e=>done(String(e)))", data)
+
+    def clear_storage(self):
+        return self._in_ext_page("const done=arguments[0]; browser.storage.local.clear().then(()=>done(1), e=>done(String(e)))")
 
     # --- errors ------------------------------------------------------------
 

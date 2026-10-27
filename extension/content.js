@@ -2147,7 +2147,9 @@
       try {
         history.pushState({}, "", "/i/bookmarks");
         quietPop++;
-        window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
+        // The event carries the page's own copy of the state: in Firefox an
+        // object made here can't be read by X's router ("Permission denied").
+        window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
         watchPage();
         openGallery();
         setTimeout(() => {
