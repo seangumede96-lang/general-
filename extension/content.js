@@ -1424,6 +1424,11 @@
   function onBack() {
     if (quietPop) return void quietPop--; // our own nudge to X's page router
     if (!ui) return;
+    if (away) {
+      // Looking at a post opened from the gallery: Back to where it was brings it back.
+      if (location.pathname + location.search === away.path) comeBack();
+      return;
+    }
     if (backSteps.ignore) {
       // One of our own quiet steps back.
       if (--backSteps.ignore === 0) {
@@ -2152,6 +2157,7 @@
     saveSpot();
     buildUi();
     if (!ui) return;
+    if (away) return comeBack(); // just as you left it (its back steps are still in place)
     if (!gotData && isBookmarks()) scanPage();
     if (!galleryOpen()) addBackStep(); // back from the grid closes the gallery, not the page
     ui.overlay.classList.remove("xbg-hidden");
@@ -2264,6 +2270,64 @@
 
   const feedOpen = () => ui && !ui.lightbox.classList.contains("xbg-hidden") && !ui.lightbox.classList.contains("xbg-closing");
 
+  // "Open post on X" shows the post in this tab: the gallery steps aside just
+  // as it is, X moves to the post the way its own links do, and Back (or the
+  // ball) brings the gallery back on the same post. X catches clicks on any
+  // x.com link at the page level and routes them itself, behind the gallery,
+  // so the tap is taken here first (this listener is added before X's own).
+  let away = null; // { path } of the page the gallery stepped aside on
+  window.addEventListener(
+    "click",
+    (e) => {
+      const a = e.target instanceof Element && e.target.closest("#xbg-overlay a.xbg-open-post");
+      if (!a) return;
+      e.stopImmediatePropagation();
+      if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return; // a new tab was asked for
+      e.preventDefault();
+      showPostOnX(a.href);
+    },
+    true
+  );
+
+  function showPostOnX(url) {
+    let u;
+    try {
+      u = new URL(url);
+    } catch (e) {
+      return;
+    }
+    saveSpotNow();
+    for (const v of ui.overlay.querySelectorAll("video")) v.pause();
+    if (u.origin !== location.origin) return void location.assign(url); // e.g. on twitter.com
+    away = { path: location.pathname + location.search };
+    ui.overlay.classList.add("xbg-hidden");
+    updateBall();
+    try {
+      history.pushState({}, "", u.pathname);
+      quietPop++;
+      window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+    } catch (e) {
+      location.assign(url);
+    }
+  }
+
+  // Back on the page the gallery stepped aside on: show it again as it was.
+  function comeBack() {
+    away = null;
+    ui.overlay.classList.remove("xbg-hidden");
+    updateBall();
+    if (reels) {
+      const v = reels.slots.get(reels.cur) && reels.slots.get(reels.cur).querySelector("video");
+      if (v) v.play().catch(() => {});
+    } else if (feedOpen()) {
+      // Nudge the feed's watcher so the video on screen starts again.
+      for (const v of ui.feed.querySelectorAll("video")) {
+        ui.feedVideos.unobserve(v);
+        ui.feedVideos.observe(v);
+      }
+    }
+  }
+
   function icon(d, filled) {
     const ns = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(ns, "svg");
@@ -2316,16 +2380,9 @@
     paintSave(save, item.key);
     const actions = el("div", { class: "xbg-post-actions" }, save);
     if (item.tweet) {
-      const open = el("a", { class: "xbg-fab-btn", href: item.tweet, target: "_blank", rel: "noopener noreferrer", "aria-label": "Open post on X" }, icon(OPEN_PATH, false));
-      // In the Android app the post opens in the same screen; reopen the
-      // gallery when you come back to your bookmarks.
-      if (window.XbgAndroid) open.addEventListener("click", () => {
-        try {
-          sessionStorage.setItem("xbg_open", "1");
-        } catch (e) {
-          /* fine */
-        }
-      });
+      // A tap shows the post in this tab (see showPostOnX); target=_blank is
+      // only for "open in new tab" (long-press, Ctrl/middle click).
+      const open = el("a", { class: "xbg-fab-btn xbg-open-post", href: item.tweet, target: "_blank", rel: "noopener noreferrer", "aria-label": "Open post on X" }, icon(OPEN_PATH, false));
       actions.append(open);
     }
     media.append(head, actions);
