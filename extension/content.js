@@ -648,6 +648,7 @@
       e.data.items.forEach(addItem);
       resolvePending(e.data.items.map(clean).filter(Boolean));
     }
+    if (e.data.check && checkReply) checkReply(e.data.check);
     if (e.data.status && typeof e.data.status.state === "string") {
       loadState = e.data.status;
       noteRate(loadState);
@@ -935,6 +936,7 @@
           rebuild(false);
         }),
         el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); reloadEverything(); } }, "Reload all bookmarks from X"),
+        el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); checkConnection(); } }, "Check the connection to X"),
         el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); exportForSorting(); } }, "Export all bookmarks for sorting"),
         el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); restore(); } }, "Import sorted folders"),
         el("button", { class: "xbg-primary", onclick: () => closeSheet() }, "Done")
@@ -2544,6 +2546,48 @@
         el("button", { class: "xbg-link", onclick: restore }, "Restore from backup")
       )
     );
+  }
+
+  // --- "Check the connection to X" -------------------------------------------
+  // Asks the part of the extension inside X's page what it has seen, and says
+  // plainly whether bookmarks are getting through.
+  let checkReply = null;
+  async function checkConnection() {
+    if (!isBookmarks()) {
+      return infoSheet("Check the connection to X", "The check runs on your bookmarks page, where the gallery talks to X.", [
+        { label: "Go to my bookmarks", main: true, run: () => goToBookmarks() },
+        { label: "Not now" },
+      ]);
+    }
+    const reply = await new Promise((resolve) => {
+      checkReply = resolve;
+      window.postMessage({ __xbgAsk: "check" }, location.origin);
+      setTimeout(() => resolve(null), 1500);
+    });
+    checkReply = null;
+    const lines = [];
+    let ok = true;
+    if (!reply) {
+      ok = false;
+      lines.push("✗ The gallery isn’t connected to this page. Reload the page and run the check again.");
+    } else {
+      lines.push("✓ The gallery is connected to this X page.");
+      const refusedLast = reply.lastError && reply.lastError.at >= (reply.lastOk || 0);
+      if (reply.lastOk) lines.push(`✓ X sent your bookmarks (${ago(reply.lastOk)}).`);
+      else if (!reply.sawRequest && !refusedLast) {
+        ok = false;
+        lines.push(gotData ? "✓ Bookmarks were read off the page by scrolling (X’s own requests weren’t seen)." : "✗ X hasn’t sent this page’s bookmarks yet. Wait for the page to finish loading, or reload it.");
+      }
+      if (refusedLast) {
+        ok = false;
+        const st = reply.lastError.status;
+        const why = st === 429 ? "too many requests — it’ll carry on by itself after a pause" : st === 401 || st === 403 ? "you may need to log in to X again" : st ? `error ${st}` : "its answer couldn’t be read";
+        lines.push(`✗ X refused the last request ${ago(reply.lastError.at)} (${why}).`);
+      }
+    }
+    const saved = cached.size || fresh.size;
+    lines.push(cacheTime && saved ? `✓ Saved copy: ${plural(lastTotal || saved, "bookmark")}, saved ${ago(cacheTime)}.` : partialInfo ? `– Partly loaded: ${plural(partialInfo.posts, "bookmark")} so far.` : "– No saved copy yet.");
+    infoSheet(ok ? "Everything’s working" : "Something’s not right", lines.join("\n"));
   }
 
   // --- Backup reminder ------------------------------------------------------

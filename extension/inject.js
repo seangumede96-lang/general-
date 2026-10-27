@@ -44,6 +44,10 @@
   let restartFull = false; // asked to reload everything while a top-up was running
   const doneKeys = new Set(); // bookmark lists already fully loaded in this visit
   let lastStatus = null;
+  // For the gallery's "Check the connection to X".
+  let lastOk = 0; // when X last sent a page of bookmarks
+  let lastError = null; // { at, status } of the last refused request
+  const noteError = (status) => (lastError = { at: Date.now(), status: Number(status) || 0 });
   let paused = false; // "Pause" in the gallery: the full load waits until "Continue"
   let resumeWaiters = [];
 
@@ -75,6 +79,7 @@
   window.addEventListener("message", (e) => {
     if (e.source !== window || !e.data) return;
     if (e.data.__xbgAsk === "status" && lastStatus) post({ status: lastStatus });
+    if (e.data.__xbgAsk === "check") post({ check: { sawRequest: !!template, lastOk, lastError, state: lastStatus && lastStatus.state } });
     if (e.data.__xbgAsk === "pause") paused = true;
     if (e.data.__xbgAsk === "resume") {
       paused = false;
@@ -302,8 +307,12 @@
             big = false;
             continue;
           }
-          if (!res.ok) break;
+          if (!res.ok) {
+            noteError(res.status);
+            break;
+          }
           const page = publish(await res.json());
+          lastOk = Date.now();
           pages++;
           posts += page.posts;
           const n = newIn(page.items);
@@ -354,6 +363,7 @@
           body: tpl.method === "GET" ? undefined : req.body,
           credentials: "include",
         });
+        if (!res.ok) noteError(res.status);
         if (res.status === 429 && retries < 8) {
           // Too many requests: wait until X's limit resets (up to ~16 minutes), then carry on.
           retries++;
@@ -375,6 +385,7 @@
         }
         if (!res.ok) throw new Error(`X answered ${res.status}`);
         const page = publish(await res.json());
+        lastOk = Date.now();
         pages++;
         posts += page.posts;
         retries = 0;
@@ -398,6 +409,7 @@
 
   // Called for every bookmarks response the page itself receives.
   function onPageResponse(json, req) {
+    lastOk = Date.now();
     const page = publish(json);
     const key = requestKey(req.url);
     const isFirstPage = !/"cursor":/.test(new URL(req.url, location.origin).searchParams.get("variables") || req.body || "");
@@ -420,7 +432,8 @@
           headers: { ...plainHeaders(input instanceof Request ? input.headers : null), ...plainHeaders(init.headers) },
           body: typeof init.body === "string" ? init.body : null,
         };
-        res.clone().json().then((json) => onPageResponse(json, req), () => {});
+        if (!res.ok) noteError(res.status);
+        else res.clone().json().then((json) => onPageResponse(json, req), () => noteError(0));
       }
     } catch (e) {
       /* never break the page */
@@ -446,7 +459,7 @@
       req.body = typeof body === "string" ? body : null;
       this.addEventListener("load", () => {
         try {
-          if (this.status !== 200) return;
+          if (this.status !== 200) return void noteError(this.status);
           const json = this.responseType === "json" ? this.response : JSON.parse(this.responseText);
           onPageResponse(json, req);
         } catch (e) {

@@ -790,3 +790,60 @@ def test_no_reminder_for_new_collections_or_when_switched_off(browser):
     b.click_text("Remind me to back up\nLast backup 8 days ago", ".xbg-setting")
     time.sleep(0.5)
     assert b.storage()["xbg_settings"]["backupRemind"] is True
+
+
+# --- Check the connection to X --------------------------------------------------
+
+def run_check(b):
+    b.click('.xbg-bar .xbg-close[aria-label="Options"]')
+    b.click_text("Check the connection to X", ".xbg-sheet button")
+    b.wait(lambda d: b.visible(".xbg-alert"), 5, "no check result")
+    time.sleep(0.3)
+    return b.q(".xbg-alert").text
+
+
+def test_check_when_everything_works(browser):
+    b = browser
+    open_loaded(b)
+    time.sleep(1)
+    text = run_check(b)
+    assert text.startswith("Everything’s working"), text
+    assert "✓ The gallery is connected" in text and "✓ X sent your bookmarks (just now)" in text
+    assert "✓ Saved copy: 60 bookmarks" in text
+    b.shot("K-check-ok")
+
+
+def test_check_when_x_refuses(browser):
+    ctl(total=300, fail=500, fail_after=1)
+    b = browser
+    b.go("https://x.com/i/bookmarks")
+    b.open_gallery_with_ball()
+    b.wait(lambda d: b.tile_count() > 0, 10)
+    time.sleep(2)
+    text = run_check(b)
+    assert text.startswith("Something’s not right") and "error 500" in text, text
+    b.shot("K-check-500")
+
+
+def test_check_when_logged_out(browser):
+    ctl(fail=401)
+    b = browser
+    b.go("https://x.com/i/bookmarks")
+    b.open_gallery_with_ball()
+    time.sleep(2)
+    text = run_check(b)
+    assert "log in to X again" in text, text
+
+
+def test_check_from_another_page(browser):
+    b = browser
+    open_loaded(b)
+    time.sleep(1)
+    b.go("https://x.com/home")
+    b.open_gallery_with_ball()
+    text = run_check(b)
+    assert "runs on your bookmarks page" in text
+    b.click_text("Go to my bookmarks", ".xbg-alert button")
+    b.wait(lambda d: d.current_url == "https://x.com/i/bookmarks", 5)
+    b.wait(lambda d: (b.status_text() or "").startswith(("Up to date", "All")), 15)
+    assert run_check(b).startswith("Everything’s working")
