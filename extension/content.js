@@ -1370,6 +1370,13 @@
       const folded = ui.controls.classList.contains("xbg-collapsed") || settings.filtersHidden;
       const pad = settings.headerHidden ? 0 : ui.bar.offsetHeight - (folded ? 0 : ui.controls.offsetHeight);
       inner.style.paddingTop = pad + "px";
+      // The search / sort row above the cards too, so the copy lines up exactly
+      // with the real page that takes over at the end.
+      if (collections.length) {
+        const row = ui.collBar.cloneNode(true);
+        row.classList.remove("xbg-hidden");
+        inner.append(row);
+      }
       inner.append(el("div", { class: "xbg-cards" }, ...collectionCards()));
       const top = view === "collection" && collectionsSpot ? collectionsSpot.top : 0;
       inner.style.transform = `translateY(${-top}px)`;
@@ -1700,7 +1707,9 @@
 
     let text = "";
     let canRefresh = false;
-    if (view === "all") {
+    // The loading status shows on both tabs, so their headers are the same
+    // height and nothing jumps when you swipe between them.
+    if (view === "all" || view === "collections") {
       const s = loadState;
       if (!isBookmarks()) {
         if (partialInfo) text = `Partly loaded (${partialInfo.posts.toLocaleString()} bookmarks)`;
@@ -1727,13 +1736,13 @@
     ui.refreshBtn.classList.toggle("xbg-hidden", !canRefresh);
     // An unfinished load carries on from where it got to.
     ui.refreshBtn.textContent = partialInfo ? "Continue loading" : "Refresh";
-    const pausable = view === "all" && isBookmarks() && !scrollTimer && ["loading", "waiting", "paused"].includes(loadState.state);
+    const pausable = view !== "collection" && isBookmarks() && !scrollTimer && ["loading", "waiting", "paused"].includes(loadState.state);
     ui.pauseBtn.classList.toggle("xbg-hidden", !pausable);
     ui.pauseBtn.textContent = loadState.state === "paused" ? "Continue" : "Pause";
 
     // The ring fills as bookmarks arrive, measured against how many the last
     // full load found; the first time, it spins with the live count instead.
-    const loading = view === "all" && isBookmarks() && ["loading", "waiting", "paused"].includes(loadState.state);
+    const loading = view !== "collection" && isBookmarks() && ["loading", "waiting", "paused"].includes(loadState.state);
     ui.progress.classList.toggle("xbg-hidden", !loading);
     if (loading) {
       const n = loadState.posts || 0;
