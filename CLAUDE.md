@@ -17,6 +17,8 @@ The owner isn't technical: explain things plainly and ask only for real decision
     collections, saving (`browser.storage.local`), scroll-the-page fallback.
   - `styles.css` — everything scoped under `#xbg-overlay` / `#xbg-ball`.
   - `popup.html/js` — toolbar popup: Open gallery, Go to my bookmarks, ball on/off.
+  - `options.html/js` — settings page in about:addons (switches, saved-data
+    summary, back up / restore / unhide all, how-to guide). Same storage.
 - `tests/` — Selenium + pytest suite driving real Firefox Nightly.
   - `mock_x/` — a stand-in for x.com / pbs.twimg.com / video.twimg.com on
     127.0.0.1:443 (`server.py` + `app.html`). Tests change its behaviour with
@@ -28,7 +30,10 @@ The owner isn't technical: explain things plainly and ask only for real decision
 - `dist/` — built package (`web-ext build`), rename `.zip` → `.xpi` to install.
 
 ### Storage keys (storage.local)
-`xbg_settings`, `xbg_collections` ([{id,name,keys}]), `xbg_items` (media of
+`xbg_settings` (also collSort, showHidden, videoSound, videoSpeed, lastBackup,
+backupBase, backupSnooze, backupRemind), `xbg_collections`
+([{id,name,keys, used?, cover?, pending?: [status ids not loaded yet]}]),
+`xbg_hidden` ([status ids hidden from All posts]), `xbg_items` (media of
 collection posts not in the saved copy), `xbg_cache` (meta) + `xbg_cache_N`
 chunks of 5,000 items, `xbg_cache_partial*` while a long load is unfinished.
 Page-side: `sessionStorage.xbg_spot` (where you were), `xbg_open`, `xbg_full`.
@@ -116,6 +121,30 @@ Every test also fails if the extension logged any error to the console or page.
     Modified clicks / long-press "open in new tab" still work (target=_blank).
     The mock now intercepts link clicks like X, so the test reproduces it.
 
+## Features added in 1.14 (all in `tests/test_new_features.py`, `tests/test_zoom_centre.py`)
+- **Undo** in toasts (`toast(text, {label, run})`): delete collection, remove
+  posts, quick save, hide.
+- **Loading progress**: time left / speed, Pause / Continue (also tap the
+  ring; inject.js `pause`/`resume`; progress saved on pause), "Continue
+  loading" for an unfinished load on other pages.
+- **Collections page**: search, sort (Your order / Recently used / Name /
+  Most posts, also used by "Save to…"), "Change order…" drag (pointer events,
+  edge auto-scroll), "Choose cover".
+- **Quick save**: long-press the save button or double-tap a picture → the
+  collection used last (`c.used`); swipe a post left → "Save to…".
+- **Hide posts** (eye button, Settings → Show hidden posts), **"In Trips,
+  Faves"** under a post, **Unsorted** filter chip (header: "N unsorted").
+- **Pending imports**: posts named in an import but not loaded yet wait in
+  `c.pending` and join when they load (`resolvePending`); such saves are
+  throttled to every 10s (`saveCollections(true)`).
+- **Video**: sound choice remembered (falls back to muted if Firefox blocks
+  sound), speed button, hold for 2×.
+- **Backup reminder** a week after the last backup (Back up now / Not now = 3 days).
+- **Check the connection to X** (Settings): inject.js reports lastOk / lastError.
+- **Settings page** in about:addons (`options_ui`).
+- **Post viewer snaps** each post to the middle of the feed area; **zoom**
+  view (pinch / magnifier / wheel / drag / double-tap; pinch smaller closes).
+
 ## Still open / not verified
 - **Real x.com is not tested** — only the mock, built from how inject.js reads
   X's responses. If X changes its GraphQL shape or headers, only a manual
@@ -125,9 +154,13 @@ Every test also fails if the extension logged any error to the console or page.
   ignored there) — lint reports that one note; `tests/test_lint.py` allows
   only that. Raising the minimum to 140/142 would silence it but drop older
   Firefox users: owner's call.
-- **Touch gestures** (swipe between tabs, swipe back from the feed, reels
-  swipes, long-press to select, dragging the ball on a phone) aren't
-  automated: geckodriver has no touch input. Desktop mouse/keyboard paths are.
+- **Touch gestures** are now played back with synthetic TouchEvents
+  (`harness.swipe()`, `pinch()` in test_zoom_centre.py; needs the
+  `dom.w3c_touch_events.enabled` pref). Real-finger quirks of Firefox for
+  Android (momentum scrolling, OS back gesture) still need a check on a phone.
+- **Signing**: an unsigned .xpi installs on regular Firefox only temporarily.
+  Signing needs the owner's addons.mozilla.org account and API keys
+  (`web-ext sign`) — not done.
 - **Firefox for Android** itself isn't tested; phone-sized layout is (via zoom).
 - After a reload, the gallery reopens where you were even if you typed a
   different X address in that tab within 12h (`xbg_spot` doesn't check the
@@ -162,4 +195,14 @@ Every test also fails if the extension logged any error to the console or page.
 - Check UI on a phone-width page (`zoom(1.3)` on a 500px window): nowrap text
   that's fine on desktop gets cut off there. Measure with `on_screen()`;
   inline elements report 0 width, so measure their block parent.
+- **Scroll snapping changes programmatic scrolling**: with `scroll-snap-type`
+  Firefox keeps the snapped post in place when content is added above, so
+  never add "scrollHeight difference" on top — measure an anchor post before
+  and after instead.
+- New UI that reuses class names (`.xbg-search-input`, `.xbg-sort`) breaks
+  loose test selectors: scope them (`.xbg-bar .xbg-sort`).
+- Sheets slide in for ~0.2s: `click_text()` retries until clickable; use it
+  for buttons in sheets/popups.
+- Long-running state (pending ids, collections) can be megabytes: throttle
+  writes that happen by themselves during loading.
 - Commit after each verified fix; run the whole suite + lint before committing.

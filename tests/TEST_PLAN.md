@@ -57,6 +57,17 @@ X server (`tests/mock_x`). The test file that covers each one is in brackets.
 - G1 Settings, collections and saved copy written to storage.local in the expected shape.
 - G2 Corrupted / unexpected stored values → the gallery still opens.
 
+## H. Phone feedback [test_phone_feedback.py, test_zoom_centre.py]
+- Status line wraps on a phone; import results in a popup; saved button;
+  "Open post on X" in the same tab and Back; posts snap to the middle; zoom.
+
+## I. 1.14 features [test_new_features.py]
+- Undo; Pause / Continue / time left; collection search, sort, drag order,
+  covers; quick save (long-press, double-tap), swipe-left save; hide posts;
+  "In …" line; Unsorted filter; pending imported posts (incl. 50,000);
+  video sound / speed / hold; backup reminder; connection check; settings
+  page; existing touch gestures (swipe back, tab swipe, long-press select).
+
 ## Always checked
 - No errors from the extension in the Browser Console log or the page.
 - `web-ext lint` stays at 0 errors / 0 warnings.
