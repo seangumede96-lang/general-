@@ -837,9 +837,8 @@
   height: 22px;
 }
 
-#xbg-overlay .xbg-save-btn.xbg-on {
-  background: var(--xbg-accent);
-}
+/* Saved: the same dark circle, with the bookmark filled in white (a white
+   background made it a plain white circle). */
 
 #xbg-overlay .xbg-post-media .xbg-note {
   position: absolute;
