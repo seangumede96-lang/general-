@@ -361,13 +361,33 @@
     clearTimeout(collectionsTimer);
     collectionsTimer = setTimeout(writeCollections, 400);
   }
+  // What this tab wrote lately, to tell its own saves from another tab's.
+  const ownCollectionWrites = [];
   function writeCollections() {
     if (!collectionsTimer) return;
     clearTimeout(collectionsTimer);
     collectionsTimer = null;
+    ownCollectionWrites.push(JSON.stringify(collections));
+    if (ownCollectionWrites.length > 5) ownCollectionWrites.shift();
     store
       .set({ [K.collections]: collections, [K.items]: Object.fromEntries(savedItems) })
       .catch(() => toast("Couldn’t save your collections"));
+  }
+
+  // Another X tab changed the collections: take its list on, so this tab's
+  // next save doesn't write its older list back over it.
+  function adoptCollections(list, items) {
+    if (!Array.isArray(list)) return;
+    for (const raw of Object.values(items || {})) {
+      const item = clean(raw);
+      if (item && !savedItems.has(item.key)) savedItems.set(item.key, item);
+    }
+    collections = list.map(cleanCollection).filter(Boolean);
+    savedSet = null;
+    if (!ui) return;
+    if (view === "collection" && !getCollection(openId)) return setView("collections");
+    if (galleryOpen()) rebuild(false);
+    for (const btn of ui.feed.querySelectorAll(".xbg-post .xbg-save-btn")) paintSave(btn, btn.closest(".xbg-post").dataset.key);
   }
   // Never lose a pending change when the tab is hidden or closed.
   document.addEventListener("visibilitychange", () => document.hidden && writeCollections());
@@ -376,7 +396,12 @@
   // Settings changed in another tab (or the popup): take them all on, so a
   // later save from this tab doesn't put the old ones back.
   ext.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !changes[K.settings] || !changes[K.settings].newValue) return;
+    if (area !== "local") return;
+    const cc = changes[K.collections];
+    if (cc && Array.isArray(cc.newValue) && !ownCollectionWrites.includes(JSON.stringify(cc.newValue))) {
+      adoptCollections(cc.newValue, changes[K.items] && changes[K.items].newValue);
+    }
+    if (!changes[K.settings] || !changes[K.settings].newValue) return;
     const nv = changes[K.settings].newValue;
     const order = (o) => [o.sort, o.dateMode, o.layout].join("|");
     const before = order(settings);
