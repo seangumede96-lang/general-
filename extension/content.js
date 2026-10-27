@@ -303,9 +303,14 @@
     }
   }
 
+  // Is the current load of the main bookmarks list? inject.js says so; the
+  // scroll fallback goes by the page. (A load carries on in the background
+  // after you leave the bookmarks, and must still be saved when it finishes.)
+  const loadingMain = () => (typeof loadState.main === "boolean" ? loadState.main : isMainBookmarks());
+
   // Keep the finished list as the saved copy for next time.
   function saveCache() {
-    if (!fresh.size || !isMainBookmarks()) return;
+    if (!fresh.size || !loadingMain()) return;
     if (loadState.posts && !loadState.quick) lastTotal = loadState.posts;
     // A load that carried on from an earlier visit only fetched the rest itself: keep the start too.
     const keepAll = loadState.resumed || loadState.quick;
@@ -334,7 +339,7 @@
 
   // During a long load, keep what's been found about every 10,000 bookmarks.
   function savePartial() {
-    if (!isMainBookmarks() || loadState.state !== "loading" || !loadState.posts) return;
+    if (!loadingMain() || loadState.state !== "loading" || !loadState.posts) return;
     if (loadState.posts - lastPartialSave < 10000) return;
     lastPartialSave = loadState.posts;
     const posts = loadState.posts;
@@ -1424,7 +1429,7 @@
       } else {
         closeSheet();
       }
-      if (feedOpen() || selectMode) addBackStep();
+      if (galleryOpen()) addBackStep();
     } else if (reels) closeReels(false);
     else if (feedOpen()) closeLightbox(true);
     else if (selectMode) setSelectMode(false, true);

@@ -47,9 +47,11 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const post = (msg) => window.postMessage({ __xbg: true, ...msg }, location.origin);
+  // `main`: the load is of your main bookmarks (not a bookmark folder), so
+  // content.js may save it even if you've moved to another page meanwhile.
   const status = (s) => {
-    lastStatus = s;
-    post({ status: s });
+    lastStatus = { ...s, main: !!template && template.key.startsWith("Bookmarks|") };
+    post({ status: lastStatus });
   };
 
   // content.js says how to load: "quick" (only fetch until we reach posts it

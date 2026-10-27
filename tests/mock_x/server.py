@@ -257,6 +257,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, json.dumps({"errors": [{"message": "count too big"}]}), "application/json", hdrs)
         if cfg("bad_json") or (cursor and cfg("bad_json_paged")):
             return self.send(200, "{not json", "application/json", hdrs)
+        if u.path.endswith("/BookmarkFolderTimeline"):
+            # A folder holds the 15 oldest bookmarks.
+            last = cfg("total") - 1
+            page = {"data": {"bookmark_collection_timeline": {"timeline": {"instructions": [{"type": "TimelineAddEntries", "entries": (
+                [post_for(g) for g in range(last - 14 + offset, last + 1)][:count] if offset == 0 else []
+            ) + [{"entryId": "cursor-bottom-x", "content": {"entryType": "TimelineTimelineCursor", "value": "cur15", "cursorType": "Bottom"}}]}]}}}}
+            return self.send(200, json.dumps(page), "application/json", hdrs)
         return self.send(200, json.dumps(bookmarks_page(offset, count)), "application/json", hdrs)
 
 

@@ -35,7 +35,10 @@
   let gen = 0;
 
   function api(vars) {
-    const url = `/i/api/graphql/${QID}/Bookmarks?variables=${encodeURIComponent(JSON.stringify(vars))}&features=${encodeURIComponent('{"f":true}')}`;
+    const folder = location.pathname.match(/^\/i\/bookmarks\/(\d+)/);
+    if (folder) vars = { ...vars, bookmark_collection_id: folder[1] };
+    const op = folder ? "BookmarkFolderTimeline" : "Bookmarks";
+    const url = `/i/api/graphql/${QID}/${op}?variables=${encodeURIComponent(JSON.stringify(vars))}&features=${encodeURIComponent('{"f":true}')}`;
     const headers = { authorization: "Bearer MOCKTOKEN", "x-csrf-token": "csrf123", "content-type": "application/json" };
     if (TRANSPORT === "fetch") return fetch(url, { headers, credentials: "include" }).then((r) => r.ok ? r.json() : Promise.reject(r.status));
     return new Promise((res, rej) => {
@@ -50,7 +53,7 @@
 
   function renderEntries(json) {
     const tl = document.getElementById("timeline");
-    const entries = json.data.bookmark_timeline_v2.timeline.instructions[0].entries;
+    const entries = (json.data.bookmark_timeline_v2 || json.data.bookmark_collection_timeline).timeline.instructions[0].entries;
     let next = null;
     for (const e of entries) {
       if (e.content.cursorType === "Bottom") next = e.content.value;
