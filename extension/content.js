@@ -685,12 +685,37 @@
   const cover = (c, cls) => mosaic(c.keys.slice(0, 4).map(getItem), cls);
 
   let toastTimer = null;
-  function toast(text) {
+  // `action`: an optional button in the toast, e.g. { label: "Undo", run }.
+  // A toast with a button stays a little longer, so there's time to tap it.
+  function toast(text, action) {
     if (!ui) return;
-    ui.toast.textContent = text;
+    ui.toast.replaceChildren(el("span", {}, text));
+    if (action) {
+      ui.toast.append(
+        el("button", { class: "xbg-toast-action", onclick: () => {
+          clearTimeout(toastTimer);
+          ui.toast.classList.add("xbg-hidden");
+          action.run();
+        } }, action.label)
+      );
+    }
     ui.toast.classList.remove("xbg-hidden");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => ui.toast.classList.add("xbg-hidden"), Math.min(8000, 2500 + text.length * 40));
+    toastTimer = setTimeout(() => ui.toast.classList.add("xbg-hidden"), Math.min(8000, (action ? 5000 : 2500) + text.length * 40));
+  }
+
+  // Put a collection's media back in savedItems (an undo may need posts that
+  // saving pruned once nothing referred to them any more).
+  function keepItems(keys) {
+    const out = new Map();
+    for (const k of keys) {
+      const it = getItem(k);
+      if (it) out.set(k, { ...it });
+    }
+    return out;
+  }
+  function restoreItems(items) {
+    for (const [k, it] of items) if (!getItem(k)) savedItems.set(k, it);
   }
 
   function ago(t) {
@@ -1655,10 +1680,17 @@
     const c = getCollection(openId);
     if (!c || !selected.size) return;
     const n = selected.size;
+    const before = [...c.keys];
+    const items = keepItems(selected);
     setMembership(c, [...selected], false);
     setSelectMode(false);
     rebuild(false);
-    toast(`Removed ${plural(n, "post")}`);
+    toast(`Removed ${plural(n, "post")}`, { label: "Undo", run: () => {
+      restoreItems(items);
+      c.keys = before;
+      saveCollections();
+      rebuild(false);
+    } });
   }
 
   function collectionMenu() {
@@ -1673,10 +1705,17 @@
         el(
           "button",
           { class: "xbg-secondary xbg-danger-text", onclick: () => confirmSheet("Delete collection?", `“${c.name}” will be deleted. The posts stay in your bookmarks.`, "Delete", () => {
+            const at = collections.indexOf(c);
+            const items = keepItems(c.keys);
             collections = collections.filter((x) => x !== c);
             saveCollections();
             setView("collections");
-            toast("Collection deleted");
+            toast(`Deleted “${c.name}”`, { label: "Undo", run: () => {
+              restoreItems(items);
+              if (!getCollection(c.id)) collections.splice(Math.min(at, collections.length), 0, c);
+              saveCollections();
+              if (galleryOpen() && view === "collections") rebuild(false);
+            } });
           }) },
           "Delete collection"
         )

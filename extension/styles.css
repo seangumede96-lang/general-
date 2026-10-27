@@ -2615,3 +2615,16 @@
 #xbg-overlay .xbg-info-sheet .xbg-alert-cancel {
   font-weight: 600;
 }
+
+/* A toast's own button (e.g. Undo). */
+#xbg-overlay .xbg-toast .xbg-toast-action {
+  margin-left: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+}
