@@ -162,8 +162,7 @@
   async function loadStored() {
     try {
       const data = await store.get(Object.values(K));
-      const s = data[K.settings] || {};
-      settings = { ...settings, ...s, ball: { ...settings.ball, ...(s.ball || {}) }, toggleBtn: { ...settings.toggleBtn, ...(s.toggleBtn || {}) } };
+      mergeSettings(data[K.settings]);
       collections = (data[K.collections] || []).map(cleanCollection).filter(Boolean);
       savedSet = null;
       for (const raw of Object.values(data[K.items] || {})) {
@@ -210,18 +209,36 @@
     } catch (e) {
       /* start empty */
     }
-    updateBall();
-    applyTheme();
-    if (ui && ui.hbtn) {
-      placeHeaderButton();
-      if (settings.headerHidden !== ui.overlay.classList.contains("xbg-header-off")) setHeaderHidden(settings.headerHidden);
-      ui.overlay.classList.toggle("xbg-filters-off", !!settings.filtersHidden);
+    applySettings(true);
+  }
+
+  function mergeSettings(s) {
+    s = s && typeof s === "object" ? s : {};
+    settings = { ...settings, ...s, ball: { ...settings.ball, ...(s.ball || {}) }, toggleBtn: { ...settings.toggleBtn, ...(s.toggleBtn || {}) } };
+  }
+
+  // Show the current settings (after reading them, or after another tab changed them).
+  let applyingSettings = false;
+  function applySettings(redraw) {
+    applyingSettings = true; // only showing what's stored: nothing to save back
+    try {
+      updateBall();
+      applyTheme();
+      if (ui && ui.hbtn) {
+        placeHeaderButton();
+        if (settings.headerHidden !== ui.overlay.classList.contains("xbg-header-off")) setHeaderHidden(settings.headerHidden);
+        ui.overlay.classList.toggle("xbg-filters-off", !!settings.filtersHidden);
+        ui.hbtn.classList.toggle("xbg-half", !!settings.filtersHidden && !settings.headerHidden);
+      }
+      syncControls();
+      if (redraw && galleryOpen()) rebuild(false);
+    } finally {
+      applyingSettings = false;
     }
-    syncControls();
-    if (galleryOpen()) rebuild(false);
   }
 
   function saveSettings() {
+    if (applyingSettings) return;
     store.set({ [K.settings]: settings }).catch(() => {});
   }
 
@@ -356,10 +373,16 @@
   document.addEventListener("visibilitychange", () => document.hidden && writeCollections());
   window.addEventListener("pagehide", writeCollections);
 
+  // Settings changed in another tab (or the popup): take them all on, so a
+  // later save from this tab doesn't put the old ones back.
   ext.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !changes[K.settings] || !changes[K.settings].newValue) return;
-    settings.fab = changes[K.settings].newValue.fab !== false;
-    updateBall();
+    const nv = changes[K.settings].newValue;
+    const order = (o) => [o.sort, o.dateMode, o.layout].join("|");
+    const before = order(settings);
+    mergeSettings(nv);
+    settings.fab = nv.fab !== false;
+    applySettings(order(settings) !== before);
   });
 
   function createCollection(name) {
