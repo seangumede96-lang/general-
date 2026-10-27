@@ -226,6 +226,37 @@ class Browser:
     def clear_storage(self):
         return self._in_ext_page("const done=arguments[0]; browser.storage.local.clear().then(()=>done(1), e=>done(String(e)))")
 
+    def fake_file_picker(self, path):
+        """Make Firefox's next "Open file" dialogs pick `path` (like Firefox's
+        own MockFilePicker), since WebDriver can't drive the native dialog."""
+        with self.d.context(self.d.CONTEXT_CHROME):
+            self.d.execute_script(
+                """
+                const path = arguments[0];
+                const CID = Components.ID("{8f1b4c3e-6d1e-4c6b-9a40-2f6b9f0a1c11}");
+                const reg = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
+                function Picker() {}
+                Picker.prototype = {
+                  QueryInterface: ChromeUtils.generateQI(["nsIFilePicker"]),
+                  init() {}, appendFilters() {}, appendFilter() {},
+                  get file() { return new FileUtils.File(Services.prefs.getStringPref("xbg.test.pickerPath")); },
+                  get domFileOrDirectory() { return File.createFromNsIFile(this.file); },
+                  get domFileOrDirectoryEnumerator() { const p = this; let done = false; return { hasMoreElements: () => !done, getNext: () => { done = true; return p.domFileOrDirectory; }, [Symbol.iterator]: function* () { yield p.domFileOrDirectory; } }; },
+                  open(cb) { Promise.resolve().then(() => cb.done(Ci.nsIFilePicker.returnOK)); },
+                  defaultExtension: "", defaultString: "", displayDirectory: null, filterIndex: 0, addToRecentDocs: false, mode: 0, okButtonLabel: "",
+                };
+                const { FileUtils } = ChromeUtils.importESModule("resource://gre/modules/FileUtils.sys.mjs");
+                const factory = { createInstance(iid) { return new Picker().QueryInterface(iid); } };
+                Services.prefs.setStringPref("xbg.test.pickerPath", path);
+                if (!reg.isCIDRegistered(CID)) reg.registerFactory(CID, "xbg mock file picker", "@mozilla.org/filepicker;1", factory);
+                """,
+                path,
+            )
+
+    def downloads(self):
+        d = os.path.join(self.profile_dir, "downloads")
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
     # --- errors ------------------------------------------------------------
 
     def page_errors(self):

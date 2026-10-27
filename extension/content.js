@@ -680,6 +680,9 @@
 
   // An iPhone-style action sheet at the bottom: the message, then the red action, then Cancel.
   function confirmSheet(title, message, action, onConfirm) {
+    // It takes the place of the menu it was asked from: left open underneath,
+    // that menu showed through and stayed behind after deleting.
+    closeSheet(true);
     const close = () => backdrop.remove();
     const box = el(
       "div",
