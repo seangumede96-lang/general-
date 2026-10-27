@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bookmarks Gallery settings</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --text: #15181c;
+        --muted: #5b6570;
+        --line: #d9dde2;
+        --card: #f5f6f8;
+        --accent: #1d72e8;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1b22;
+          --text: #fbfbfe;
+          --muted: #a6a9b3;
+          --line: #3a3944;
+          --card: #2b2a33;
+          --accent: #6eaaff;
+        }
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      main {
+        max-width: 640px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 20px;
+      }
+      h2 {
+        margin: 26px 0 8px;
+        font-size: 16px;
+      }
+      p {
+        margin: 0 0 10px;
+        color: var(--muted);
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        overflow: hidden;
+      }
+      label.row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-top: 1px solid var(--line);
+        cursor: pointer;
+      }
+      label.row:first-child {
+        border-top: 0;
+      }
+      label.row small {
+        display: block;
+        color: var(--muted);
+      }
+      label.row input {
+        flex: none;
+        width: 20px;
+        height: 20px;
+        accent-color: var(--accent);
+      }
+      .facts {
+        margin: 0;
+        padding: 12px 14px 12px 32px;
+      }
+      .facts li {
+        margin: 2px 0;
+      }
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      button {
+        padding: 9px 16px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.main {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+      }
+      #message {
+        margin-top: 10px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: var(--card);
+        color: var(--text);
+        white-space: pre-line;
+      }
+      #message:empty {
+        display: none;
+      }
+      .guide {
+        margin: 0;
+        padding-left: 20px;
+      }
+      .guide li {
+        margin: 5px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Bookmarks Gallery</h1>
+      <p>Your X bookmarks’ photos and videos as a grid, with collections.</p>
+
+      <h2>Settings</h2>
+      <div class="card">
+        <label class="row"><span>Floating button on X<small>The round button you can drag anywhere; tap it to open the gallery.</small></span><input type="checkbox" data-setting="fab" data-default="true" /></label>
+        <label class="row"><span>Dark mode</span><input type="checkbox" data-setting="theme" data-on="dark" data-off="light" /></label>
+        <label class="row"><span>Remind me to back up<small id="last-backup">Once a week, if you have collections.</small></span><input type="checkbox" data-setting="backupRemind" data-default="true" /></label>
+        <label class="row"><span>Show hidden posts<small>Hidden posts appear faded in All posts.</small></span><input type="checkbox" data-setting="showHidden" /></label>
+      </div>
+
+      <h2>Your data</h2>
+      <p>Everything is kept in this browser only; nothing is sent anywhere.</p>
+      <div class="card"><ul class="facts" id="facts"><li>Reading…</li></ul></div>
+      <div class="buttons">
+        <button id="backup" class="main">Back up collections</button>
+        <button id="restore">Restore from backup…</button>
+        <button id="unhide">Unhide all posts</button>
+      </div>
+      <div id="message" role="status"></div>
+
+      <h2>How to use</h2>
+      <ul class="guide">
+        <li><b>Open the gallery:</b> tap the floating button on X, or the extension’s button in the toolbar.</li>
+        <li><b>Load everything:</b> open x.com/i/bookmarks once; all your bookmarks load in the background. You can pause and continue.</li>
+        <li><b>Look at a post:</b> tap a picture. Pinch (or tap the magnifier) to zoom; tap the arrow to see the post on X, then Back to return.</li>
+        <li><b>Save to a collection:</b> tap the bookmark button. Long-press it, or double-tap the picture, to save to the collection you used last. Swipe a post left for the list.</li>
+        <li><b>Pick many:</b> long-press a picture in the grid (or tap Select), tap more, then “Add to collection”.</li>
+        <li><b>Hide a post:</b> the eye button hides it from All posts; it stays bookmarked and in its collections.</li>
+        <li><b>Find things:</b> search words or <i>@name</i>, filter Photos / Videos / Unsorted, or browse by Months and Years.</li>
+        <li><b>Collections:</b> search them, sort them, “Change order…” to drag them, and “Choose cover” in a collection’s ⋯ menu.</li>
+        <li><b>Videos:</b> hold a video for 2× speed; the speed and sound buttons remember your choice.</li>
+        <li><b>Something wrong?</b> In the gallery: ⋯ → “Check the connection to X”.</li>
+      </ul>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -847,3 +847,88 @@ def test_check_from_another_page(browser):
     b.wait(lambda d: d.current_url == "https://x.com/i/bookmarks", 5)
     b.wait(lambda d: (b.status_text() or "").startswith(("Up to date", "All")), 15)
     assert run_check(b).startswith("Everything’s working")
+
+
+# --- Settings page in about:addons --------------------------------------------
+
+def test_settings_page_is_registered(browser):
+    b = browser
+    with b.d.context(b.d.CONTEXT_CHROME):
+        url = b.d.execute_async_script(
+            """const done = arguments[0];
+            const { AddonManager } = ChromeUtils.importESModule("resource://gre/modules/AddonManager.sys.mjs");
+            AddonManager.getAddonByID("x-bookmarks-gallery@local").then(a => done(a.optionsURL));"""
+        )
+    assert url and url.endswith("/options.html")
+
+
+def test_settings_page_switches_reach_open_x_tabs(browser):
+    b = browser
+    open_loaded(b)
+    b.click('.xbg-close[aria-label="Close gallery"]')
+    x = b.d.current_window_handle
+    b.open_ext_page("options.html")
+    b.shot("O-settings-page")
+    fab = b.q('input[data-setting="fab"]')
+    assert fab.is_selected()
+    fab.click()
+    b.d.switch_to.window(x)
+    b.wait(lambda d: not b.visible("#xbg-ball"), 5, "the floating button didn't go away")
+    b.d.switch_to.window([h for h in b.d.window_handles if h != x][0])
+    b.q('input[data-setting="theme"]').click()  # dark mode off
+    b.q('input[data-setting="fab"]').click()   # ball back
+    b.d.switch_to.window(x)
+    b.open_gallery_with_ball()
+    assert b.js("return document.getElementById('xbg-overlay').classList.contains('xbg-light')")
+
+
+def test_settings_page_data_backup_restore_unhide(browser, tmp_path):
+    b = browser
+    open_loaded(b)
+    keys = fill_collection(b, "Mine", 2)
+    b.click('.xbg-tab[data-view="all"]')
+    time.sleep(0.4)
+    key, post = open_post(b, 5)
+    b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+    b.q(f"{post} .xbg-hide-btn").click()
+    time.sleep(1)
+    x = b.d.current_window_handle
+    b.open_ext_page("options.html")
+    time.sleep(0.5)
+    facts = b.q("#facts").text
+    assert "60 bookmarks in the saved copy" in facts and "1 collection with 2 pictures and videos" in facts and "1 post hidden" in facts, facts
+    # Back up.
+    b.click("#backup")
+    b.wait(lambda d: any(f.endswith(".json") for f in b.downloads()), 10)
+    assert "Backed up 1 collection" in b.q("#message").text
+    # Restore a sorted-folders file: 2 posts known, 1 not yet.
+    f = tmp_path / "folders.json"
+    f.write_text(json.dumps({"collections": [{"id": "s1", "name": "From file", "posts": [post_id(0), post_id(2), post_id(500)]}]}))
+    b.fake_file_picker(str(f))
+    b.click("#restore")
+    b.wait(lambda d: "Added 1 folder" in b.q("#message").text, 10)
+    assert "2 of the 3 posts" in b.q("#message").text and "other 1 will be added" in b.q("#message").text
+    stored = [c for c in b.storage()["xbg_collections"] if c["name"] == "From file"][0]
+    assert stored["pending"] == [post_id(500)] and len(stored["keys"]) >= 2
+    # Unhide all.
+    b.click("#unhide")
+    b.wait(lambda d: b.storage().get("xbg_hidden") == [], 5)
+    b.shot("O-settings-after")
+    # The X tab shows the restored collection without a reload.
+    b.d.switch_to.window(x)
+    from test_collections import card_names, go_collections
+    b.click(".xbg-feed-bar .xbg-close")
+    time.sleep(0.4)
+    go_collections(b)
+    assert "From file" in card_names(b)
+
+
+def test_settings_page_restore_wrong_file(browser, tmp_path):
+    b = browser
+    b.go("https://x.com/home")
+    b.open_ext_page("options.html")
+    f = tmp_path / "x.json"
+    f.write_text("{oops")
+    b.fake_file_picker(str(f))
+    b.click("#restore")
+    b.wait(lambda d: "isn’t a collections backup" in b.q("#message").text, 5)
