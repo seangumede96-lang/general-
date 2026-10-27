@@ -3125,6 +3125,10 @@
   });
 
   async function start() {
+    // After an update (or reload) of the extension, Firefox stops the old
+    // copy of this script but leaves its ball and gallery in the page, dead.
+    // Clear them away; an open gallery comes back below through restoreSpot.
+    document.querySelectorAll("#xbg-ball, #xbg-overlay").forEach((n) => n.remove());
     // The gallery itself is built the first time it opens (openGallery), so
     // ordinary X pages don't pay for it.
     updateBall();

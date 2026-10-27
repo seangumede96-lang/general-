@@ -106,6 +106,22 @@ class Browser:
         if install:
             self.install()
 
+    def allow_private(self):
+        """Tick "Run in Private Windows" for the extension (users must do this themselves)."""
+        with self.d.context(self.d.CONTEXT_CHROME):
+            self.d.execute_async_script(
+                """const done = arguments[1];
+                const { ExtensionPermissions } = ChromeUtils.importESModule("resource://gre/modules/ExtensionPermissions.sys.mjs");
+                const { AddonManager } = ChromeUtils.importESModule("resource://gre/modules/AddonManager.sys.mjs");
+                (async () => {
+                  await ExtensionPermissions.add(arguments[0], { permissions: ["internal:privateBrowsingAllowed"], origins: [] });
+                  const a = await AddonManager.getAddonByID(arguments[0]);
+                  await a.reload();
+                })().then(() => done(1), (e) => done(String(e)));""",
+                ADDON_ID,
+            )
+        time.sleep(1)
+
     def install(self):
         self.addon_id = self.driver.install_addon(EXT_DIR, temporary=True)
         time.sleep(0.5)
@@ -181,7 +197,10 @@ class Browser:
         return self.js("const c=document.querySelector('#xbg-overlay .xbg-status > span:not(.xbg-progress)'); return c ? c.textContent : null")
 
     def open_gallery_with_ball(self):
-        self.wait(lambda d: self.visible("#xbg-ball"), 10, "floating ball never showed")
+        """Tap the floating ball, unless the gallery already came back open by itself."""
+        self.wait(lambda d: self.visible("#xbg-ball") or self.gallery_open(), 10, "floating ball never showed")
+        if self.gallery_open():
+            return
         self.click("#xbg-ball")
         self.wait(lambda d: self.gallery_open(), 10, "gallery didn't open")
 

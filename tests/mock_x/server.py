@@ -213,6 +213,7 @@ class Handler(BaseHTTPRequestHandler):
                     state["cfg"] = dict(DEFAULTS)
                     state["log"] = []
                     state["rl_done"] = False
+                    state["t0"] = int(time.time() * 1000) - 5 * DAY
                 for k, v in q.items():
                     if k in DEFAULTS:
                         state["cfg"][k] = type(DEFAULTS[k])(v[0])
