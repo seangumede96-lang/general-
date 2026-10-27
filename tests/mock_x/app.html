@@ -112,7 +112,7 @@
       }).finally(() => (loading = false));
     } else {
       const h = document.createElement("h2");
-      h.textContent = path === "/explore" ? "Explore" : "Home timeline";
+      h.textContent = /\/status\/\d+/.test(path) ? "Post" : path === "/explore" ? "Explore" : "Home timeline";
       tl.append(h);
       for (let i = 0; i < 5; i++) {
         const p = document.createElement("article");
@@ -122,11 +122,15 @@
     }
   }
 
+  // Like X: any click on a link to an x.com page is caught at the document
+  // and handled by the app's own router (no new tab, no page load).
   document.addEventListener("click", (e) => {
-    const a = e.target.closest("a[data-nav]");
-    if (!a) return;
+    const a = e.target.closest("a[href]");
+    if (!a || e.defaultPrevented) return;
+    const u = new URL(a.href, location.href);
+    if (u.hostname !== location.hostname) return;
     e.preventDefault();
-    history.pushState({}, "", a.getAttribute("href"));
+    history.pushState({}, "", u.pathname);
     render();
   });
   // Like the `history` package X's router uses: read the key and state off

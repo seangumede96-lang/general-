@@ -78,6 +78,7 @@
 
 #xbg-overlay .xbg-title {
   flex: 1;
+  min-width: 0; /* a long status line wraps instead of pushing Select and ⋯ off screen */
   font-weight: 700;
   font-size: 17px;
 }
@@ -2510,18 +2511,26 @@
 
 /* The title row keeps the same height on every tab (a status line's worth of
    room is always kept), so nothing resizes when you swipe between them */
-#xbg-overlay .xbg-bar > .xbg-row .xbg-status {
-  display: flex;
-  align-items: center;
-  height: 24px; /* room for the loading ring, kept even when empty */
-  white-space: nowrap;
-  overflow: hidden;
+/* A long status line wraps onto a second line rather than being cut off on a
+   phone; the ring, the text and "Refresh" flow together like a sentence. */
+#xbg-overlay .xbg-bar > .xbg-row {
+  flex-wrap: wrap;
+  row-gap: 0;
 }
 
-#xbg-overlay .xbg-bar > .xbg-row .xbg-status > span:not(.xbg-progress) {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+#xbg-overlay .xbg-bar > .xbg-row .xbg-status {
+  display: block;
+  flex: 0 0 100%;
+  min-height: 24px; /* room for the loading ring, kept even when empty */
+  margin-top: -8px;
+  padding-left: 44px; /* under the title: past the ✕ / ‹ button and the gap */
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+#xbg-overlay .xbg-bar > .xbg-row .xbg-status .xbg-link {
+  display: inline;
+  height: auto;
 }
 
 #xbg-overlay .xbg-bar > .xbg-row .xbg-progress {

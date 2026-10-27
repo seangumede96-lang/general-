@@ -915,7 +915,9 @@
     const bar = el(
       "header",
       { class: "xbg-bar" },
-      el("div", { class: "xbg-row" }, back, close, el("div", { class: "xbg-title" }, titleName, " ", count, status), selectBtn, menuBtn),
+      // The status line gets a line of its own under the title (the full width,
+      // so a long one fits on two lines on a phone).
+      el("div", { class: "xbg-row" }, back, close, el("div", { class: "xbg-title" }, titleName, " ", count), selectBtn, menuBtn, status),
       tabs,
       controls
     );
