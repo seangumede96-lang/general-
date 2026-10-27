@@ -22,7 +22,36 @@ async function focus(tab) {
   if (tab.windowId !== undefined && ext.windows) ext.windows.update(tab.windowId, { focused: true }).catch(() => {});
 }
 
-document.getElementById("open").addEventListener("click", async () => {
+// Firefox lets you switch off the extension's access to X (about:addons →
+// Permissions). Without it nothing runs on X and the X tabs can't even be
+// found, so say so and offer to turn it back on instead of failing quietly.
+const ORIGINS = ["https://x.com/*", "https://twitter.com/*"];
+const openBtn = document.getElementById("open");
+let hasAccess = true;
+ext.permissions.contains({ origins: ORIGINS }).then((ok) => {
+  hasAccess = ok;
+  if (ok) return;
+  statusEl.textContent = "The gallery isn’t allowed on x.com right now, so it can’t show your bookmarks.";
+  openBtn.textContent = "Allow access to X";
+}, () => {});
+
+// Asks for access again; true once it's allowed. It has to be the first
+// thing the click does, or Firefox won't show the request.
+async function allowAccess() {
+  const ok = await ext.permissions.request({ origins: ORIGINS }).catch(() => false);
+  if (!ok) {
+    statusEl.textContent = "The gallery needs access to x.com to show your bookmarks.";
+    return false;
+  }
+  hasAccess = true;
+  openBtn.textContent = "Open gallery";
+  statusEl.textContent = "";
+  return true;
+}
+
+openBtn.addEventListener("click", async () => {
+  const granted = !hasAccess;
+  if (granted && !(await allowAccess())) return;
   const tab = await findXTab();
   if (!tab) {
     // The new tab opens the gallery itself once it has loaded (see #xbg-open in content.js).
@@ -34,6 +63,16 @@ document.getElementById("open").addEventListener("click", async () => {
   try {
     await ext.tabs.sendMessage(tab.id, { type: "xbg-open" });
   } catch (e) {
+    if (granted) {
+      // Access was only just given back, so this tab started without the
+      // gallery: load the bookmarks there and open it.
+      await ext.tabs.update(tab.id, { url: BOOKMARKS + "#xbg-open", active: true });
+      // Already on the bookmarks, that only changes the #: load it afresh.
+      if ((tab.url || "").split("#")[0] === BOOKMARKS) await ext.tabs.reload(tab.id);
+      await focus(tab).catch(() => {});
+      window.close();
+      return;
+    }
     statusEl.textContent = "Reload your X tab, then try again.";
     return;
   }

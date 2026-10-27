@@ -86,6 +86,8 @@ class Browser:
             "devtools.console.stdout.content": True,
             "devtools.console.stdout.chrome": True,
             "browser.dom.window.dump.enabled": True,
+            # permissions.request() grants without the doorhanger (it can't be clicked from WebDriver).
+            "extensions.webextOptionalPermissionPrompts": False,
             "media.autoplay.default": 0,
             "media.autoplay.blocking_policy": 0,
             "browser.download.folderList": 2,
@@ -121,6 +123,21 @@ class Browser:
                 ADDON_ID,
             )
         time.sleep(1)
+
+    def revoke_x_access(self):
+        """Switch off "Access your data for x.com/twitter.com" like a user can in about:addons."""
+        with self.d.context(self.d.CONTEXT_CHROME):
+            r = self.d.execute_async_script(
+                """const done = arguments[1];
+                const { ExtensionPermissions } = ChromeUtils.importESModule("resource://gre/modules/ExtensionPermissions.sys.mjs");
+                const { WebExtensionPolicy } = globalThis;
+                const policy = WebExtensionPolicy.getByID(arguments[0]);
+                ExtensionPermissions.remove(arguments[0], { permissions: [], origins: ["https://x.com/*", "https://twitter.com/*"] }, policy.extension)
+                  .then(() => done(1), (e) => done(String(e)));""",
+                ADDON_ID,
+            )
+        time.sleep(0.5)
+        return r
 
     def install(self):
         self.addon_id = self.driver.install_addon(EXT_DIR, temporary=True)

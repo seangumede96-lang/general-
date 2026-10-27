@@ -106,3 +106,22 @@ def test_x_tab_opened_before_install():
         assert not b.console_errors()
     finally:
         b.quit()
+
+
+def test_access_to_x_switched_off(browser):
+    b = browser
+    b.revoke_x_access()
+    b.go("https://x.com/i/bookmarks")
+    x = b.d.current_window_handle
+    time.sleep(1)
+    assert not b.qa("#xbg-ball")
+    b.open_ext_page("popup.html")
+    b.wait(lambda d: "x.com" in b.q("#status").text, 5, "the popup doesn't explain that access to X is off")
+    assert b.q("#open").text == "Allow access to X"
+    b.shot("B6-no-access")
+    b.click("#open")
+    # Access is back and the gallery opens in the X tab (no second X tab).
+    b.wait(lambda d: len([h for h in d.window_handles if h != x]) <= 1, 5)
+    b.d.switch_to.window(x)
+    b.wait(lambda d: b.gallery_open(), 15, "gallery didn't open after allowing access")
+    assert len(x_tabs(b)) == 1
