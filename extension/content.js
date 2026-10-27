@@ -1032,6 +1032,7 @@
     wireGrid();
     wireScroller();
     wireReorder();
+    wireZoom();
     wireLightbox();
     buildScrubber();
     buildHeaderButton();
@@ -1057,6 +1058,8 @@
       if (e.key === "Escape") ui.alert.remove();
     } else if (ui.sheet) {
       if (e.key === "Escape") closeSheet();
+    } else if (zoom) {
+      if (e.key === "Escape") closeZoom();
     } else if (reels) {
       // Full screen: up/down (or left/right) moves between posts, Esc goes back.
       if (e.key === "Escape") return closeReels(true);
@@ -1123,7 +1126,10 @@
     });
     grid.addEventListener("touchcancel", cancel);
     grid.addEventListener("contextmenu", (e) => e.preventDefault());
-    window.addEventListener("resize", () => fillPage());
+    window.addEventListener("resize", () => {
+      fillPage();
+      if (feedOpen()) markTall();
+    });
     grid.addEventListener("click", (e) => {
       const tile = e.target.closest(".xbg-tile");
       if (!tile || tile.dataset.key === swallowKey) return;
@@ -1547,7 +1553,8 @@
         closeSheet();
       }
       if (galleryOpen()) addBackStep();
-    } else if (reels) closeReels(false);
+    } else if (zoom) closeZoom(true);
+    else if (reels) closeReels(false);
     else if (feedOpen()) closeLightbox(true);
     else if (selectMode) setSelectMode(false, true);
     else if (galleryOpen() && view === "collection") slideTo("collections", 1, true);
@@ -2500,6 +2507,7 @@
 
   function closeGallery(fromHistory = false) {
     if (!galleryOpen()) return;
+    if (zoom) closeZoom(fromHistory);
     closeSheet();
     closeLightbox(false, false);
     stopScrollLoading();
@@ -2622,6 +2630,7 @@
   }
   const BOOKMARK_PATH = "M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-4.6L5 21V4.5A1.5 1.5 0 0 1 6.5 3z";
   const OPEN_PATH = "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5";
+  const ZOOM_PATH = "M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15zM16 16l5 5M10.5 7.5v6M7.5 10.5h6";
 
   // Each post is just its picture or video, edge to edge, with the name and
   // date laid over the top and Save / Open post as round buttons over the
@@ -2676,6 +2685,8 @@
     save.addEventListener("contextmenu", (e) => e.preventDefault()); // a long-press isn't a right-click menu
     paintSave(save, item.key);
     const actions = el("div", { class: "xbg-post-actions" }, save);
+    // Photos can be zoomed: this button, or pinching the picture.
+    if (item.type === "photo") actions.append(el("button", { class: "xbg-fab-btn xbg-zoom-btn", "aria-label": "Zoom", onclick: () => openZoom(item) }, icon(ZOOM_PATH, false)));
     if (item.tweet) {
       // A tap shows the post in this tab (see showPostOnX); target=_blank is
       // only for "open in new tab" (long-press, Ctrl/middle click).
@@ -2828,6 +2839,200 @@
     media.append(cover, v, bar);
     if (buildingReel) setIcon(fullBtn, "exitFull");
     else ui.feedVideos.observe(v);
+  }
+
+  // --- Zoom: a picture full screen, pinch / wheel / double-tap to zoom -------
+  // X's page turns off the phone's own pinch-zoom, so pictures zoom here: the
+  // picture fits the screen, centred; pinch (or the mouse wheel) zooms about
+  // your fingers, one finger (or the mouse) drags it around while zoomed,
+  // double-tap switches between fitted and close up, and pinching it smaller
+  // than the screen closes it. ✕, Escape and Back close it too.
+  const ZOOM_MAX = 6;
+  // The zoom area's own size (the window less any scrollbar).
+  const zoomW = () => (zoom && zoom.root.clientWidth) || window.innerWidth;
+  const zoomH = () => (zoom && zoom.root.clientHeight) || window.innerHeight;
+  let zoom = null; // { root, img, item, s, x, y, w, h, g }
+
+  function openZoom(item, touches) {
+    if (zoom || !ui) return;
+    const img = el("img", { src: item.full || item.thumb, alt: "", referrerpolicy: "no-referrer", draggable: "false" });
+    const close = el("button", { class: "xbg-close xbg-zoom-close", "aria-label": "Close zoom", onclick: () => closeZoom() }, "✕");
+    const root = el("div", { class: "xbg-zoom" }, img, close);
+    ui.overlay.append(root);
+    zoom = { root, img, item, s: 1, x: 0, y: 0, w: 0, h: 0, g: null, lastTap: 0 };
+    img.addEventListener("load", () => zoom && zoom.img === img && layoutZoom());
+    img.addEventListener("error", () => {
+      if (zoom && zoom.img === img && item.thumb && img.src !== item.thumb) img.src = item.thumb;
+    });
+    layoutZoom();
+    addBackStep();
+    if (touches) startGesture(touches);
+  }
+
+  function closeZoom(fromHistory = false) {
+    if (!zoom) return;
+    zoom.root.remove();
+    zoom = null;
+    if (!fromHistory) removeBackStep();
+  }
+
+  // The fitted size: the whole picture, as big as the screen allows.
+  function layoutZoom() {
+    const { img, item } = zoom;
+    const W = zoomW();
+    const H = zoomH();
+    const ratio = (img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : item.w && item.h ? item.w / item.h : 1) || 1;
+    const w = Math.min(W, H * ratio);
+    const h = w / ratio;
+    Object.assign(img.style, { width: w + "px", height: h + "px", left: (W - w) / 2 + "px", top: (H - h) / 2 + "px" });
+    zoom.w = w;
+    zoom.h = h;
+    applyZoom(false);
+  }
+
+  // Keep the picture over the screen: centred while it fits, never dragged
+  // past its edges when zoomed.
+  function clampZoom() {
+    const z = zoom;
+    const mx = Math.max(0, (z.w * z.s - zoomW()) / 2);
+    const my = Math.max(0, (z.h * z.s - zoomH()) / 2);
+    z.x = Math.min(mx, Math.max(-mx, z.x));
+    z.y = Math.min(my, Math.max(-my, z.y));
+  }
+
+  function applyZoom(animate, clamp = true) {
+    const z = zoom;
+    if (clamp) clampZoom();
+    z.img.style.transition = animate ? "transform 0.22s ease-out" : "none";
+    z.img.style.transform = `translate(${z.x}px, ${z.y}px) scale(${z.s})`;
+  }
+
+  // Zoom to `s`, keeping the point under (px, py) where it is.
+  function zoomAt(s, px, py) {
+    const z = zoom;
+    const cx = zoomW() / 2;
+    const cy = zoomH() / 2;
+    const ux = (px - cx - z.x) / z.s;
+    const uy = (py - cy - z.y) / z.s;
+    z.s = s;
+    z.x = px - cx - ux * s;
+    z.y = py - cy - uy * s;
+  }
+
+  function toggleZoom(px, py) {
+    if (zoom.s > 1.01) Object.assign(zoom, { s: 1, x: 0, y: 0 });
+    else zoomAt(2.5, px, py);
+    applyZoom(true);
+  }
+
+  const gap = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const middle = (t) => [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
+
+  function startGesture(t) {
+    const z = zoom;
+    if (t.length >= 2) {
+      const [mx, my] = middle(t);
+      z.g = { pinch: true, d0: gap(t) || 1, s0: z.s, mx, my };
+    } else if (t.length === 1) {
+      z.g = { pinch: false, px: t[0].clientX, py: t[0].clientY, moved: false };
+    }
+  }
+
+  function wireZoom() {
+    // Touch: on window, so a pinch that started on the feed's picture carries on here.
+    window.addEventListener("touchstart", (e) => {
+      if (!zoom) {
+        const media = e.touches.length === 2 && e.target instanceof Element && e.target.closest("#xbg-overlay .xbg-post-media");
+        const item = media && getItem(media.closest(".xbg-post").dataset.key);
+        if (item && item.type === "photo") {
+          if (e.cancelable) e.preventDefault();
+          openZoom(item, e.touches);
+        }
+        return;
+      }
+      if (e.target.closest && e.target.closest(".xbg-zoom-close")) return;
+      if (e.cancelable) e.preventDefault();
+      startGesture(e.touches);
+      // Two taps in a row: fitted ↔ close up.
+      if (e.touches.length === 1) {
+        const now = Date.now();
+        const t = e.touches[0];
+        if (now - zoom.lastTap < 300) {
+          zoom.lastTap = 0;
+          zoom.tapped = now;
+          zoom.g = null;
+          toggleZoom(t.clientX, t.clientY);
+        } else zoom.lastTap = now;
+      }
+    }, { capture: true, passive: false });
+    window.addEventListener("touchmove", (e) => {
+      if (!zoom || !zoom.g) return;
+      if (e.cancelable) e.preventDefault();
+      const z = zoom;
+      const g = z.g;
+      if (g.pinch && e.touches.length >= 2) {
+        const [mx, my] = middle(e.touches);
+        // Scale about the fingers' middle, and follow it as the fingers move.
+        const s = Math.min(ZOOM_MAX * 1.3, Math.max(0.4, (g.s0 * gap(e.touches)) / g.d0));
+        zoomAt(s, g.mx, g.my);
+        z.x += mx - g.mx;
+        z.y += my - g.my;
+        g.mx = mx;
+        g.my = my;
+        applyZoom(false, false);
+      } else if (!g.pinch && e.touches.length === 1) {
+        const t = e.touches[0];
+        z.x += t.clientX - g.px;
+        z.y += t.clientY - g.py;
+        g.px = t.clientX;
+        g.py = t.clientY;
+        g.moved = true;
+        applyZoom(false);
+      }
+    }, { capture: true, passive: false });
+    const end = (e) => {
+      if (!zoom) return;
+      const z = zoom;
+      if (e.touches.length) return startGesture(e.touches); // a finger still down: carry on with it
+      const wasPinch = z.g && z.g.pinch;
+      z.g = null;
+      if (wasPinch && z.s < 0.85) return closeZoom(); // pinched smaller than the screen
+      if (z.s < 1) Object.assign(z, { s: 1, x: 0, y: 0 });
+      if (z.s > ZOOM_MAX) zoomAt(ZOOM_MAX, zoomW() / 2, zoomH() / 2);
+      applyZoom(true);
+    };
+    window.addEventListener("touchend", end, true);
+    window.addEventListener("touchcancel", end, true);
+    // Mouse: wheel zooms about the pointer, drag moves, double-click toggles.
+    window.addEventListener("wheel", (e) => {
+      if (!zoom || !zoom.root.contains(e.target)) return;
+      e.preventDefault();
+      const s = Math.min(ZOOM_MAX, Math.max(1, zoom.s * Math.exp(-e.deltaY * 0.0015)));
+      zoomAt(s, e.clientX, e.clientY);
+      if (s === 1) Object.assign(zoom, { x: 0, y: 0 });
+      applyZoom(false);
+    }, { capture: true, passive: false });
+    let drag = null;
+    window.addEventListener("pointerdown", (e) => {
+      if (!zoom || e.pointerType === "touch" || e.target !== zoom.img) return;
+      e.preventDefault();
+      drag = { x: e.clientX, y: e.clientY };
+    }, true);
+    window.addEventListener("pointermove", (e) => {
+      if (!zoom || !drag) return;
+      zoom.x += e.clientX - drag.x;
+      zoom.y += e.clientY - drag.y;
+      drag = { x: e.clientX, y: e.clientY };
+      applyZoom(false);
+    }, true);
+    window.addEventListener("pointerup", () => (drag = null), true);
+    window.addEventListener("dblclick", (e) => {
+      if (!zoom || !zoom.root.contains(e.target) || e.target.closest(".xbg-zoom-close")) return;
+      if (Date.now() - (zoom.tapped || 0) < 600) return; // the touch double-tap already did it
+      e.preventDefault();
+      toggleZoom(e.clientX, e.clientY);
+    }, true);
+    window.addEventListener("resize", () => zoom && layoutZoom());
   }
 
   // --- Reels: full screen, one post at a time, swipe up / down -------------
@@ -3064,6 +3269,7 @@
     for (let i = from; i < to; i++) frag.append(feedPost(current[i]));
     if (atTop) ui.feed.prepend(frag);
     else ui.feed.append(frag);
+    markTall();
   }
 
   // Add posts below as you near the bottom and above as you near the top
@@ -3078,9 +3284,12 @@
     }
     if (feedStart > 0 && f.scrollTop < 2500) {
       const from = Math.max(0, feedStart - FEED_CHUNK);
-      const before = f.scrollHeight;
+      // Keep the post you're on exactly where it is. Measured, not assumed:
+      // with snapping, Firefox may already have kept it in place itself.
+      const anchor = f.querySelector(":scope > .xbg-post");
+      const before = anchor ? anchor.getBoundingClientRect().top : 0;
       addFeedPosts(from, feedStart, true);
-      f.scrollTop += f.scrollHeight - before;
+      if (anchor) f.scrollTop += anchor.getBoundingClientRect().top - before;
       feedStart = from;
       trimFeed(false);
     }
@@ -3139,16 +3348,27 @@
   // Put the tapped post in the exact middle of the screen, whatever its shape.
   // The feed gets room above the first post and below the last, so even
   // those can sit in the middle.
+  // The middle is the middle of the feed's own area (below the "Posts" bar),
+  // the same place the feed snaps posts to when you stop scrolling.
   function centrePost(post) {
     const feed = ui.feed;
+    const h = feed.clientHeight || window.innerHeight;
     feed.style.paddingBottom = "50vh";
     const first = feedStart === 0 && feed.querySelector(".xbg-post");
-    feed.style.paddingTop = first ? Math.max(0, (window.innerHeight - first.offsetHeight) / 2) + "px" : "";
+    feed.style.paddingTop = first ? Math.max(0, (h - first.offsetHeight) / 2) + "px" : "";
+    markTall();
     if (!post) return (feed.scrollTop = 0);
     feed.scrollTop = 0;
     const r = post.getBoundingClientRect();
-    const fits = r.height <= window.innerHeight;
-    feed.scrollTop = fits ? r.top + r.height / 2 - window.innerHeight / 2 : r.top - feed.getBoundingClientRect().top;
+    const top = feed.getBoundingClientRect().top;
+    feed.scrollTop = r.height <= h ? r.top - top + r.height / 2 - h / 2 : r.top - top;
+  }
+
+  // Posts taller than the screen snap by their top (so the name and date show)
+  // and can be scrolled through; the rest snap to the middle.
+  function markTall() {
+    const h = ui.feed.clientHeight || window.innerHeight;
+    for (const p of ui.feed.querySelectorAll(":scope > .xbg-post")) p.classList.toggle("xbg-tall", p.offsetHeight > h);
   }
 
   function clearFeed() {

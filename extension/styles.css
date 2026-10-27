@@ -757,6 +757,16 @@
 
 #xbg-overlay .xbg-feed {
   touch-action: pan-y pinch-zoom;
+  /* When you stop scrolling, the nearest post settles in the middle. */
+  scroll-snap-type: y mandatory;
+}
+
+#xbg-overlay .xbg-feed > .xbg-post {
+  scroll-snap-align: center;
+}
+
+#xbg-overlay .xbg-feed > .xbg-post.xbg-tall {
+  scroll-snap-align: start;
 }
 
 #xbg-overlay .xbg-post-media {
@@ -2752,4 +2762,40 @@
   35% { transform: scale(0.95); }
   70% { transform: scale(1); opacity: 1; }
   100% { transform: scale(1); opacity: 0; }
+}
+
+/* --- Zoom: one picture full screen -------------------------------------------- */
+#xbg-overlay .xbg-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 21;
+  overflow: hidden;
+  background: #000;
+  touch-action: none;
+  animation: xbg-zoom-in 0.16s ease-out;
+}
+
+#xbg-overlay .xbg-zoom img {
+  position: absolute;
+  max-width: none;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+  cursor: grab;
+}
+
+#xbg-overlay .xbg-zoom .xbg-zoom-close {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 10px;
+  z-index: 1;
+  width: 42px;
+  height: 42px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+}
+
+@keyframes xbg-zoom-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
