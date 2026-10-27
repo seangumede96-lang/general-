@@ -12,7 +12,7 @@
   const cached = new Map(); // key -> item from the saved copy, shown until loading finishes
   const savedItems = new Map(); // key -> item, for every post in a collection
   let collections = []; // [{ id, name, keys: [newest first] }]
-  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid", theme: "dark", headerHidden: false, filtersHidden: false, toggleBtn: { side: "right", y: 0.75 } };
+  let settings = { fab: true, ball: { side: "right", y: 0.6 }, sort: "newest", dateMode: "saved", layout: "grid", theme: "dark", collSort: "custom", headerHidden: false, filtersHidden: false, toggleBtn: { side: "right", y: 0.75 } };
   let cacheTime = 0;
   let lastTotal = 0; // how many bookmarks the last full load found, to show progress next time
   let partialInfo = null; // { posts, at } while an unfinished long load's progress is all that's saved
@@ -107,11 +107,14 @@
 
   function cleanCollection(c) {
     if (!c || typeof c.name !== "string" || !Array.isArray(c.keys)) return null;
-    return {
+    const out = {
       id: typeof c.id === "string" && c.id ? c.id.slice(0, 40) : newId(),
       name: c.name.trim().slice(0, 60) || "Untitled",
       keys: [...new Set(c.keys.filter((k) => typeof k === "string"))],
     };
+    if (Number.isFinite(c.used) && c.used > 0) out.used = c.used; // last time posts were added
+    if (typeof c.cover === "string" && c.cover) out.cover = c.cover; // the picture chosen for its card
+    return out;
   }
 
   function newId() {
@@ -416,7 +419,7 @@
   });
 
   function createCollection(name) {
-    const c = { id: newId(), name: name.trim().slice(0, 60), keys: [] };
+    const c = { id: newId(), name: name.trim().slice(0, 60), keys: [], used: Date.now() };
     collections.push(c);
     saveCollections();
     return c;
@@ -427,6 +430,7 @@
       const have = new Set(c.keys);
       const added = [...new Set(keys)].filter((k) => !have.has(k));
       if (added.length) c.keys = [...added, ...c.keys];
+      c.used = Date.now();
     } else {
       const drop = new Set(keys);
       c.keys = c.keys.filter((k) => !drop.has(k));
@@ -684,7 +688,22 @@
     return box;
   }
 
-  const cover = (c, cls) => mosaic(c.keys.slice(0, 4).map(getItem), cls);
+  // A collection's card: its chosen picture first (if still in it), then the newest.
+  const cover = (c, cls) => {
+    const first = c.cover && c.keys.includes(c.cover) ? [c.cover, ...c.keys.filter((k) => k !== c.cover)] : c.keys;
+    return mosaic(first.slice(0, 4).map(getItem), cls);
+  };
+
+  // Collections in the order chosen on the Collections page (also used by "Save to…").
+  const COLL_SORTS = [["custom", "Your order"], ["recent", "Recently used"], ["name", "Name (A–Z)"], ["size", "Most posts"]];
+  function sortedCollections() {
+    const list = [...collections];
+    const by = settings.collSort;
+    if (by === "recent") list.sort((a, b) => (b.used || 0) - (a.used || 0));
+    else if (by === "name") list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
+    else if (by === "size") list.sort((a, b) => b.keys.length - a.keys.length);
+    return list;
+  }
 
   let toastTimer = null;
   // `action`: an optional button in the toast, e.g. { label: "Undo", run }.
@@ -847,7 +866,7 @@
           el("span", { class: "xbg-pick-name" }, "New collection")
         )
       );
-      for (const c of collections) {
+      for (const c of sortedCollections()) {
         const inIt = keys.every((k) => c.keys.includes(k));
         list.append(
           el(
@@ -937,9 +956,27 @@
     const grid = el("div", { class: "xbg-grid" });
     const years = el("div", { class: "xbg-cards xbg-hidden" });
     const collGrid = el("div", { class: "xbg-cards xbg-hidden" });
+    // Above the collections: find one by name, and how they're ordered.
+    const collSearch = el("input", { class: "xbg-search-input", type: "search", placeholder: "Search collections", "aria-label": "Search collections", autocomplete: "off", spellcheck: "false", enterkeyhint: "search" });
+    collSearch.addEventListener("input", () => {
+      collQuery = collSearch.value.trim().toLowerCase();
+      renderCollections();
+    });
+    collSearch.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") collSearch.blur();
+    });
+    const collSortBtn = el("button", { class: "xbg-chip xbg-sort", onclick: () => collectionSortMenu() });
+    const collDone = el("button", { class: "xbg-primary xbg-coll-done xbg-hidden", onclick: () => setReorder(false) }, "Done");
+    const collBar = el(
+      "div",
+      { class: "xbg-coll-bar xbg-hidden" },
+      el("label", { class: "xbg-search" }, collSearch),
+      collSortBtn,
+      collDone
+    );
     const empty = el("p", { class: "xbg-empty" });
     const sentinel = el("div", { class: "xbg-sentinel" });
-    const scroller = el("div", { class: "xbg-scroll" }, grid, years, collGrid, empty, sentinel);
+    const scroller = el("div", { class: "xbg-scroll" }, grid, years, collBar, collGrid, empty, sentinel);
 
     const selectInfo = el("span", { class: "xbg-select-info" });
     const addBtn = el("button", { class: "xbg-primary", onclick: () => openPicker([...selected], () => { setSelectMode(false); rebuild(false); }) }, "Add to collection");
@@ -988,12 +1025,13 @@
 
     ui = {
       overlay, bar, back, close, titleName, count, statusText, refreshBtn, pauseBtn, selectBtn, menuBtn, tabs, filters, sortBtn, search, searchClear,
-      layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
+      layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, collBar, collSearch, collSortBtn, collDone, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
       lightbox, feed, toast: toastEl, sheet: null, tabInk, progress, progressFill, progressPct,
     };
 
     wireGrid();
     wireScroller();
+    wireReorder();
     wireLightbox();
     buildScrubber();
     buildHeaderButton();
@@ -1026,13 +1064,19 @@
       if (!step || reels.anim) return;
       e.preventDefault();
       if (reels.cur + step >= 0 && reels.cur + step < current.length) settleReels(step, 0);
+    } else if (typing && e.key === "Escape" && e.target === ui.collSearch) {
+      e.target.blur();
+      ui.collSearch.value = "";
+      collQuery = "";
+      renderCollections();
     } else if (typing && e.key === "Escape" && e.target === ui.search) {
       e.target.blur();
       if (searchText) setSearch("");
     } else if (!ui.lightbox.classList.contains("xbg-hidden")) {
       if (e.key === "Escape") closeLightbox();
     } else if (e.key === "Escape") {
-      if (selectMode) setSelectMode(false);
+      if (reordering) setReorder(false);
+      else if (selectMode) setSelectMode(false);
       else if (view === "collection") setView("collections");
       else closeGallery();
     }
@@ -1136,7 +1180,7 @@
     scroller.addEventListener("touchstart", (e) => {
       const t = e.touches[0];
       const fromEdge = t.clientX < 28 || t.clientX > window.innerWidth - 28; // Android's back gesture
-      swipe = e.touches.length === 1 && !selectMode && !ui.sheet && !fromEdge && !ui.sliding ? { x: t.clientX, y: t.clientY, at: Date.now(), dx: 0, on: false } : null;
+      swipe = e.touches.length === 1 && !selectMode && !reordering && !ui.sheet && !fromEdge && !ui.sliding ? { x: t.clientX, y: t.clientY, at: Date.now(), dx: 0, on: false } : null;
     }, { passive: true });
     scroller.addEventListener("touchmove", (e) => {
       if (!swipe) return;
@@ -1739,6 +1783,7 @@
         "div",
         { class: "xbg-sheet-body" },
         el("button", { class: "xbg-secondary", onclick: () => askName("Rename collection", c.name, (name) => { c.name = name; saveCollections(); updateHeader(); }) }, "Rename"),
+        el("button", { class: "xbg-secondary", onclick: () => chooseCover(c) }, "Choose cover"),
         el(
           "button",
           { class: "xbg-secondary xbg-danger-text", onclick: () => confirmSheet("Delete collection?", `“${c.name}” will be deleted. The posts stay in your bookmarks.`, "Delete", () => {
@@ -2095,6 +2140,8 @@
     ui.grid.classList.toggle("xbg-hidden", mode !== "grid");
     ui.years.classList.toggle("xbg-hidden", mode !== "years");
     ui.collGrid.classList.toggle("xbg-hidden", mode !== "collections");
+    ui.collBar.classList.toggle("xbg-hidden", mode !== "collections" || !collections.length);
+    if (mode !== "collections" && reordering) setReorder(false);
     if (mode === "collections") {
       entries = [];
       ui.periodBar.classList.add("xbg-hidden");
@@ -2199,11 +2246,12 @@
         el("div", { class: "xbg-card-name" }, "New collection")
       ),
     ];
-    for (const c of collections) {
+    const list = sortedCollections().filter((c) => !collQuery || c.name.toLowerCase().includes(collQuery));
+    for (const c of list) {
       cards.push(
         el(
           "button",
-          { class: "xbg-card", onclick: () => setView("collection", c.id, "left") },
+          { class: "xbg-card", "data-id": c.id, onclick: () => !reordering && setView("collection", c.id, "left") },
           cover(c, "xbg-card-cover"),
           el("div", { class: "xbg-card-name" }, c.name),
           el("div", { class: "xbg-card-count" }, plural(c.keys.length, "post"))
@@ -2213,8 +2261,144 @@
     return cards;
   }
 
+  function sortIcon() {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    for (const [k, v] of Object.entries({ class: "xbg-sort-icon", viewBox: "0 0 24 24", width: 17, height: 17, "aria-hidden": "true", fill: "none", stroke: "currentColor", "stroke-width": 2.2, "stroke-linecap": "round", "stroke-linejoin": "round" })) svg.setAttribute(k, v);
+    for (const d of ["M6 20V4M2.5 7.5 6 4l3.5 3.5", "M18 4v16M14.5 16.5 18 20l3.5-3.5"]) {
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("d", d);
+      svg.append(path);
+    }
+    return svg;
+  }
+
+  function collectionSortMenu() {
+    const option = ([value, label]) =>
+      el(
+        "button",
+        { class: "xbg-pick" + (settings.collSort === value ? " xbg-on" : ""), onclick: () => { settings.collSort = value; saveSettings(); closeSheet(); renderCollections(); } },
+        el("span", { class: "xbg-pick-name" }, label),
+        el("span", { class: "xbg-pick-check" }, settings.collSort === value ? "✓" : "")
+      );
+    openSheet(
+      "Order collections",
+      el(
+        "div",
+        { class: "xbg-sheet-body" },
+        ...COLL_SORTS.map(option),
+        el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); setReorder(true); } }, "Change order…")
+      )
+    );
+  }
+
+  // Arrange collections by dragging them (finger or mouse), then Done.
+  function setReorder(on) {
+    reordering = on;
+    if (on) {
+      collQuery = "";
+      ui.collSearch.value = "";
+      if (settings.collSort !== "custom") {
+        settings.collSort = "custom";
+        saveSettings();
+      }
+    }
+    renderCollections();
+    if (on) toast("Drag the collections into the order you like");
+  }
+
+  function wireReorder() {
+    let drag = null;
+    const cards = () => [...ui.collGrid.querySelectorAll(".xbg-card[data-id]")];
+    ui.collGrid.addEventListener("pointerdown", (e) => {
+      if (!reordering) return;
+      const card = e.target.closest(".xbg-card[data-id]");
+      if (!card) return;
+      e.preventDefault();
+      try {
+        card.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* fine */
+      }
+      drag = { card };
+      card.classList.add("xbg-dragging");
+    });
+    ui.collGrid.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      // Near the top or bottom of the screen: scroll so far-off places can be reached.
+      const sr = ui.scroller.getBoundingClientRect();
+      if (e.clientY < sr.top + 70) ui.scroller.scrollTop -= 18;
+      else if (e.clientY > sr.bottom - 70) ui.scroller.scrollTop += 18;
+      // Over another card: take its place.
+      const all = cards();
+      const over = all.find((c) => {
+        if (c === drag.card) return false;
+        const r = c.getBoundingClientRect();
+        return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      });
+      if (!over) return;
+      if (all.indexOf(over) < all.indexOf(drag.card)) over.before(drag.card);
+      else over.after(drag.card);
+    });
+    const end = () => {
+      if (!drag) return;
+      drag.card.classList.remove("xbg-dragging");
+      drag = null;
+      const order = cards().map((c) => c.dataset.id);
+      collections.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      saveCollections();
+    };
+    ui.collGrid.addEventListener("pointerup", end);
+    ui.collGrid.addEventListener("pointercancel", end);
+  }
+
+  // Pick the picture shown on a collection's card.
+  function chooseCover(c) {
+    const grid = el("div", { class: "xbg-cover-grid" });
+    for (const key of c.keys.slice(0, 120)) {
+      const it = getItem(key);
+      if (!it) continue;
+      grid.append(
+        el(
+          "button",
+          { class: "xbg-cover-pick" + (c.cover === key ? " xbg-on" : ""), "data-key": key, "aria-label": "Use this picture", onclick: () => {
+            c.cover = key;
+            saveCollections();
+            closeSheet();
+            toast("Cover changed");
+          } },
+          el("img", { src: it.thumb, loading: "lazy", alt: "", referrerpolicy: "no-referrer" })
+        )
+      );
+    }
+    openSheet(
+      "Choose cover",
+      el(
+        "div",
+        { class: "xbg-sheet-body" },
+        c.keys.length ? grid : el("p", { class: "xbg-sheet-note" }, "Add some posts first."),
+        c.cover ? el("button", { class: "xbg-secondary", onclick: () => { delete c.cover; saveCollections(); closeSheet(); toast("Cover shows the newest posts"); } }, "Show the newest posts") : ""
+      )
+    );
+  }
+
+  let collQuery = ""; // words typed in "Search collections"
+  let reordering = false; // dragging collections into your own order
+
   function renderCollections() {
-    ui.collGrid.replaceChildren(...collectionCards());
+    const cards = collectionCards();
+    if (reordering) cards.shift(); // no "New collection" while arranging
+    ui.collGrid.replaceChildren(...cards);
+    ui.collGrid.classList.toggle("xbg-reordering", reordering);
+    ui.collBar.classList.toggle("xbg-hidden", !collections.length);
+    ui.collSortBtn.replaceChildren(sortIcon(), el("span", {}, (COLL_SORTS.find(([v]) => v === settings.collSort) || COLL_SORTS[0])[1]));
+    ui.collSortBtn.classList.toggle("xbg-hidden", reordering);
+    ui.collSearch.closest(".xbg-search").classList.toggle("xbg-hidden", reordering);
+    ui.collDone.classList.toggle("xbg-hidden", !reordering);
+    if (collQuery && cards.length === 1) {
+      ui.empty.replaceChildren(`No collection is called “${ui.collSearch.value.trim()}”.`);
+      return;
+    }
     ui.empty.replaceChildren(
       collections.length ? "" : "Group your favourite posts into collections, like on Instagram.",
       el(

@@ -2638,3 +2638,87 @@
 #xbg-overlay .xbg-progress.xbg-paused .xbg-ring-fill {
   animation: none;
 }
+
+/* --- Collections page: search, order, arranging, covers --------------------- */
+#xbg-overlay .xbg-coll-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 935px;
+  margin: 0 auto;
+  padding: 12px 12px 0;
+}
+
+#xbg-overlay .xbg-coll-bar.xbg-hidden,
+#xbg-overlay .xbg-coll-bar .xbg-hidden {
+  display: none;
+}
+
+#xbg-overlay .xbg-coll-bar .xbg-search {
+  flex: 1;
+  min-width: 0;
+}
+
+#xbg-overlay .xbg-coll-bar .xbg-sort {
+  flex: none;
+}
+
+#xbg-overlay .xbg-coll-done {
+  flex: none;
+  width: auto;
+  margin: 0 0 0 auto;
+  padding: 8px 22px;
+}
+
+/* While arranging: cards wobble a little, the one held is lifted. */
+#xbg-overlay .xbg-cards.xbg-reordering .xbg-card {
+  touch-action: none;
+  cursor: grab;
+  animation: xbg-wobble 0.3s ease-in-out infinite alternate;
+}
+
+#xbg-overlay .xbg-cards.xbg-reordering .xbg-card:nth-child(2n) {
+  animation-delay: -0.15s;
+}
+
+#xbg-overlay .xbg-cards.xbg-reordering .xbg-card.xbg-dragging {
+  animation: none;
+  transform: scale(1.06);
+  opacity: 0.85;
+  cursor: grabbing;
+  z-index: 2;
+}
+
+@keyframes xbg-wobble {
+  from { transform: rotate(-0.8deg); }
+  to { transform: rotate(0.8deg); }
+}
+
+#xbg-overlay .xbg-cover-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  max-height: 55vh;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
+#xbg-overlay .xbg-cover-pick {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  background: var(--xbg-surface);
+  cursor: pointer;
+}
+
+#xbg-overlay .xbg-cover-pick img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#xbg-overlay .xbg-cover-pick.xbg-on {
+  outline: 3px solid var(--xbg-accent);
+  outline-offset: -3px;
+}
