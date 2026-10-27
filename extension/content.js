@@ -338,9 +338,9 @@
   }
 
   // During a long load, keep what's been found about every 10,000 bookmarks.
-  function savePartial() {
-    if (!loadingMain() || loadState.state !== "loading" || !loadState.posts) return;
-    if (loadState.posts - lastPartialSave < 10000) return;
+  function savePartial(now = false) {
+    if (!loadingMain() || !["loading", "paused"].includes(loadState.state) || !loadState.posts) return;
+    if (loadState.posts - lastPartialSave < (now ? 1 : 10000)) return;
     lastPartialSave = loadState.posts;
     const posts = loadState.posts;
     // Once it's stored, tell inject.js a later visit may carry on from here.
@@ -561,6 +561,8 @@
     }
     if (e.data.status && typeof e.data.status.state === "string") {
       loadState = e.data.status;
+      noteRate(loadState);
+      if (loadState.state === "paused") savePartial(true); // keep what's loaded while paused
       if (loadState.state === "failed" && galleryOpen()) startScrollLoading();
       if (loadState.state === "done") {
         stopScrollLoading();
@@ -896,7 +898,9 @@
     const count = el("span", { class: "xbg-count" }, "0");
     const statusText = el("span");
     const refreshBtn = el("button", { class: "xbg-link xbg-hidden", onclick: () => goToBookmarks() }, "Refresh");
-    const status = el("div", { class: "xbg-status" }, statusText, refreshBtn);
+    // Pause / Continue while a long load runs.
+    const pauseBtn = el("button", { class: "xbg-link xbg-hidden", onclick: () => window.postMessage({ __xbgAsk: loadState.state === "paused" ? "resume" : "pause" }, location.origin) }, "Pause");
+    const status = el("div", { class: "xbg-status" }, statusText, refreshBtn, pauseBtn);
     const selectBtn = el("button", { class: "xbg-text-btn", onclick: () => setSelectMode(!selectMode) }, "Select");
     const menuBtn = el("button", { class: "xbg-close", "aria-label": "Options", onclick: () => (view === "collection" ? collectionMenu() : settingsMenu()) }, "⋯");
 
@@ -975,14 +979,15 @@
     const progressFill = svgEl("circle", { cx: 18, cy: 18, r: 15.5, class: "xbg-ring-fill", pathLength: 100 });
     ring.append(svgEl("circle", { cx: 18, cy: 18, r: 15.5, class: "xbg-ring-track" }), progressFill, svgEl("rect", { x: 13, y: 13, width: 10, height: 10, rx: 2, class: "xbg-ring-stop" }));
     const progressPct = el("span", { class: "xbg-ring-pct" });
-    const progress = el("span", { class: "xbg-progress xbg-hidden", role: "progressbar" }, ring, progressPct);
+    // Tapping the ring (its square is a "stop" sign) pauses or continues, like Pause.
+    const progress = el("span", { class: "xbg-progress xbg-hidden", role: "progressbar", title: "Pause or continue loading", onclick: () => ui.pauseBtn.click() }, ring, progressPct);
     status.prepend(progress);
     const toastEl = el("div", { class: "xbg-toast xbg-hidden" });
     const overlay = el("div", { id: "xbg-overlay", class: "xbg-hidden" }, scroller, bar, selectBar, lightbox, toastEl);
     document.body.append(overlay);
 
     ui = {
-      overlay, bar, back, close, titleName, count, statusText, refreshBtn, selectBtn, menuBtn, tabs, filters, sortBtn, search, searchClear,
+      overlay, bar, back, close, titleName, count, statusText, refreshBtn, pauseBtn, selectBtn, menuBtn, tabs, filters, sortBtn, search, searchClear,
       layouts, controls, periodBar, yearBar, monthBar, grid, years, collGrid, empty, sentinel, scroller, selectBar, selectInfo, addBtn, removeBtn,
       lightbox, feed, toast: toastEl, sheet: null, tabInk, progress, progressFill, progressPct,
     };
@@ -1522,12 +1527,13 @@
     if (view === "all") {
       const s = loadState;
       if (!isBookmarks()) {
-        if (partialInfo) text = `Partly loaded (${partialInfo.posts.toLocaleString()} bookmarks) · open your bookmarks to finish`;
+        if (partialInfo) text = `Partly loaded (${partialInfo.posts.toLocaleString()} bookmarks)`;
         else text = (cached.size || fresh.size) && cacheTime ? `Saved copy · ${ago(cacheTime)}` : cached.size || fresh.size ? "Saved copy" : "";
         canRefresh = true;
       } else if (scrollTimer) text = "Loading more…";
       else if (s.state === "checking") text = "Checking for new bookmarks…";
       else if (s.state === "loading") text = loadingText(s.posts);
+      else if (s.state === "paused") text = `Paused · ${(s.posts || 0).toLocaleString()} so far`;
       else if (s.state === "waiting") {
         const wait = s.seconds >= 90 ? `${Math.ceil(s.seconds / 60)} min` : `${s.seconds}s`;
         text = `X asked for a pause · continuing in ${wait}` + (s.posts ? ` · ${s.posts.toLocaleString()} so far` : "");
@@ -1540,16 +1546,22 @@
     }
     ui.statusText.textContent = text;
     ui.refreshBtn.classList.toggle("xbg-hidden", !canRefresh);
+    // An unfinished load carries on from where it got to.
+    ui.refreshBtn.textContent = partialInfo ? "Continue loading" : "Refresh";
+    const pausable = view === "all" && isBookmarks() && !scrollTimer && ["loading", "waiting", "paused"].includes(loadState.state);
+    ui.pauseBtn.classList.toggle("xbg-hidden", !pausable);
+    ui.pauseBtn.textContent = loadState.state === "paused" ? "Continue" : "Pause";
 
     // The ring fills as bookmarks arrive, measured against how many the last
     // full load found; the first time, it spins with the live count instead.
-    const loading = view === "all" && isBookmarks() && (loadState.state === "loading" || loadState.state === "waiting");
+    const loading = view === "all" && isBookmarks() && ["loading", "waiting", "paused"].includes(loadState.state);
     ui.progress.classList.toggle("xbg-hidden", !loading);
     if (loading) {
       const n = loadState.posts || 0;
       const known = lastTotal > n;
       const pct = known ? Math.min(99, Math.max(1, Math.floor((n / lastTotal) * 100))) : 0;
       ui.progress.classList.toggle("xbg-progress-unknown", !known);
+      ui.progress.classList.toggle("xbg-paused", loadState.state === "paused");
       ui.progressFill.style.strokeDasharray = known ? `${pct} 100` : "";
       ui.progressPct.textContent = known ? pct + "%" : "";
       ui.progress.setAttribute("aria-valuenow", String(pct));
@@ -1561,7 +1573,32 @@
   function loadingText(n) {
     if (!n) return cached.size ? "Updating…" : "Loading all bookmarks…";
     const done = n.toLocaleString();
-    return lastTotal && lastTotal > n ? `${done} of ~${lastTotal.toLocaleString()}` : `Loading… ${done} so far`;
+    const perMin = loadRate();
+    if (lastTotal && lastTotal > n) {
+      let left = "";
+      if (perMin) {
+        const mins = (lastTotal - n) / perMin;
+        left = mins < 1 ? " · under a minute left" : mins < 90 ? ` · about ${Math.round(mins)} min left` : ` · about ${Math.round(mins / 60)} h left`;
+      }
+      return `${done} of ~${lastTotal.toLocaleString()}${left}`;
+    }
+    // The first time there's no total to measure against: say how fast it goes.
+    return `Loading… ${done} so far` + (perMin ? ` · ~${Math.round(perMin).toLocaleString()} a minute` : "");
+  }
+
+  // Bookmarks loaded per minute over the last minute or so (null until known).
+  const rateSamples = [];
+  function noteRate(s) {
+    if (s.state !== "loading" || !s.posts) return void (rateSamples.length = 0);
+    const now = Date.now();
+    rateSamples.push([now, s.posts]);
+    while (rateSamples.length > 2 && now - rateSamples[0][0] > 60000) rateSamples.shift();
+  }
+  function loadRate() {
+    if (rateSamples.length < 2) return null;
+    const [t0, p0] = rateSamples[0];
+    const [t1, p1] = rateSamples[rateSamples.length - 1];
+    return t1 - t0 >= 2000 && p1 > p0 ? ((p1 - p0) / (t1 - t0)) * 60000 : null;
   }
 
   // Where you were on the Collections page and inside each collection, so going

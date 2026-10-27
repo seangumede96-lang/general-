@@ -44,6 +44,8 @@
   let restartFull = false; // asked to reload everything while a top-up was running
   const doneKeys = new Set(); // bookmark lists already fully loaded in this visit
   let lastStatus = null;
+  let paused = false; // "Pause" in the gallery: the full load waits until "Continue"
+  let resumeWaiters = [];
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const post = (msg) => window.postMessage({ __xbg: true, ...msg }, location.origin);
@@ -73,6 +75,12 @@
   window.addEventListener("message", (e) => {
     if (e.source !== window || !e.data) return;
     if (e.data.__xbgAsk === "status" && lastStatus) post({ status: lastStatus });
+    if (e.data.__xbgAsk === "pause") paused = true;
+    if (e.data.__xbgAsk === "resume") {
+      paused = false;
+      resumeWaiters.forEach((r) => r());
+      resumeWaiters = [];
+    }
     if (e.data.__xbgPlan && typeof e.data.__xbgPlan.mode === "string") {
       plan = { mode: e.data.__xbgPlan.mode, known: new Set(e.data.__xbgPlan.known || []) };
       planWaiters.forEach((r) => r(plan));
@@ -332,6 +340,12 @@
     status({ state: "loading", pages, posts, resumed });
     try {
       while (cursor && !used.has(cursor) && template === tpl) {
+        if (paused) {
+          status({ state: "paused", pages, posts, resumed });
+          await new Promise((r) => resumeWaiters.push(r));
+          if (template !== tpl) break;
+          status({ state: "loading", pages, posts, resumed });
+        }
         used.add(cursor);
         const req = withCursor(tpl, cursor, big ? BIG_PAGE : 0);
         const res = await origFetch(req.url, {

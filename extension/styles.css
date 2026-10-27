@@ -2628,3 +2628,13 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+#xbg-overlay .xbg-bar .xbg-progress {
+  cursor: pointer;
+}
+
+/* Paused: the ring holds still. */
+#xbg-overlay .xbg-progress.xbg-paused .xbg-ring,
+#xbg-overlay .xbg-progress.xbg-paused .xbg-ring-fill {
+  animation: none;
+}

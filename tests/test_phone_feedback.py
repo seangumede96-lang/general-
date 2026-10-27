@@ -38,7 +38,8 @@ def test_long_status_line_wraps_and_keeps_buttons_on_phone():
         b.open_gallery_with_ball()
         time.sleep(0.5)
         status = b.status_text()
-        assert status.startswith("Partly loaded (10,019 bookmarks)") and status.endswith("open your bookmarks to finish"), status
+        assert status == "Partly loaded (10,019 bookmarks)", status
+        assert b.q(".xbg-bar .xbg-status .xbg-link").text == "Continue loading"
         b.shot("PF-status-phone")
         assert on_screen(b, ".xbg-bar .xbg-status"), "status line is cut off"
         lines = b.js("const s=document.querySelector('.xbg-bar .xbg-status > span:not(.xbg-progress)'); return s.getClientRects().length")
