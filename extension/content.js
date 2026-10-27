@@ -134,6 +134,7 @@
   }
 
   let storedReady = null; // set once start() begins reading storage
+  let mainKeys = new Set(); // every picture in the complete saved copy
   const storedPostIds = new Set(); // every post in the saved copy, for the top-up check
 
   // Coming back to the bookmarks page with a complete saved copy only tops it
@@ -190,7 +191,10 @@
       const cache = data[K.cache];
       if (!(gotData && loadState.state === "done")) {
         const meta = await store.get(PARTIAL);
-        const partial = meta[PARTIAL] && Date.now() - meta[PARTIAL].at < 24 * 3600000 ? meta[PARTIAL] : null;
+        // An unfinished load is shown however old it is (only carrying on from
+        // where it stopped expires, in inject.js): throwing it away after a day
+        // emptied the pictures of collection posts that were only in it.
+        const partial = meta[PARTIAL] || null;
         const readChunks = async (prefix, n, which) => {
           if (!(n > 0)) return [];
           const keys = Array.from({ length: n }, (_, i) => prefix + i);
@@ -212,10 +216,9 @@
           // Only an unfinished load has been saved so far (or it's newer than the last full one).
           if (!cache || partial.at > cacheTime) partialInfo = { posts: Number(partial.posts) || 0, at: partial.at };
         }
-        const list = [
-          ...(partial ? await readChunks(PARTIAL + "_", partial.chunks, "partial") : []),
-          ...(cache && Array.isArray(cache.items) ? cache.items : await readChunks(K.cache + "_", cache && cache.chunks, "main")),
-        ];
+        const main = cache && Array.isArray(cache.items) ? cache.items : await readChunks(K.cache + "_", cache && cache.chunks, "main");
+        for (const raw of main) if (raw && typeof raw.key === "string") mainKeys.add(raw.key);
+        const list = [...(partial ? await readChunks(PARTIAL + "_", partial.chunks, "partial") : []), ...main];
         for (const raw of list) {
           const item = clean(raw);
           if (!item) continue;
@@ -352,7 +355,12 @@
     }
     partialInfo = null;
     // Keep the unfinished copy if the finished one couldn't be stored.
-    writeChunks("main", list, { posts: lastTotal }).then((ok) => ok && clearPartial());
+    writeChunks("main", list, { posts: lastTotal }).then((ok) => {
+      if (!ok) return;
+      mainKeys = new Set(list.map((it) => it.key));
+      clearPartial();
+      if (collections.length) saveCollections(true); // their own copies of these can go now
+    });
     scheduleRefresh();
   }
 
@@ -376,7 +384,9 @@
     savedSet = null;
     const used = new Set(collections.flatMap((c) => c.keys));
     for (const key of used) {
-      if (fresh.has(key) || cached.has(key)) {
+      // Only pictures in the complete saved copy can rely on it; anything else
+      // (this visit's load, an unfinished one) keeps its own copy here.
+      if (mainKeys.has(key)) {
         savedItems.delete(key);
         continue;
       }
