@@ -199,7 +199,8 @@ def test_restore_from_backup(browser, tmp_path):
     go_collections(b)
     b.click_text("Restore from backup", ".xbg-empty button")
     b.wait(lambda d: "Restored" in card_names(b), 10, "restored collection didn't appear")
-    assert "Added 1 folder" in b.q(".xbg-toast").text
+    b.wait(lambda d: b.visible(".xbg-alert"), 5)
+    assert "Added 1 folder" in b.q(".xbg-alert").text
 
 
 def test_restore_wrong_file(browser, tmp_path):
@@ -210,4 +211,4 @@ def test_restore_wrong_file(browser, tmp_path):
     b.fake_file_picker(str(bad))
     go_collections(b)
     b.click_text("Restore from backup", ".xbg-empty button")
-    b.wait(lambda d: "isn’t a collections backup" in b.q(".xbg-toast").text, 10)
+    b.wait(lambda d: b.visible(".xbg-alert") and "isn’t a collections backup" in b.q(".xbg-alert").text, 10)

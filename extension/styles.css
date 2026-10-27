@@ -572,7 +572,12 @@
   background: var(--xbg-accent);
   color: var(--xbg-on-accent);
   font-weight: 600;
-  white-space: nowrap;
+  /* Long notices wrap inside the screen instead of running off both sides. */
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 /* --- Sorting, months and years --------------------------------------------- */
@@ -2601,4 +2606,13 @@
   color: var(--xbg-bg);
   font-size: 11px;
   line-height: 24px;
+}
+
+/* Results shown in a sheet (e.g. after an import): lines kept as written. */
+#xbg-overlay .xbg-info-sheet .xbg-alert-message {
+  white-space: pre-line;
+}
+
+#xbg-overlay .xbg-info-sheet .xbg-alert-cancel {
+  font-weight: 600;
 }

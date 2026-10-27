@@ -540,12 +540,12 @@
         const parts = [];
         if (added) parts.push(`added ${plural(added, "folder")}`);
         if (updated) parts.push(`${added ? "updated" : "Updated"} ${plural(updated, "folder")} you already had`);
-        let msg = (parts.join(", ") || "Nothing to import").replace(/^a/, "A");
-        if (named) msg += ` · ${matched.toLocaleString()} of ${named.toLocaleString()} posts found`;
+        let msg = (parts.join(", ") || "Nothing to import").replace(/^a/, "A") + ".";
+        if (named) msg += `\n${matched.toLocaleString()} of the ${named.toLocaleString()} posts in the file are in your saved bookmarks.`;
         if (named && !matched) msg = "None of these posts are in your saved bookmarks yet. Open x.com/i/bookmarks, let it load, then import again.";
-        toast(msg);
+        infoSheet("Import finished", msg);
       } catch (e) {
-        toast("That file isn’t a collections backup");
+        infoSheet("Couldn’t import", "That file isn’t a collections backup.");
       }
     });
     input.click();
@@ -752,6 +752,25 @@
       el("div", { class: "xbg-alert-text" }, el("div", { class: "xbg-alert-title" }, title), el("div", { class: "xbg-alert-message" }, message)),
       el("button", { class: "xbg-alert-action", onclick: () => { close(); onConfirm(); } }, action),
       el("button", { class: "xbg-alert-cancel", onclick: close }, "Cancel")
+    );
+    const backdrop = el("div", { class: "xbg-alert-backdrop xbg-sheet-style", onclick: (e) => e.target === backdrop && close() }, box);
+    ui.overlay.append(backdrop);
+    ui.alert = backdrop;
+  }
+
+  // The same kind of sheet with just a message and OK, for results too long
+  // for a toast (e.g. what an import did).
+  function infoSheet(title, message) {
+    closeSheet(true);
+    if (ui.alert && ui.alert.isConnected) ui.alert.remove();
+    clearTimeout(toastTimer);
+    ui.toast.classList.add("xbg-hidden");
+    const close = () => backdrop.remove();
+    const box = el(
+      "div",
+      { class: "xbg-alert xbg-action-sheet xbg-info-sheet", role: "alertdialog" },
+      el("div", { class: "xbg-alert-text" }, el("div", { class: "xbg-alert-title" }, title), el("div", { class: "xbg-alert-message" }, message)),
+      el("button", { class: "xbg-alert-cancel", onclick: close }, "OK")
     );
     const backdrop = el("div", { class: "xbg-alert-backdrop xbg-sheet-style", onclick: (e) => e.target === backdrop && close() }, box);
     ui.overlay.append(backdrop);
