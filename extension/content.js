@@ -1514,7 +1514,7 @@
         for (const entry of list) {
           const v = entry.target;
           if (v.closest(".xbg-reels")) continue; // reels play their own videos
-          if (entry.isIntersecting) v.play().catch(() => {});
+          if (entry.isIntersecting) playVideo(v);
           else v.pause();
         }
       },
@@ -2808,7 +2808,7 @@
     // double-tap); a single tap waits a moment to be sure it isn't the first.
     let tapTimer = null;
     media.addEventListener("click", (e) => {
-      if (e.target.closest("button, a, .xbg-vbar")) return;
+      if (e.target.closest("button, a, .xbg-vbar") || media._held) return;
       if (tapTimer) {
         clearTimeout(tapTimer);
         tapTimer = null;
@@ -2888,7 +2888,10 @@
   function videoPlayer(item, media) {
     const cover = el("img", { class: "xbg-vcover", src: feedImg(item), alt: "", referrerpolicy: "no-referrer" });
     const v = el("video", { src: item.video, muted: true, loop: true, playsinline: true, preload: "none", disablepictureinpicture: true });
-    v.muted = true;
+    // Starts with sound if you turned sound on last time (see playVideo).
+    v.muted = !settings.videoSound;
+    const speed = () => settings.videoSpeed || 1;
+    v.addEventListener("loadedmetadata", () => (v.playbackRate = speed()));
     v.addEventListener("playing", () => media.classList.add("xbg-vready"));
     const btn = (name, label, onclick, filled) => {
       const b = el("button", { class: "xbg-vbtn", "aria-label": label, onclick: (e) => { e.stopPropagation(); onclick(); showPostUi(media, true); } });
@@ -2897,13 +2900,52 @@
     };
     const setIcon = (b, name, filled) => b.replaceChildren(vicon(name, filled));
     const playBtn = btn("play", "Play or pause", () => (v.paused ? v.play().catch(() => {}) : v.pause()), true);
-    const soundBtn = btn("muted", "Sound", () => { v.muted = !v.muted; setIcon(soundBtn, v.muted ? "muted" : "sound"); });
+    const soundBtn = btn(v.muted ? "muted" : "sound", "Sound", () => {
+      v.muted = !v.muted;
+      setIcon(soundBtn, v.muted ? "muted" : "sound");
+      // Remembered for the next videos.
+      settings.videoSound = !v.muted;
+      reelMuted = v.muted;
+      saveSettings();
+    });
+    // Playback speed, remembered: 1× → 1.5× → 2× → 0.5×.
+    const SPEEDS = [1, 1.5, 2, 0.5];
+    const speedBtn = el("button", { class: "xbg-vbtn xbg-vspeed", "aria-label": "Playback speed", onclick: (e) => {
+      e.stopPropagation();
+      settings.videoSpeed = SPEEDS[(SPEEDS.indexOf(speed()) + 1) % SPEEDS.length];
+      saveSettings();
+      v.playbackRate = speed();
+      speedBtn.textContent = speed() + "×";
+      showPostUi(media, true);
+    } }, speed() + "×");
     const rotateBtn = btn("rotate", "Rotate", () => rotate());
     const fullBtn = btn("full", "Full screen", () => toggleFull());
     const time = el("span", { class: "xbg-vtime" }, "0:00 / " + clock(item.duration ? item.duration / 1000 : NaN));
     const fill = el("div", { class: "xbg-vfill" });
     const track = el("div", { class: "xbg-vtrack" }, fill);
-    const bar = el("div", { class: "xbg-vbar" }, track, el("div", { class: "xbg-vrow" }, playBtn, time, el("span", { class: "xbg-vspace" }), soundBtn, rotateBtn, fullBtn));
+    const bar = el("div", { class: "xbg-vbar" }, track, el("div", { class: "xbg-vrow" }, playBtn, time, el("span", { class: "xbg-vspace" }), speedBtn, soundBtn, rotateBtn, fullBtn));
+    // Press and hold the video: 2× while held (like X and TikTok).
+    let hold = null;
+    const badge = el("span", { class: "xbg-ffwd xbg-hidden" }, "2× ▶▶");
+    media.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("button, a, .xbg-vbar") || v.paused || (e.pointerType === "mouse" && e.button)) return;
+      hold = setTimeout(() => {
+        hold = "on";
+        media._held = true;
+        v.playbackRate = Math.max(2, speed());
+        badge.classList.remove("xbg-hidden");
+      }, 400);
+    });
+    const release = () => {
+      if (hold === "on") {
+        v.playbackRate = speed();
+        badge.classList.add("xbg-hidden");
+        setTimeout(() => (media._held = false), 50); // the click that ends the hold isn't a tap
+      } else clearTimeout(hold);
+      hold = null;
+    };
+    for (const type of ["pointerup", "pointercancel", "pointerleave"]) media.addEventListener(type, release);
+    media.addEventListener("contextmenu", (e) => e.preventDefault()); // a long press isn't a menu here
     v.addEventListener("play", () => setIcon(playBtn, "pause", true));
     v.addEventListener("pause", () => setIcon(playBtn, "play", true));
     v.addEventListener("timeupdate", () => {
@@ -2945,7 +2987,7 @@
         /* rotation isn't available */
       }
     }
-    media.append(cover, v, bar);
+    media.append(cover, v, bar, badge);
     if (buildingReel) setIcon(fullBtn, "exitFull");
     else ui.feedVideos.observe(v);
   }
@@ -3152,7 +3194,20 @@
   // post it stretches and springs back. Only the post on screen plays.
   let reels = null; // { root, track, cur, slots: Map(index -> node), off, anim }
   let buildingReel = false;
-  let reelMuted = true;
+  let reelMuted = !settings.videoSound;
+
+  // Play, with sound if that was your choice; if Firefox won't start it with
+  // sound (no tap yet on this page), start it muted rather than not at all.
+  function playVideo(v) {
+    v.muted = !settings.videoSound;
+    v.play().catch(() => {
+      if (v.muted) return;
+      v.muted = true;
+      const b = v.parentNode && v.parentNode.querySelector('.xbg-vbtn[aria-label="Sound"]');
+      if (b) b.replaceChildren(vicon("muted"));
+      v.play().catch(() => {});
+    });
+  }
 
   function reelNode(i) {
     buildingReel = true;
@@ -3222,6 +3277,7 @@
     const track = el("div", { class: "xbg-reels-track" });
     const root = el("div", { class: "xbg-reels" }, track);
     reels = { root, track, cur: index, slots: new Map(), off: 0, anim: null };
+    reelMuted = !settings.videoSound;
     if (fromVideo) {
       reelMuted = fromVideo.muted;
       fromVideo.pause();

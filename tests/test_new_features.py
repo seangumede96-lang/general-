@@ -628,3 +628,90 @@ def test_big_import_with_many_waiting_posts_stays_quick(browser, tmp_path):
     time.sleep(11)  # the background save
     stored = b.storage()["xbg_collections"]
     assert len(stored) == 5 and all(len(c.get("pending", [])) < 2000 for c in stored)
+
+
+# --- Video: sound remembered, speed, hold for 2× ------------------------------
+
+def open_video(b):
+    b.click('.xbg-chip[data-filter="video"]')
+    time.sleep(0.3)
+    tile = b.qa(".xbg-grid .xbg-tile")[0]
+    key = tile.get_attribute("data-key")
+    tile.click()
+    b.wait(lambda d: b.visible(".xbg-lightbox"), 5)
+    post = f'.xbg-post[data-key="{key}"]'
+    b.wait(lambda d: b.js(f"const v=document.querySelector('{post} video'); return v && !v.paused"), 10)
+    return post
+
+
+def test_sound_choice_is_remembered(browser):
+    b = browser
+    open_loaded(b)
+    post = open_video(b)
+    assert b.js(f"return document.querySelector('{post} video').muted")
+    b.js(f"document.querySelector('{post} .xbg-vbtn[aria-label=Sound]').click()")
+    time.sleep(0.3)
+    assert not b.js(f"return document.querySelector('{post} video').muted")
+    time.sleep(0.5)
+    assert b.storage()["xbg_settings"]["videoSound"] is True
+    # Next time a video opens, it has sound.
+    b.click(".xbg-feed-bar .xbg-close")
+    time.sleep(0.5)
+    tile = b.qa(".xbg-grid .xbg-tile")[1]
+    key = tile.get_attribute("data-key")
+    tile.click()
+    p2 = f'.xbg-post[data-key="{key}"]'
+    b.wait(lambda d: b.js(f"const v=document.querySelector('{p2} video'); return v && !v.paused"), 10)
+    assert not b.js(f"return document.querySelector('{p2} video').muted"), "the next video started muted"
+    assert b.js(f"return document.querySelector('{p2} .xbg-vbtn[aria-label=Sound] path').getAttribute('d')").startswith("M3 9h4l5-4v14l-5-4H3zM15.5")
+
+
+def test_speed_button(browser):
+    b = browser
+    open_loaded(b)
+    post = open_video(b)
+    rate = lambda: b.js(f"return document.querySelector('{post} video').playbackRate")
+    btn = f"{post} .xbg-vspeed"
+    b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+    assert b.q(btn).text == "1×" and rate() == 1
+    b.q(btn).click()
+    assert b.q(btn).text == "1.5×" and rate() == 1.5
+    b.q(btn).click()
+    assert b.q(btn).text == "2×" and rate() == 2
+    b.shot("V-speed")
+    time.sleep(0.5)
+    assert b.storage()["xbg_settings"]["videoSpeed"] == 2
+    b.q(btn).click()
+    b.q(btn).click()
+    assert b.q(btn).text == "1×" and rate() == 1
+
+
+def test_hold_for_double_speed(browser):
+    b = browser
+    open_loaded(b)
+    post = open_video(b)
+    media = b.q(f"{post} .xbg-post-media")
+    rate = lambda: b.js(f"return document.querySelector('{post} video').playbackRate")
+    ActionChains(b.d).move_to_element(media).click_and_hold().pause(0.8).perform()
+    assert rate() == 2 and b.visible(f"{post} .xbg-ffwd")
+    b.shot("V-hold")
+    ActionChains(b.d).release().perform()
+    time.sleep(0.4)
+    assert rate() == 1 and not b.visible(f"{post} .xbg-ffwd")
+    assert not b.js(f"return document.querySelector('{post} .xbg-post-media').classList.contains('xbg-ui-on')"), "letting go also counted as a tap"
+
+
+def test_video_controls_fit_on_a_phone():
+    b = Browser(width=500, height=1000)
+    try:
+        open_loaded(b)
+        b.zoom(1.3)
+        time.sleep(0.4)
+        post = open_video(b)
+        b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+        time.sleep(0.4)
+        b.shot("V-phone-controls")
+        assert b.js(f"""const row=document.querySelector('{post} .xbg-vrow'); const r=row.getBoundingClientRect();
+          return [...row.children].every(c => {{ const x=c.getBoundingClientRect(); return x.left >= r.left - 1 && x.right <= r.right + 1; }})"""), "a video button is cut off"
+    finally:
+        b.quit()
