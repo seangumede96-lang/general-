@@ -619,6 +619,9 @@
 
   function startScrollLoading() {
     if (scrollTimer || !isBookmarks()) return;
+    // If X refused the background loading, the page's own scrolling likely
+    // stops early too: don't claim everything loaded when it runs dry.
+    const afterFailure = loadState.state === "failed";
     let lastSize = fresh.size;
     let idle = 0;
     scrollTimer = setInterval(() => {
@@ -629,10 +632,16 @@
         idle = 0;
       } else if (++idle >= 12) {
         stopScrollLoading();
-        // Scrolling may stop early, so add what it found to the saved copy
-        // instead of replacing it ("resumed" keeps everything already saved).
-        loadState = { state: "done", resumed: true };
-        saveCache();
+        if (!fresh.size) {
+          // X sent nothing at all: say so instead of "Loading…" forever.
+          loadState = { state: "failed", nothing: true };
+          updateEmpty();
+        } else {
+          // Scrolling may stop early, so add what it found to the saved copy
+          // instead of replacing it ("resumed" keeps everything already saved).
+          loadState = { state: "done", resumed: true, incomplete: afterFailure };
+          saveCache();
+        }
       }
       updateHeader();
     }, 1200);
@@ -1466,7 +1475,9 @@
         text = `X asked for a pause · continuing in ${wait}` + (s.posts ? ` · ${s.posts.toLocaleString()} so far` : "");
       }
       else if (s.state === "done" && s.quick) text = s.fresh ? `Up to date · ${s.fresh.toLocaleString()} new` : "Up to date";
+      else if (s.state === "done" && s.incomplete) text = "Couldn’t load everything";
       else if (s.state === "done") text = s.posts ? `All ${s.posts.toLocaleString()} bookmarks loaded` : "All loaded";
+      else if (s.state === "failed" && s.nothing) text = "X didn’t send your bookmarks";
       else if (s.state === "failed") text = "Couldn’t load everything";
     }
     ui.statusText.textContent = text;
@@ -2029,6 +2040,8 @@
     } else if (c) ui.empty.textContent = c.keys.length ? "Nothing here for this filter." : "No posts yet. Go to All posts, long-press a post, pick some more, then tap “Add to collection”.";
     else if (!isBookmarks() && !totalCount) {
       ui.empty.replaceChildren("Open your bookmarks to fill the gallery. ", el("button", { class: "xbg-link", onclick: () => goToBookmarks() }, "Go to bookmarks"));
+    } else if (!totalCount && loadState.nothing) {
+      ui.empty.replaceChildren("X didn’t send your bookmarks. ", el("button", { class: "xbg-link", onclick: () => location.reload() }, "Reload to try again"));
     } else if (!totalCount) ui.empty.textContent = "Loading your bookmarks…";
     else ui.empty.textContent = "Nothing here for this filter.";
   }

@@ -42,7 +42,7 @@
       const x = new XMLHttpRequest();
       x.open("GET", url);
       for (const k in headers) x.setRequestHeader(k, headers[k]);
-      x.onload = () => (x.status === 200 ? res(JSON.parse(x.responseText)) : rej(x.status));
+      x.onload = () => { if (x.status !== 200) return rej(x.status); try { res(JSON.parse(x.responseText)); } catch (e) { rej("bad json"); } };
       x.onerror = () => rej("net");
       x.send();
     });

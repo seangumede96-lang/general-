@@ -59,6 +59,8 @@ DEFAULTS = {
     "bad_json": 0,        # answer with broken JSON
     "no_media_every": 6,  # every Nth post is text only
     "years_span_days": 5, # days between consecutive bookmarks
+    "missing_every": 0,   # every Nth photo is one X won't serve (404)
+    "bad_json_paged": 0,  # broken JSON only for pages after the first
 }
 
 state = {"cfg": dict(DEFAULTS), "log": [], "rl_done": False, "t0": int(time.time() * 1000) - 2 * DAY}
@@ -104,9 +106,10 @@ def post_for(g):
             })
         else:
             for k in range(2 if g % 5 == 0 else 1):
+                gone = cfg("missing_every") and g % cfg("missing_every") == 1
                 media.append({
                     "type": "photo",
-                    "media_url_https": f"https://pbs.twimg.com/media/P{g}m{k}x.jpg",
+                    "media_url_https": f"https://pbs.twimg.com/media/{'missing' if gone else 'P'}{g}m{k}x.jpg",
                     "expanded_url": f"https://x.com/{user}/status/{pid}/photo/{k + 1}",
                     "original_info": {"width": 1200, "height": 800 if g % 2 else 1500},
                 })
@@ -204,6 +207,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, png(u.path), "image/png")
         if host == "video.twimg.com":
             return self.send(200, MP4, "video/mp4")
+        if host == "example.com":
+            return self.send(200, "<!doctype html><title>Example</title><p>Not X</p>", "text/html")
         if host not in ("x.com", "twitter.com"):
             return self.send(404, "unknown host")
 
@@ -250,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(429, "{}", "application/json", hdrs)
         if cfg("reject_big") and count > 20:
             return self.send(400, json.dumps({"errors": [{"message": "count too big"}]}), "application/json", hdrs)
-        if cfg("bad_json"):
+        if cfg("bad_json") or (cursor and cfg("bad_json_paged")):
             return self.send(200, "{not json", "application/json", hdrs)
         return self.send(200, json.dumps(bookmarks_page(offset, count)), "application/json", hdrs)
 

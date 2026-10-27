@@ -71,7 +71,7 @@ class Browser:
         o.add_argument(self.profile_dir)
         o.accept_insecure_certs = True
         prefs = {
-            "network.dns.localDomains": "x.com,twitter.com,pbs.twimg.com,video.twimg.com,abs.twimg.com",
+            "network.dns.localDomains": "x.com,twitter.com,pbs.twimg.com,video.twimg.com,abs.twimg.com,example.com",
             "network.proxy.type": 0,
             "network.trr.mode": 5,
             "browser.shell.checkDefaultBrowser": False,
@@ -189,6 +189,14 @@ class Browser:
 
     def tile_count(self):
         return int(self.js("return document.querySelectorAll('#xbg-overlay .xbg-grid .xbg-tile').length"))
+
+    def first_tile_key(self):
+        """The tile drawn top-left (tiles are positioned, so page order isn't screen order)."""
+        return self.js("const t=[...document.querySelectorAll('#xbg-overlay .xbg-grid .xbg-tile')].sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)||parseFloat(a.style.left)-parseFloat(b.style.left))[0]; return t ? t.dataset.key : null")
+
+    def go_offline(self, offline=True):
+        with self.d.context(self.d.CONTEXT_CHROME):
+            self.d.execute_script("Services.io.offline = arguments[0]; Services.io.manageOfflineStatus = false;", offline)
 
     def count_text(self):
         return self.js("const c=document.querySelector('#xbg-overlay .xbg-count'); return c ? c.textContent : null")
