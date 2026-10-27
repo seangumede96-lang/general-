@@ -2887,3 +2887,8 @@
 #xbg-overlay .xbg-ffwd.xbg-hidden {
   display: none;
 }
+
+/* The suggested choice in a sheet (e.g. "Back up now"): blue, not red. */
+#xbg-overlay .xbg-alert-action.xbg-go {
+  color: #0a84ff;
+}

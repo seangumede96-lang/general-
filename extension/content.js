@@ -471,6 +471,9 @@
   }
 
   function backup() {
+    settings.lastBackup = Date.now();
+    delete settings.backupSnooze;
+    saveSettings();
     const data = JSON.stringify({ app: "x-bookmarks-gallery", version: 1, collections, items: Object.fromEntries(savedItems) });
     // In the Android app, the app saves the file to Downloads itself.
     if (window.XbgAndroid && window.XbgAndroid.saveFile) {
@@ -888,7 +891,8 @@
 
   // The same kind of sheet with just a message and OK, for results too long
   // for a toast (e.g. what an import did).
-  function infoSheet(title, message) {
+  // `buttons`: [{ label, run, main }] (default: just OK).
+  function infoSheet(title, message, buttons = [{ label: "OK" }]) {
     closeSheet(true);
     if (ui.alert && ui.alert.isConnected) ui.alert.remove();
     clearTimeout(toastTimer);
@@ -898,7 +902,7 @@
       "div",
       { class: "xbg-alert xbg-action-sheet xbg-info-sheet", role: "alertdialog" },
       el("div", { class: "xbg-alert-text" }, el("div", { class: "xbg-alert-title" }, title), el("div", { class: "xbg-alert-message" }, message)),
-      el("button", { class: "xbg-alert-cancel", onclick: close }, "OK")
+      ...buttons.map((b) => el("button", { class: b.main ? "xbg-alert-action xbg-go" : "xbg-alert-cancel", onclick: () => { close(); if (b.run) b.run(); } }, b.label))
     );
     const backdrop = el("div", { class: "xbg-alert-backdrop xbg-sheet-style", onclick: (e) => e.target === backdrop && close() }, box);
     ui.overlay.append(backdrop);
@@ -922,6 +926,9 @@
         toggle("Dark mode", "", settings.theme !== "light", () => {
           settings.theme = settings.theme === "light" ? "dark" : "light";
           applyTheme();
+        }),
+        toggle("Remind me to back up", settings.lastBackup ? `Last backup ${ago(settings.lastBackup)}` : "Never backed up", settings.backupRemind !== false, () => {
+          settings.backupRemind = settings.backupRemind === false;
         }),
         toggle("Show hidden posts", hiddenPosts.size ? plural(hiddenPosts.size, "post") + " hidden" : "None hidden", !!settings.showHidden, () => {
           settings.showHidden = !settings.showHidden;
@@ -2539,6 +2546,34 @@
     );
   }
 
+  // --- Backup reminder ------------------------------------------------------
+  // Collections only live in this browser. A week after the last backup (or
+  // after you started making collections), the gallery offers one, once per
+  // visit; "Not now" asks again in 3 days.
+  const WEEK = 7 * 24 * 3600000;
+  let remindedThisVisit = false;
+  function maybeRemindBackup() {
+    if (remindedThisVisit || settings.backupRemind === false || !collections.length || ui.sheet || (ui.alert && ui.alert.isConnected)) return;
+    const now = Date.now();
+    if (!settings.lastBackup && !settings.backupBase) {
+      settings.backupBase = now; // the clock starts with your first collections
+      return saveSettings();
+    }
+    if ((settings.backupSnooze || 0) > now || now - (settings.lastBackup || settings.backupBase) < WEEK) return;
+    remindedThisVisit = true;
+    infoSheet(
+      "Back up your collections?",
+      (collections.length === 1
+        ? "Your collection is kept only in this browser. A backup file keeps it safe if Firefox’s data is ever cleared."
+        : `Your ${collections.length.toLocaleString()} collections are kept only in this browser. A backup file keeps them safe if Firefox’s data is ever cleared.`) +
+        (settings.lastBackup ? `\nLast backup: ${ago(settings.lastBackup)}.` : ""),
+      [
+        { label: "Back up now", main: true, run: backup },
+        { label: "Not now", run: () => { settings.backupSnooze = Date.now() + 3 * 24 * 3600000; saveSettings(); } },
+      ]
+    );
+  }
+
   // --- Opening and closing -------------------------------------------------
 
   function openGallery() {
@@ -2551,6 +2586,7 @@
     ui.overlay.classList.remove("xbg-hidden");
     updateBall();
     rebuild();
+    setTimeout(() => galleryOpen() && maybeRemindBackup(), 600);
     if (isBookmarks() && (loadState.state === "failed" || (!gotData && loadState.state === "idle"))) {
       // Background loading isn't working (or hasn't started): scroll the page instead.
       setTimeout(() => {

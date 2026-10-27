@@ -715,3 +715,78 @@ def test_video_controls_fit_on_a_phone():
           return [...row.children].every(c => {{ const x=c.getBoundingClientRect(); return x.left >= r.left - 1 && x.right <= r.right + 1; }})"""), "a video button is cut off"
     finally:
         b.quit()
+
+
+# --- Backup reminder ------------------------------------------------------------
+
+DAY_MS = 24 * 3600 * 1000
+
+
+def seed_old_backup(b, days_ago, **extra):
+    s = b.storage().get("xbg_settings") or {}
+    s.update({"lastBackup": int(time.time() * 1000) - days_ago * DAY_MS, **extra})
+    b.set_storage({"xbg_settings": s})
+
+
+def reminder_shown(b):
+    return b.visible(".xbg-alert") and "Back up your collections?" in b.q(".xbg-alert").text
+
+
+def test_backup_reminder_after_a_week(browser):
+    b = browser
+    open_loaded(b)
+    new_collection(b, "Precious")
+    time.sleep(0.8)
+    seed_old_backup(b, 8)
+    b.go("https://x.com/home")
+    b.open_gallery_with_ball()
+    b.wait(lambda d: reminder_shown(b), 5, "no backup reminder after 8 days")
+    assert "Last backup: 8 days ago" in b.q(".xbg-alert").text
+    assert "Your collection is kept only in this browser" in b.q(".xbg-alert").text
+    b.shot("R-reminder")
+    b.click_text("Back up now", ".xbg-alert button")
+    b.wait(lambda d: any(f.endswith(".json") for f in b.downloads()), 10, "no backup file")
+    time.sleep(0.5)
+    assert time.time() * 1000 - b.storage()["xbg_settings"]["lastBackup"] < 60000
+    b.go("https://x.com/home")
+    b.open_gallery_with_ball()
+    time.sleep(1.5)
+    assert not reminder_shown(b), "asked again right after backing up"
+
+
+def test_backup_reminder_not_now(browser):
+    b = browser
+    open_loaded(b)
+    new_collection(b, "Precious")
+    time.sleep(0.8)
+    seed_old_backup(b, 30)
+    b.go("https://x.com/home")
+    b.open_gallery_with_ball()
+    b.wait(lambda d: reminder_shown(b), 5)
+    b.click_text("Not now", ".xbg-alert button")
+    time.sleep(0.5)
+    assert not b.downloads()
+    b.go("https://x.com/home")
+    b.open_gallery_with_ball()
+    time.sleep(1.5)
+    assert not reminder_shown(b), "'Not now' should wait a few days"
+
+
+def test_no_reminder_for_new_collections_or_when_switched_off(browser):
+    b = browser
+    open_loaded(b)
+    new_collection(b, "Fresh")
+    b.go("https://x.com/home")
+    b.open_gallery_with_ball()
+    time.sleep(1.5)
+    assert not reminder_shown(b), "just started collecting: no reminder yet"
+    seed_old_backup(b, 8, backupRemind=False)
+    b.go("https://x.com/home")
+    b.open_gallery_with_ball()
+    time.sleep(1.5)
+    assert not reminder_shown(b), "reminders were switched off"
+    # The switch in settings.
+    b.click('.xbg-bar .xbg-close[aria-label="Options"]')
+    b.click_text("Remind me to back up\nLast backup 8 days ago", ".xbg-setting")
+    time.sleep(0.5)
+    assert b.storage()["xbg_settings"]["backupRemind"] is True
