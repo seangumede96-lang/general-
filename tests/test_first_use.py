@@ -10,6 +10,7 @@ def open_loaded(b, total=60):
     b.wait(lambda d: "loaded" in (b.js("return document.body.innerText") or "") or b.js("return !!window.__xbgHooked"), 10)
     b.open_gallery_with_ball()
     b.wait(lambda d: (b.status_text() or "").startswith("All"), 20, "bookmarks never finished loading")
+    time.sleep(1)  # the grid redraws with the last page a moment after the status says so
 
 
 def test_ball_shows_on_x_and_page_still_works(browser):

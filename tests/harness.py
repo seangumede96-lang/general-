@@ -59,7 +59,7 @@ def api_log():
 class Browser:
     """One Firefox Nightly with the extension loaded."""
 
-    def __init__(self, profile_dir=None, private=False, width=1280, height=900, install=True):
+    def __init__(self, profile_dir=None, private=False, width=1280, height=900, install=True, scale=None):
         self.own_profile = profile_dir is None
         self.profile_dir = profile_dir or tempfile.mkdtemp(prefix="xbg-prof-")
         os.makedirs(ARTIFACTS, exist_ok=True)
@@ -97,6 +97,10 @@ class Browser:
         }
         if private:
             prefs["browser.privatebrowsing.autostart"] = True
+        if scale:
+            # Firefox won't make windows narrower than ~450px; a bigger pixel
+            # scale gives a phone-sized page in CSS pixels instead.
+            prefs["layout.css.devPixelsPerPx"] = str(scale)
         for k, v in prefs.items():
             o.set_preference(k, v)
         # Lets the harness reach Firefox's own chrome code (to open extension pages).
@@ -210,6 +214,13 @@ class Browser:
     def first_tile_key(self):
         """The tile drawn top-left (tiles are positioned, so page order isn't screen order)."""
         return self.js("const t=[...document.querySelectorAll('#xbg-overlay .xbg-grid .xbg-tile')].sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)||parseFloat(a.style.left)-parseFloat(b.style.left))[0]; return t ? t.dataset.key : null")
+
+    def zoom(self, z):
+        """Page zoom (like Ctrl +). Used to get phone-sized pages, since
+        Firefox won't make a window narrower than about 500px."""
+        with self.d.context(self.d.CONTEXT_CHROME):
+            self.d.execute_script("gBrowser.selectedBrowser.fullZoom = arguments[0];", z)
+        time.sleep(0.3)
 
     def go_offline(self, offline=True):
         with self.d.context(self.d.CONTEXT_CHROME):

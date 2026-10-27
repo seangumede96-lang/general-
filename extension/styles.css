@@ -7,6 +7,9 @@
 
 #xbg-overlay {
   /* Dark theme (default). Accents are white; red where white wouldn't show. */
+  /* Dark scrollbars, not a white strip down the side of the gallery. */
+  color-scheme: dark;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
   --xbg-bg: #000;
   --xbg-surface: #16181c;
   --xbg-sheet: #16181c;
@@ -1365,6 +1368,8 @@
 /* --- Light theme ------------------------------------------------------------ */
 
 #xbg-overlay.xbg-light {
+  color-scheme: light;
+  scrollbar-color: rgba(0, 0, 0, 0.28) transparent;
   --xbg-bg: #f2f3f5;
   --xbg-surface: #ffffff;
   --xbg-sheet: #ffffff;
