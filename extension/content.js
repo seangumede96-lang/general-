@@ -121,6 +121,11 @@
     };
     if (Number.isFinite(c.used) && c.used > 0) out.used = c.used; // last time posts were added
     if (typeof c.cover === "string" && c.cover) out.cover = c.cover; // the picture chosen for its card
+    // Posts an import named that weren't loaded yet (status ids): added as they arrive.
+    if (Array.isArray(c.pending)) {
+      const pending = [...new Set(c.pending.map(String).filter((id) => /^\d{1,25}$/.test(id)))];
+      if (pending.length) out.pending = pending;
+    }
     return out;
   }
 
@@ -174,6 +179,7 @@
       const data = await store.get(Object.values(K));
       mergeSettings(data[K.settings]);
       collections = (data[K.collections] || []).map(cleanCollection).filter(Boolean);
+      pendingIndex = null;
       hiddenPosts.clear();
       if (Array.isArray(data[K.hidden])) for (const id of data[K.hidden]) if (typeof id === "string") hiddenPosts.add(id);
       savedSet = null;
@@ -221,6 +227,7 @@
     } catch (e) {
       /* start empty */
     }
+    resolvePending(allItems());
     applySettings(true);
   }
 
@@ -362,7 +369,10 @@
   // Collections keep their own copy only of posts that aren't in the saved
   // copy of your bookmarks, so even huge collections save in a moment.
   let collectionsTimer = null;
-  function saveCollections() {
+  // `background`: a change made by itself (imported posts arriving while
+  // bookmarks load), written at most every 10s instead of within a moment —
+  // with a big import that list is large, and loading brings many batches.
+  function saveCollections(background = false) {
     savedSet = null;
     const used = new Set(collections.flatMap((c) => c.keys));
     for (const key of used) {
@@ -375,6 +385,10 @@
     }
     for (const key of [...savedItems.keys()]) if (!used.has(key)) savedItems.delete(key);
     // Several quick changes in a row are written once.
+    if (background) {
+      if (!collectionsTimer) collectionsTimer = setTimeout(writeCollections, 10000);
+      return;
+    }
     clearTimeout(collectionsTimer);
     collectionsTimer = setTimeout(writeCollections, 400);
   }
@@ -401,6 +415,7 @@
     }
     collections = list.map(cleanCollection).filter(Boolean);
     savedSet = null;
+    pendingIndex = null;
     if (!ui) return;
     if (view === "collection" && !getCollection(openId)) return setView("collections");
     if (galleryOpen()) rebuild(false);
@@ -543,12 +558,19 @@
             named += raw.posts.length;
             matched += raw.posts.filter((id) => mediaOf.has(String(id))).length;
           }
-          if (raw && Array.isArray(raw.posts)) raw.keys = [...(raw.keys || []), ...raw.posts.flatMap((id) => mediaOf.get(String(id)) || [])];
+          if (raw && Array.isArray(raw.posts)) {
+            raw.keys = [...(raw.keys || []), ...raw.posts.flatMap((id) => mediaOf.get(String(id)) || [])];
+            raw.pending = [...(Array.isArray(raw.pending) ? raw.pending : []), ...raw.posts.map(String).filter((id) => !mediaOf.has(id))];
+          }
           const c = cleanCollection(raw);
           if (!c) continue;
           const existing = getCollection(c.id);
           if (existing) {
             existing.keys = [...new Set([...existing.keys, ...c.keys])];
+            if (c.pending) {
+              const have = new Set(existing.keys.map((k) => statusOf(getItem(k))));
+              existing.pending = [...new Set([...(existing.pending || []), ...c.pending])].filter((id) => !have.has(id));
+            }
             updated++;
           } else {
             collections.push(c);
@@ -563,13 +585,55 @@
         if (updated) parts.push(`${added ? "updated" : "Updated"} ${plural(updated, "folder")} you already had`);
         let msg = (parts.join(", ") || "Nothing to import").replace(/^a/, "A") + ".";
         if (named) msg += `\n${matched.toLocaleString()} of the ${named.toLocaleString()} posts in the file are in your saved bookmarks.`;
-        if (named && !matched) msg = "None of these posts are in your saved bookmarks yet. Open x.com/i/bookmarks, let it load, then import again.";
+        if (named && !matched) msg = "None of these posts are in your saved bookmarks yet.";
+        if (named > matched) msg += `\nThe other ${(named - matched).toLocaleString()} will be added to their folders by themselves as your bookmarks load (open x.com/i/bookmarks and let it finish).`;
+        pendingIndex = null;
         infoSheet("Import finished", msg);
       } catch (e) {
         infoSheet("Couldn’t import", "That file isn’t a collections backup.");
       }
     });
     input.click();
+  }
+
+  // --- Imported posts that arrive later -------------------------------------
+  // An import can name posts that weren't loaded yet. They wait in their
+  // collection's `pending` list and are added as soon as they load.
+  const statusOf = (item) => (item && ((item.tweet || "").match(/\/status\/(\d+)/) || [])[1]) || null;
+  let pendingIndex = null; // status id -> [collections waiting for it]
+  function getPendingIndex() {
+    if (!pendingIndex) {
+      pendingIndex = new Map();
+      for (const c of collections) for (const id of c.pending || []) {
+        if (!pendingIndex.has(id)) pendingIndex.set(id, []);
+        pendingIndex.get(id).push(c);
+      }
+    }
+    return pendingIndex;
+  }
+
+  function resolvePending(items) {
+    if (!items.length || !collections.some((c) => c.pending && c.pending.length)) return;
+    const index = getPendingIndex();
+    const found = new Map(); // collection -> Set of resolved ids
+    for (const it of items) {
+      const id = statusOf(it);
+      const waiting = id && index.get(id);
+      if (!waiting) continue;
+      for (const c of waiting) {
+        if (!c.keys.includes(it.key)) c.keys.push(it.key);
+        if (!found.has(c)) found.set(c, new Set());
+        found.get(c).add(id);
+      }
+    }
+    if (!found.size) return;
+    for (const [c, ids] of found) {
+      c.pending = c.pending.filter((id) => !ids.has(id));
+      if (!c.pending.length) delete c.pending;
+    }
+    pendingIndex = null;
+    saveCollections(true);
+    if (galleryOpen()) view === "all" ? scheduleRefresh() : rebuild(false);
   }
 
   // --- Messages from inject.js ---------------------------------------------
@@ -579,6 +643,7 @@
     if (Array.isArray(e.data.items)) {
       gotData = true;
       e.data.items.forEach(addItem);
+      resolvePending(e.data.items.map(clean).filter(Boolean));
     }
     if (e.data.status && typeof e.data.status.state === "string") {
       loadState = e.data.status;
@@ -1645,6 +1710,9 @@
       else if (s.state === "done") text = s.posts ? `All ${s.posts.toLocaleString()} bookmarks loaded` : "All loaded";
       else if (s.state === "failed" && s.nothing) text = "X didn’t send your bookmarks";
       else if (s.state === "failed") text = "Couldn’t load everything";
+    }
+    if (c && c.pending && c.pending.length) {
+      text = `${plural(c.pending.length, "more post")} will appear as your bookmarks load`;
     }
     ui.statusText.textContent = text;
     ui.refreshBtn.classList.toggle("xbg-hidden", !canRefresh);

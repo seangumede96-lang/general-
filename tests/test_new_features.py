@@ -542,3 +542,89 @@ def test_filter_chips_fit_on_a_phone():
         assert b.js("const row=document.querySelector('.xbg-bar .xbg-chips'); return row.scrollWidth <= row.clientWidth + 1"), "some filter chips are cut off"
     finally:
         b.quit()
+
+
+# --- Imported posts that weren't loaded yet -----------------------------------
+
+def post_id(g):
+    return str(1790000000000000000 + (g + 1000) * 7919)
+
+
+def test_imported_posts_are_added_when_they_load(browser, tmp_path):
+    b = browser
+    ctl(total=60)
+    open_loaded(b)
+    time.sleep(1)
+    # A sorted-folders file: posts 0-2 are loaded; 100, 102, 103 aren't bookmarked yet.
+    f = tmp_path / "sorted.json"
+    f.write_text(json.dumps({"collections": [{"id": "f1", "name": "Folder", "posts": [post_id(g) for g in (0, 1, 2, 100, 102, 103)]}]}))
+    b.fake_file_picker(str(f))
+    go_collections(b)
+    b.click_text("Restore from backup", ".xbg-empty button")
+    b.wait(lambda d: b.visible(".xbg-alert"), 10)
+    text = b.q(".xbg-alert").text
+    assert "3 of the 6 posts" in text and "other 3 will be added" in text, text
+    b.shot("I-import-pending")
+    b.click_text("OK", ".xbg-alert button")
+    open_collection(b, "Folder")
+    before = int(b.count_text())
+    assert b.status_text() == "3 more posts will appear as your bookmarks load", b.status_text()
+    time.sleep(0.6)
+    stored = b.storage()["xbg_collections"][0]
+    assert sorted(stored["pending"]) == sorted(post_id(g) for g in (100, 102, 103))
+    # Later those posts get bookmarked on X, and the bookmarks load again.
+    b.click(".xbg-bar .xbg-close[aria-label='Back']")
+    time.sleep(0.6)
+    ctl(total=120)
+    b.click('.xbg-tab[data-view="all"]')
+    time.sleep(0.4)
+    b.click('.xbg-bar .xbg-close[aria-label="Options"]')
+    b.click_text("Reload all bookmarks from X", ".xbg-sheet button")
+    b.wait(lambda d: (b.status_text() or "").startswith("All 120"), 30)
+    time.sleep(1.5)
+    open_collection(b, "Folder")
+    b.wait(lambda d: "pending" not in b.storage()["xbg_collections"][0], 15, "the found posts were never saved")
+    # Post 100 has two photos, 102 one photo, 103 a GIF.
+    assert int(b.count_text()) == before + 4, b.count_text()
+    assert not b.status_text()
+    stored = b.storage()["xbg_collections"][0]
+    assert "pending" not in stored
+    # Still there after a reload of the page.
+    b.d.refresh()
+    b.wait(lambda d: b.gallery_open(), 10)  # comes back inside the collection
+    time.sleep(1)
+    assert b.js("return document.querySelector('.xbg-title span').textContent") == "Folder"
+    assert int(b.count_text()) == before + 4
+
+
+def test_big_import_with_many_waiting_posts_stays_quick(browser, tmp_path):
+    b = browser
+    ctl(total=600, years_span_days=1)
+    b.go("https://x.com/home")
+    # 50,000 posts named, only some exist yet.
+    f = tmp_path / "big.json"
+    ids = [post_id(g) for g in range(0, 50000, 5)] * 5
+    f.write_text(json.dumps({"collections": [{"id": f"b{i}", "name": f"Big {i}", "posts": ids[i::5]} for i in range(5)]}))
+    b.go("https://x.com/i/bookmarks")
+    b.open_gallery_with_ball()
+    b.wait(lambda d: (b.status_text() or "").startswith("All 600"), 30)
+    b.fake_file_picker(str(f))
+    go_collections(b)
+    t = time.time()
+    b.click_text("Restore from backup", ".xbg-empty button")
+    b.wait(lambda d: b.visible(".xbg-alert"), 20)
+    assert time.time() - t < 8, "import took too long"
+    b.click_text("OK", ".xbg-alert button")
+    # Loading everything again with all those posts waiting stays quick.
+    b.click('.xbg-tab[data-view="all"]')
+    time.sleep(0.4)
+    ctl(total=900)
+    t = time.time()
+    b.click('.xbg-bar .xbg-close[aria-label="Options"]')
+    b.click_text("Reload all bookmarks from X", ".xbg-sheet button")
+    b.wait(lambda d: (b.status_text() or "").startswith("All 900"), 60)
+    print(f"reload with 50,000 waiting: {time.time() - t:.1f}s")
+    assert time.time() - t < 40
+    time.sleep(11)  # the background save
+    stored = b.storage()["xbg_collections"]
+    assert len(stored) == 5 and all(len(c.get("pending", [])) < 2000 for c in stored)

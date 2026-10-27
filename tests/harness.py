@@ -194,12 +194,25 @@ class Browser:
         self.js("arguments[0].scrollIntoView({block:'center'})", el)
         el.click()
 
-    def click_text(self, text, css="button"):
-        for el in self.qa(css):
-            if el.text.strip() == text and el.is_displayed():
-                el.click()
-                return el
-        raise AssertionError(f"no visible {css} with text {text!r}; have {[e.text for e in self.qa(css)]}")
+    def click_text(self, text, css="button", timeout=2.0):
+        """Click the visible element with this text. Retries for a moment while
+        it is still sliding into place (sheets animate in), like a person waits."""
+        from selenium.common.exceptions import ElementClickInterceptedException, ElementNotInteractableException, StaleElementReferenceException
+        end = time.time() + timeout
+        while True:
+            try:
+                for el in self.qa(css):
+                    if el.text.strip() == text and el.is_displayed():
+                        el.click()
+                        return el
+            except (ElementNotInteractableException, ElementClickInterceptedException, StaleElementReferenceException):
+                if time.time() > end:
+                    raise
+                time.sleep(0.1)
+                continue
+            if time.time() > end:
+                raise AssertionError(f"no visible {css} with text {text!r}; have {[e.text for e in self.qa(css)]}")
+            time.sleep(0.1)
 
     def shot(self, name):
         os.makedirs(ARTIFACTS, exist_ok=True)
