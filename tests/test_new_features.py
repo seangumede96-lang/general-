@@ -404,3 +404,141 @@ def test_long_press_tile_starts_selecting(browser):
     b.swipe(tile, 0, 0, ms=700, steps=2)  # finger held still for 0.7s
     time.sleep(0.3)
     assert b.visible(".xbg-select-bar") and b.q(".xbg-select-info").text == "1 selected"
+
+
+# --- Hide posts; which collections; "Not in a collection" ---------------------
+
+def visible_keys(b):
+    return set(b.js("return [...document.querySelectorAll('.xbg-grid .xbg-tile')].map(t=>t.dataset.key)"))
+
+
+def test_hide_a_post_and_bring_it_back(browser):
+    b = browser
+    open_loaded(b)
+    total = int(b.count_text())
+    key, post = open_post(b, 2)
+    b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+    time.sleep(0.3)
+    b.q(f"{post} .xbg-hide-btn").click()
+    time.sleep(0.5)
+    assert toast_text(b).startswith("Hidden from All posts")
+    assert not b.qa(post), "the hidden post stayed in the feed"
+    b.click(".xbg-feed-bar .xbg-close")
+    time.sleep(0.5)
+    assert key not in visible_keys(b) and int(b.count_text()) == total - 1
+    time.sleep(0.5)
+    assert len(b.storage()["xbg_hidden"]) == 1
+    # Survives a reload.
+    b.d.refresh()
+    b.open_gallery_with_ball()
+    b.wait(lambda d: (b.status_text() or "").startswith(("All", "Up to date")), 15)
+    time.sleep(1)
+    assert key not in visible_keys(b)
+    # "Show hidden posts" shows it faded, and from there it can be un-hidden.
+    b.click('.xbg-bar .xbg-close[aria-label="Options"]')
+    b.click_text("Show hidden posts\n1 post hidden", ".xbg-setting")
+    b.click_text("Done", ".xbg-sheet button")
+    time.sleep(0.5)
+    assert key in visible_keys(b)
+    assert "xbg-hidden-post" in b.q(f'.xbg-tile[data-key="{key}"]').get_attribute("class")
+    b.shot("H-hidden-shown")
+    b.q(f'.xbg-tile[data-key="{key}"]').click()
+    b.wait(lambda d: b.visible(".xbg-lightbox"), 5)
+    time.sleep(0.4)
+    b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+    assert b.q(f"{post} .xbg-hide-btn").get_attribute("aria-label") == "Show in All posts again"
+    b.q(f"{post} .xbg-hide-btn").click()
+    time.sleep(0.5)
+    assert b.storage()["xbg_hidden"] == []
+
+
+def test_undo_hide(browser):
+    b = browser
+    open_loaded(b)
+    key, post = open_post(b, 1)
+    b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+    b.q(f"{post} .xbg-hide-btn").click()
+    time.sleep(0.4)
+    b.click(".xbg-toast .xbg-toast-action")
+    time.sleep(0.5)
+    b.click(".xbg-feed-bar .xbg-close")
+    time.sleep(0.5)
+    assert key in visible_keys(b)
+
+
+def test_hidden_post_stays_in_its_collection(browser):
+    b = browser
+    open_loaded(b)
+    keys = fill_collection(b, "Keep", 1)
+    b.click('.xbg-tab[data-view="all"]')
+    time.sleep(0.4)
+    b.q(f'.xbg-tile[data-key="{keys[0]}"]').click()
+    b.wait(lambda d: b.visible(".xbg-lightbox"), 5)
+    time.sleep(0.4)
+    post = f'.xbg-post[data-key="{keys[0]}"]'
+    b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+    b.q(f"{post} .xbg-hide-btn").click()
+    time.sleep(0.4)
+    b.click(".xbg-feed-bar .xbg-close")
+    time.sleep(0.4)
+    open_collection(b, "Keep")
+    assert b.count_text() == "1" and keys[0] in visible_keys(b)
+
+
+def test_post_shows_which_collections_it_is_in(browser):
+    b = browser
+    open_loaded(b)
+    keys = fill_collection(b, "Trips", 1)
+    new_collection(b, "Faves")
+    b.click('.xbg-tab[data-view="all"]')
+    time.sleep(0.4)
+    b.q(f'.xbg-tile[data-key="{keys[0]}"]').click()
+    b.wait(lambda d: b.visible(".xbg-lightbox"), 5)
+    time.sleep(0.4)
+    post = f'.xbg-post[data-key="{keys[0]}"]'
+    assert b.q(f"{post} .xbg-post-in").text == "In Trips"
+    b.js(f"document.querySelector('{post} .xbg-save-btn').click()")
+    b.click_text("Faves\n0 posts", ".xbg-pick")
+    b.click_text("Done", ".xbg-sheet button")
+    time.sleep(0.4)
+    assert b.q(f"{post} .xbg-post-in").text in ("In Trips, Faves", "In Faves, Trips")
+    b.shot("H-in-collections")
+
+
+def test_not_in_a_collection_filter(browser):
+    b = browser
+    open_loaded(b)
+    total = int(b.count_text())
+    keys = fill_collection(b, "Sorted", 3)
+    b.click('.xbg-tab[data-view="all"]')
+    time.sleep(0.4)
+    b.click_text("Unsorted", ".xbg-chip")
+    time.sleep(0.5)
+    shown = visible_keys(b)
+    assert not (set(keys) & shown)
+    assert b.count_text() == f"{total - 3} unsorted"
+    assert b.q(".xbg-unsorted").get_attribute("aria-pressed") == "true"
+    # Works with Photos/Videos, and switches off again.
+    b.click('.xbg-chip[data-filter="video"]')
+    time.sleep(0.4)
+    assert set(b.js("return [...document.querySelectorAll('.xbg-grid .xbg-tile')].map(t=>t.getAttribute('aria-label'))")) <= {"Video"}
+    b.click('.xbg-chip[data-filter="all"]')
+    b.click_text("Unsorted", ".xbg-chip")
+    time.sleep(0.4)
+    assert int(b.count_text()) == total
+
+
+def test_filter_chips_fit_on_a_phone():
+    b = Browser(width=500, height=1000)
+    try:
+        open_loaded(b)
+        b.zoom(1.3)
+        time.sleep(0.5)
+        b.shot("H-phone-chips")
+        # Nothing pushes the page sideways; the Newest button stays on screen.
+        assert b.js("return document.querySelector('.xbg-bar').scrollWidth <= document.querySelector('.xbg-bar').clientWidth + 1")
+        assert b.js("const r=document.querySelector('.xbg-bar .xbg-sort').getBoundingClientRect(); return r.right <= document.querySelector('.xbg-bar').getBoundingClientRect().right + 1")
+        # Every filter chip is fully on screen (none hidden off the edge).
+        assert b.js("const row=document.querySelector('.xbg-bar .xbg-chips'); return row.scrollWidth <= row.clientWidth + 1"), "some filter chips are cut off"
+    finally:
+        b.quit()

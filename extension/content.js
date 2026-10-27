@@ -41,7 +41,14 @@
 
   const SAFE_MEDIA = /^https:\/\/(pbs|video)\.twimg\.com\//;
   const SAFE_TWEET = /^https:\/\/x\.com\/[^\s"'<>]+$/;
-  const K = { collections: "xbg_collections", items: "xbg_items", settings: "xbg_settings", cache: "xbg_cache" };
+  const K = { collections: "xbg_collections", items: "xbg_items", settings: "xbg_settings", cache: "xbg_cache", hidden: "xbg_hidden" };
+
+  // Posts hidden from "All posts" (their status id, or the media key). They
+  // stay bookmarked on X and stay in any collection.
+  const hiddenPosts = new Set();
+  const postIdOf = (item) => ((item.tweet || "").match(/\/status\/(\d+)/) || [])[1] || item.key;
+  const isHidden = (item) => hiddenPosts.size > 0 && hiddenPosts.has(postIdOf(item));
+  let unsortedOnly = false; // "Not in a collection" filter
 
   const isBookmarks = () => location.pathname.startsWith("/i/bookmarks");
   const isMainBookmarks = () => location.pathname.replace(/\/$/, "") === "/i/bookmarks";
@@ -167,6 +174,8 @@
       const data = await store.get(Object.values(K));
       mergeSettings(data[K.settings]);
       collections = (data[K.collections] || []).map(cleanCollection).filter(Boolean);
+      hiddenPosts.clear();
+      if (Array.isArray(data[K.hidden])) for (const id of data[K.hidden]) if (typeof id === "string") hiddenPosts.add(id);
       savedSet = null;
       for (const raw of Object.values(data[K.items] || {})) {
         const item = clean(raw);
@@ -405,6 +414,14 @@
   // later save from this tab doesn't put the old ones back.
   ext.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
+    if (changes[K.hidden] && Array.isArray(changes[K.hidden].newValue)) {
+      const nv = changes[K.hidden].newValue;
+      if (nv.length !== hiddenPosts.size || nv.some((id) => !hiddenPosts.has(id))) {
+        hiddenPosts.clear();
+        nv.forEach((id) => hiddenPosts.add(id));
+        if (galleryOpen()) rebuild(false);
+      }
+    }
     const cc = changes[K.collections];
     if (cc && Array.isArray(cc.newValue) && !ownCollectionWrites.includes(JSON.stringify(cc.newValue))) {
       adoptCollections(cc.newValue, changes[K.items] && changes[K.items].newValue);
@@ -841,6 +858,10 @@
           settings.theme = settings.theme === "light" ? "dark" : "light";
           applyTheme();
         }),
+        toggle("Show hidden posts", hiddenPosts.size ? plural(hiddenPosts.size, "post") + " hidden" : "None hidden", !!settings.showHidden, () => {
+          settings.showHidden = !settings.showHidden;
+          rebuild(false);
+        }),
         el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); reloadEverything(); } }, "Reload all bookmarks from X"),
         el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); exportForSorting(); } }, "Export all bookmarks for sorting"),
         el("button", { class: "xbg-secondary", onclick: () => { closeSheet(); restore(); } }, "Import sorted folders"),
@@ -933,6 +954,12 @@
     for (const [value, label] of [["all", "All"], ["photo", "Photos"], ["video", "Videos"]]) {
       filters.append(el("button", { class: "xbg-chip", "data-filter": value, onclick: () => setFilter(value) }, label));
     }
+    // Posts in no collection yet: handy when sorting a big library.
+    filters.append(el("button", { class: "xbg-chip xbg-unsorted", "aria-pressed": "false", onclick: () => {
+      unsortedOnly = !unsortedOnly;
+      syncControls();
+      rebuild();
+    }, title: "Posts that aren’t in any collection yet" }, "Unsorted"));
     const sortBtn = el("button", { class: "xbg-chip xbg-sort", onclick: sortMenu });
     const layouts = el("div", { class: "xbg-seg" });
     for (const [value, label] of [["grid", ""], ["months", "Months"], ["years", "Years"]]) {
@@ -1563,13 +1590,18 @@
 
   function syncControls() {
     if (!ui) return;
-    ui.filters.querySelectorAll(".xbg-chip").forEach((b) => b.classList.toggle("xbg-on", b.dataset.filter === filter));
+    ui.filters.querySelectorAll(".xbg-chip[data-filter]").forEach((b) => b.classList.toggle("xbg-on", b.dataset.filter === filter));
+    const unsorted = ui.filters.querySelector(".xbg-unsorted");
+    unsorted.classList.toggle("xbg-on", unsortedOnly);
+    unsorted.setAttribute("aria-pressed", String(unsortedOnly));
+    unsorted.classList.toggle("xbg-hidden", view !== "all");
     ui.layouts.querySelectorAll("button").forEach((b) => b.classList.toggle("xbg-on", b.dataset.layout === settings.layout));
     // Up and down arrows drawn apart (the ⇅ character squeezes them together).
     if (!ui.sortBtn.firstChild) {
       ui.sortBtn.innerHTML = '<svg class="xbg-sort-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20V4M2.5 7.5 6 4l3.5 3.5"/><path d="M18 4v16M14.5 16.5 18 20l3.5-3.5"/></svg><span></span>';
     }
     ui.sortBtn.lastChild.textContent = settings.sort === "oldest" ? "Oldest" : "Newest";
+    ui.sortBtn.setAttribute("aria-label", "Sort: " + ui.sortBtn.lastChild.textContent + " first");
   }
 
   function updateHeader() {
@@ -1585,6 +1617,8 @@
     const searching = searchTerms.length && view !== "collections";
     ui.count.textContent = searching
       ? `${current.length.toLocaleString()} found`
+      : unsortedOnly && view === "all"
+      ? `${current.length.toLocaleString()} unsorted`
       : (c ? c.keys.length : view === "collections" ? collections.length : totalCount || allItems().length).toLocaleString();
     ui.count.title = view === "collections" ? "collections" : searching ? "pictures and videos matching your search" : "pictures and videos (a post can have up to 4)";
     ui.tabs.querySelectorAll(".xbg-tab").forEach((t) => t.classList.toggle("xbg-on", t.dataset.view === view));
@@ -1833,6 +1867,7 @@
 
   function matches(item) {
     if (filter !== "all" && (filter === "photo" ? item.type !== "photo" : item.type === "photo")) return false;
+    if (unsortedOnly && view === "all" && isSaved(item.key)) return false;
     return !searchTerms.length || matchesSearch(item);
   }
 
@@ -1867,7 +1902,8 @@
 
   function computeEntries() {
     const c = view === "collection" ? getCollection(openId) : null;
-    const base = c ? c.keys.map(getItem).filter(Boolean) : allItems();
+    // Hidden posts leave "All posts" (unless you ask to see them), not collections.
+    const base = c ? c.keys.map(getItem).filter(Boolean) : settings.showHidden ? allItems() : allItems().filter((it) => !isHidden(it));
     totalCount = c ? c.keys.length : base.length;
     const dir = settings.sort === "oldest" ? -1 : 1;
     // Dated posts first, by date; ties and undated posts keep their bookmark order.
@@ -1994,7 +2030,7 @@
   }
 
   function makeTile(item) {
-    const tile = el("button", { class: "xbg-tile" + (selected.has(item.key) ? " xbg-selected" : ""), "data-key": item.key, "aria-label": item.type === "photo" ? "Photo" : "Video" });
+    const tile = el("button", { class: "xbg-tile" + (selected.has(item.key) ? " xbg-selected" : "") + (isHidden(item) ? " xbg-hidden-post" : ""), "data-key": item.key, "aria-label": item.type === "photo" ? "Photo" : "Video" });
     // The picture is asked for once the tile is on screen and the scrolling has slowed (see loadThumbs).
     tile.append(el("img", { "data-src": item.thumb, decoding: "async", alt: "", referrerpolicy: "no-referrer" }));
     if (item.type !== "photo") tile.append(el("span", { class: "xbg-badge xbg-badge-time" }, item.type === "gif" ? "GIF" : "▶"));
@@ -2645,7 +2681,8 @@
       "div",
       { class: "xbg-post-head" },
       el("span", { class: "xbg-post-user" }, user && user !== "i" ? "@" + user : "Post"),
-      el("span", { class: "xbg-post-date" }, d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "")
+      el("span", { class: "xbg-post-date" }, d ? new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : ""),
+      el("span", { class: "xbg-post-in" }) // which collections it's in (paintSave fills it)
     );
     // Size the box from the media's real shape (when known) so the feed
     // doesn't jump as pictures load.
@@ -2685,6 +2722,9 @@
     save.addEventListener("contextmenu", (e) => e.preventDefault()); // a long-press isn't a right-click menu
     paintSave(save, item.key);
     const actions = el("div", { class: "xbg-post-actions" }, save);
+    const hide = el("button", { class: "xbg-fab-btn xbg-hide-btn", onclick: () => toggleHidden(item) });
+    paintHide(hide, item);
+    actions.append(hide);
     // Photos can be zoomed: this button, or pinching the picture.
     if (item.type === "photo") actions.append(el("button", { class: "xbg-fab-btn xbg-zoom-btn", "aria-label": "Zoom", onclick: () => openZoom(item) }, icon(ZOOM_PATH, false)));
     if (item.tweet) {
@@ -2694,6 +2734,7 @@
       actions.append(open);
     }
     media.append(head, actions);
+    paintSave(save, item.key); // again, now the "In …" line is there to fill
     // The buttons (and a video's controls) stay hidden until you tap the post.
     // Two quick taps save it to the collection used last (like Instagram's
     // double-tap); a single tap waits a moment to be sure it isn't the first.
@@ -3262,6 +3303,53 @@
     btn.replaceChildren(icon(BOOKMARK_PATH, saved));
     btn.setAttribute("aria-label", saved ? "Saved to a collection" : "Save to a collection");
     btn.classList.toggle("xbg-on", saved);
+    // And the names of the collections it's in, under the name and date.
+    const line = btn.closest(".xbg-post-media") && btn.closest(".xbg-post-media").querySelector(".xbg-post-in");
+    if (line) {
+      const names = saved ? collections.filter((c) => c.keys.includes(key)).map((c) => c.name) : [];
+      line.textContent = names.length ? "In " + names.join(", ") : "";
+    }
+  }
+
+  const EYE_OFF_PATH = "M3 3l18 18M10.6 5.1A10.6 10.6 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-2.9 3.8M6.6 6.6C3.9 8.4 2.5 12 2.5 12S6 19 12 19a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2";
+  const EYE_PATH = "M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z";
+  function paintHide(btn, item) {
+    const hidden = isHidden(item);
+    btn.replaceChildren(icon(hidden ? EYE_PATH : EYE_OFF_PATH, false));
+    btn.setAttribute("aria-label", hidden ? "Show in All posts again" : "Hide from All posts");
+  }
+
+  function saveHidden() {
+    store.set({ [K.hidden]: [...hiddenPosts] }).catch(() => toast("Couldn’t save that"));
+  }
+
+  // Hide a post from "All posts" (or bring it back), with Undo.
+  function toggleHidden(item, undoing = false) {
+    const id = postIdOf(item);
+    const hide = !hiddenPosts.has(id);
+    if (hide) hiddenPosts.add(id);
+    else hiddenPosts.delete(id);
+    saveHidden();
+    for (const p of ui.feed.querySelectorAll(".xbg-post")) {
+      const it = getItem(p.dataset.key);
+      if (it && postIdOf(it) === id) paintHide(p.querySelector(".xbg-hide-btn"), it);
+    }
+    // Gone from "All posts" now: take it out of the feed too.
+    if (hide && view === "all" && !settings.showHidden && feedOpen()) {
+      for (const p of [...ui.feed.querySelectorAll(".xbg-post")]) {
+        const it = getItem(p.dataset.key);
+        if (it && postIdOf(it) === id) p.remove();
+      }
+      rebuild(false);
+      const keys = [...ui.feed.querySelectorAll(".xbg-post")].map((p) => p.dataset.key);
+      if (!keys.length) closeLightbox();
+      else {
+        feedStart = current.findIndex((it) => it.key === keys[0]);
+        feedEnd = current.findIndex((it) => it.key === keys[keys.length - 1]) + 1;
+      }
+    } else rebuild(false);
+    if (undoing) return;
+    toast(hide ? "Hidden from All posts" : "Showing in All posts again", { label: "Undo", run: () => toggleHidden(item, true) });
   }
 
   function addFeedPosts(from, to, atTop) {

@@ -2799,3 +2799,65 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Hidden posts, when shown anyway: faded. */
+#xbg-overlay .xbg-tile.xbg-hidden-post img {
+  opacity: 0.35 !important;
+}
+
+/* "In Faves, Trips" under a post's name and date. */
+#xbg-overlay .xbg-post-in {
+  flex-basis: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+#xbg-overlay .xbg-post-in:empty {
+  display: none;
+}
+
+#xbg-overlay .xbg-chips .xbg-chip.xbg-hidden {
+  display: none;
+}
+
+#xbg-overlay .xbg-post-head {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+/* The filter chips scroll sideways on a narrow screen instead of squeezing. */
+#xbg-overlay .xbg-controls .xbg-chips {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#xbg-overlay .xbg-controls .xbg-chips .xbg-chip {
+  flex: none;
+}
+
+/* Narrow screens: slimmer chips so All · Photos · Videos · Unsorted and the
+   sort button all fit on one line. */
+@media (max-width: 440px) {
+  #xbg-overlay .xbg-controls .xbg-chip {
+    padding-left: 11px;
+    padding-right: 11px;
+    font-size: 14px;
+  }
+
+  #xbg-overlay .xbg-controls .xbg-chips {
+    gap: 5px;
+  }
+
+  /* The sort button keeps just its arrows; the menu says Newest / Oldest. */
+  #xbg-overlay .xbg-controls .xbg-sort span {
+    display: none;
+  }
+
+  #xbg-overlay .xbg-controls .xbg-sort {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
