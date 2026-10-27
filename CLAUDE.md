@@ -96,6 +96,26 @@ Every test also fails if the extension logged any error to the console or page.
 12. **White scrollbar strip down the dark gallery** — added `color-scheme` and
     `scrollbar-color` on `#xbg-overlay`.
 
+## Fixed from real-phone feedback (Oct 27 2026, `tests/test_phone_feedback.py`)
+13. **Status line cut off on a phone** ("Partly loaded … · open your bookmar…")
+    and it pushed Select / ⋯ off screen. The status now has its own full-width
+    line under the title and wraps to two lines; the title has `min-width: 0`.
+14. **Import/restore result was a one-line toast running off both sides.** Now
+    an action-sheet popup like the delete question (`infoSheet()`: "Import
+    finished" + message lines + OK). All toasts also wrap within the screen.
+15. **Saved post's button was a plain white circle** (white background + white
+    icon). Now the same dark circle as "open post", with a white filled bookmark.
+16. **"Open post on X" did nothing visible.** X catches clicks on any x.com link
+    at the page level and routed to the post *behind* the gallery (address bar
+    changed, gallery stayed). Owner chose: open in the **same tab**. A
+    window-level capture listener (added at document_start, before X's) takes
+    the click; `showPostOnX()` hides the gallery as is (`away`), pauses videos
+    and moves X to the post (pushState + popstate nudge). Back to the
+    bookmarks URL — or the ball — brings it back on the same post
+    (`comeBack()`); the gallery's own back steps stay untouched underneath.
+    Modified clicks / long-press "open in new tab" still work (target=_blank).
+    The mock now intercepts link clicks like X, so the test reproduces it.
+
 ## Still open / not verified
 - **Real x.com is not tested** — only the mock, built from how inject.js reads
   X's responses. If X changes its GraphQL shape or headers, only a manual
@@ -136,4 +156,10 @@ Every test also fails if the extension logged any error to the console or page.
   `extensions.webextOptionalPermissionPrompts=false` pref.
 - Check screenshots by sampling pixels when a style "should" work — the
   computed CSS said `color-scheme: dark` while the scrollbar was still white.
+- **X hijacks clicks on x.com links anywhere in its page** (our overlay is in
+  its document). Any link we show must be handled by us first (window capture
+  listener registered at document_start), never left to the browser default.
+- Check UI on a phone-width page (`zoom(1.3)` on a 500px window): nowrap text
+  that's fine on desktop gets cut off there. Measure with `on_screen()`;
+  inline elements report 0 width, so measure their block parent.
 - Commit after each verified fix; run the whole suite + lint before committing.

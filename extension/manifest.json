@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X Bookmarks Gallery",
-  "version": "1.13.1",
+  "version": "1.13.2",
   "description": "View the photos and videos from your X bookmarks in a 4-column grid.",
   "icons": {
     "48": "icons/icon-48.png",
