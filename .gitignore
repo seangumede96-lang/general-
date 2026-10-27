@@ -1,0 +1,4 @@
+tests/artifacts/
+__pycache__/
+.pytest_cache/
+web-ext-artifacts/

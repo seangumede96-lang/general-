@@ -1,0 +1,2590 @@
+/* All rules are scoped to the gallery's own elements so X's page is untouched. */
+
+#xbg-overlay,
+#xbg-overlay * {
+  box-sizing: border-box;
+}
+
+#xbg-overlay {
+  /* Dark theme (default). Accents are white; red where white wouldn't show. */
+  --xbg-bg: #000;
+  --xbg-surface: #16181c;
+  --xbg-sheet: #16181c;
+  --xbg-text: #e7e9ea;
+  --xbg-muted: #8b98a5;
+  --xbg-accent: #fff;
+  --xbg-on-accent: #000;
+  --xbg-red: #ff3b30;
+  --xbg-line: #2f3336;
+  --xbg-line-strong: #536471;
+  --xbg-bar-bg: rgba(0, 0, 0, 0.92);
+  --xbg-seg-on: #333639;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  background: var(--xbg-bg);
+  color: var(--xbg-text);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+#xbg-overlay.xbg-hidden,
+#xbg-overlay .xbg-hidden,
+#xbg-ball.xbg-hidden {
+  display: none !important;
+}
+
+#xbg-overlay button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Header */
+#xbg-overlay .xbg-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  transition: transform 0.22s ease;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: var(--xbg-bar-bg);
+  border-bottom: 1px solid var(--xbg-line);
+}
+
+#xbg-overlay .xbg-bar.xbg-bar-hidden {
+  transform: translateY(-100%);
+}
+
+#xbg-overlay .xbg-close {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 20px;
+}
+
+#xbg-overlay .xbg-title {
+  flex: 1;
+  font-weight: 700;
+  font-size: 17px;
+}
+
+#xbg-overlay .xbg-count {
+  color: var(--xbg-muted);
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-status {
+  color: var(--xbg-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-status:empty {
+  display: none;
+}
+
+#xbg-overlay .xbg-chips {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+#xbg-overlay .xbg-chip {
+  border: 1px solid var(--xbg-line-strong);
+  border-radius: 999px;
+  background: transparent;
+  padding: 5px 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#xbg-overlay .xbg-chip.xbg-on {
+  background: var(--xbg-accent);
+  border-color: var(--xbg-accent);
+  color: var(--xbg-on-accent);
+}
+
+/* Grid */
+#xbg-overlay .xbg-scroll {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+#xbg-overlay .xbg-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  max-width: 935px;
+  margin: 0 auto;
+}
+
+#xbg-overlay .xbg-tile {
+  position: relative;
+  -webkit-touch-callout: none;
+  user-select: none;
+  display: block;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: var(--xbg-surface);
+  /* Let the browser skip work for tiles that are far off screen. */
+  content-visibility: auto;
+  contain-intrinsic-size: 130px 130px;
+}
+
+#xbg-overlay .xbg-tile img,
+#xbg-overlay .xbg-tile video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+#xbg-overlay .xbg-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+#xbg-overlay .xbg-empty {
+  margin: 0;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--xbg-muted);
+}
+
+#xbg-overlay .xbg-empty:empty {
+  display: none;
+}
+
+#xbg-overlay .xbg-empty a {
+  color: var(--xbg-accent);
+}
+
+/* Lightbox */
+#xbg-overlay .xbg-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  background: var(--xbg-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+#xbg-overlay .xbg-note {
+  margin: 12px 20px 0;
+  color: var(--xbg-muted);
+  text-align: center;
+}
+
+#xbg-overlay .xbg-open {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--xbg-accent);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* --- Collections --------------------------------------------------------- */
+
+#xbg-overlay .xbg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+#xbg-overlay .xbg-text-btn,
+#xbg-overlay .xbg-link {
+  border: 0;
+  background: transparent;
+  padding: 6px 4px;
+  color: var(--xbg-accent);
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-link {
+  font-weight: 400;
+  font-size: 14px;
+}
+
+#xbg-overlay .xbg-tabs {
+  display: flex;
+  /* Leave clear space between the tab underline and the buttons below it. */
+  margin: 0 -12px 6px;
+  border-bottom: 1px solid var(--xbg-line);
+  width: calc(100% + 24px);
+}
+
+#xbg-overlay .xbg-tab {
+  flex: 1;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-tab.xbg-on {
+  color: var(--xbg-text);
+  border-bottom-color: var(--xbg-text);
+}
+
+#xbg-overlay .xbg-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px 12px;
+  max-width: 935px;
+  margin: 0 auto;
+  padding: 16px 12px 0;
+}
+
+#xbg-overlay .xbg-card {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#xbg-overlay .xbg-card-cover {
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+}
+
+#xbg-overlay .xbg-card-name {
+  margin-top: 6px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-card-count {
+  color: var(--xbg-muted);
+  font-size: 13px;
+}
+
+/* Cover made of up to 4 thumbnails */
+#xbg-overlay .xbg-mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  overflow: hidden;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-mosaic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="1"] img {
+  grid-column: 1 / 3;
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="2"] img {
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-mosaic[data-n="3"] img:first-child {
+  grid-row: 1 / 3;
+}
+
+#xbg-overlay .xbg-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--xbg-line-strong);
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 32px;
+}
+
+#xbg-overlay .xbg-backup {
+  display: block;
+  margin-top: 24px;
+}
+
+/* Select mode */
+#xbg-overlay .xbg-tile.xbg-selected::after {
+  content: "✓";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--xbg-accent);
+  color: var(--xbg-on-accent);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected img {
+  opacity: 0.6;
+}
+
+#xbg-overlay.xbg-selecting .xbg-tile:not(.xbg-selected)::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+#xbg-overlay .xbg-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--xbg-line);
+  background: var(--xbg-bg);
+}
+
+#xbg-overlay .xbg-select-info {
+  flex: 1;
+  color: var(--xbg-muted);
+  font-size: 14px;
+}
+
+#xbg-overlay .xbg-select-bar .xbg-primary,
+#xbg-overlay .xbg-select-bar .xbg-secondary {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+}
+
+/* Buttons used in sheets and bars */
+#xbg-overlay .xbg-primary,
+#xbg-overlay .xbg-secondary {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-primary {
+  border: 0;
+  background: var(--xbg-accent);
+  color: var(--xbg-on-accent);
+}
+
+#xbg-overlay .xbg-secondary {
+  border: 1px solid var(--xbg-line-strong);
+  background: transparent;
+}
+
+#xbg-overlay .xbg-primary:disabled,
+#xbg-overlay .xbg-secondary:disabled {
+  opacity: 0.4;
+}
+
+#xbg-overlay .xbg-primary.xbg-danger {
+  background: #f4212e;
+  color: #fff;
+}
+
+#xbg-overlay .xbg-danger-text {
+  color: #f4212e;
+}
+
+/* Bottom sheet */
+#xbg-overlay .xbg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+#xbg-overlay .xbg-sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 8px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  border-radius: 16px 16px 0 0;
+  background: var(--xbg-sheet);
+}
+
+#xbg-overlay .xbg-sheet-handle {
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 2px;
+  background: var(--xbg-line-strong);
+}
+
+#xbg-overlay .xbg-sheet-title {
+  margin-bottom: 8px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+#xbg-overlay .xbg-sheet-text {
+  margin: 0 0 6px;
+  color: var(--xbg-muted);
+  text-align: center;
+}
+
+#xbg-overlay .xbg-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--xbg-line-strong);
+  border-radius: 8px;
+  background: var(--xbg-bg);
+  color: var(--xbg-text);
+  font: inherit;
+  font-size: 16px;
+}
+
+#xbg-overlay .xbg-input:focus {
+  outline: none;
+  border-color: var(--xbg-accent);
+}
+
+#xbg-overlay .xbg-picker {
+  display: flex;
+  flex-direction: column;
+}
+
+#xbg-overlay .xbg-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#xbg-overlay .xbg-pick-cover {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  font-size: 22px;
+}
+
+#xbg-overlay .xbg-pick-name {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-pick-name small {
+  color: var(--xbg-muted);
+  font-weight: 400;
+  font-size: 13px;
+}
+
+#xbg-overlay .xbg-pick-check {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--xbg-line-strong);
+  text-align: center;
+  line-height: 22px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-pick.xbg-on .xbg-pick-check {
+  border-color: var(--xbg-accent);
+  background: var(--xbg-accent);
+  color: var(--xbg-on-accent);
+}
+
+/* Lightbox save button */
+
+#xbg-overlay .xbg-save {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-save.xbg-on {
+  border-color: var(--xbg-text);
+  background: var(--xbg-text);
+  color: #000;
+}
+
+/* Small message at the bottom */
+#xbg-overlay .xbg-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 90px;
+  z-index: 7;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--xbg-accent);
+  color: var(--xbg-on-accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* --- Sorting, months and years --------------------------------------------- */
+
+#xbg-overlay .xbg-controls {
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+#xbg-overlay .xbg-chips {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+#xbg-overlay .xbg-sort {
+  flex: none;
+}
+
+#xbg-overlay .xbg-seg {
+  display: flex;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-seg button {
+  flex: 1;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-seg button.xbg-on {
+  background: var(--xbg-seg-on);
+  color: var(--xbg-text);
+}
+
+#xbg-overlay .xbg-section {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 18px 12px 8px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+#xbg-overlay .xbg-section-count {
+  color: var(--xbg-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-sentinel {
+  height: 1px;
+}
+
+#xbg-overlay .xbg-sheet-label {
+  margin: 12px 0 2px;
+  color: var(--xbg-muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#xbg-overlay .xbg-status .xbg-link {
+  padding: 0 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Sliding between "All posts" and "Collections" */
+@keyframes xbg-in-left {
+  from { transform: translateX(28%); opacity: 0.3; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes xbg-in-right {
+  from { transform: translateX(-28%); opacity: 0.3; }
+  to { transform: none; opacity: 1; }
+}
+
+#xbg-overlay .xbg-scroll.xbg-slide-left > * {
+  animation: xbg-in-left 0.22s ease-out;
+}
+
+#xbg-overlay .xbg-scroll.xbg-slide-right > * {
+  animation: xbg-in-right 0.22s ease-out;
+}
+
+/* --- Period bar (years, then months of the chosen year) --------------------- */
+
+#xbg-overlay .xbg-periods {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 -12px;
+}
+
+#xbg-overlay .xbg-period-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0 12px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+#xbg-overlay .xbg-period-row::-webkit-scrollbar {
+  display: none;
+}
+
+#xbg-overlay .xbg-pchip {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--xbg-line);
+  border-radius: 8px;
+  background: var(--xbg-surface);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-pchip small {
+  color: var(--xbg-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+#xbg-overlay .xbg-pchip.xbg-on {
+  background: var(--xbg-accent);
+  border-color: var(--xbg-accent);
+  color: var(--xbg-on-accent);
+}
+
+#xbg-overlay .xbg-pchip.xbg-on small {
+  color: var(--xbg-on-accent); opacity: 0.75;
+}
+
+/* --- Post feed (opens when you tap a post) ---------------------------------- */
+
+#xbg-overlay .xbg-feed-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--xbg-line);
+  background: var(--xbg-bg);
+}
+
+#xbg-overlay .xbg-feed {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+#xbg-overlay .xbg-post {
+  max-width: 600px;
+  margin: 0 auto 2px;
+}
+
+#xbg-overlay .xbg-feed {
+  touch-action: pan-y pinch-zoom;
+}
+
+#xbg-overlay .xbg-post-media {
+  position: relative;
+  width: 100%;
+  background: var(--xbg-surface);
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-post-media img,
+#xbg-overlay .xbg-post-media video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+/* Name and date laid over the top of the picture */
+#xbg-overlay .xbg-post-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px 28px;
+  background: linear-gradient(rgba(0, 0, 0, 0.55), transparent);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+#xbg-overlay .xbg-post-user {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-post-date {
+  flex: none;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+}
+
+/* Save / Open post as round buttons side by side at the bottom centre */
+#xbg-overlay .xbg-post-actions {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 16px;
+}
+
+/* Leave room for a video's own play/seek bar */
+#xbg-overlay .xbg-is-video .xbg-post-actions {
+  bottom: 64px;
+}
+
+#xbg-overlay .xbg-fab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  text-decoration: none;
+}
+
+#xbg-overlay .xbg-fab-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+#xbg-overlay .xbg-save-btn.xbg-on {
+  background: var(--xbg-accent);
+}
+
+#xbg-overlay .xbg-post-media .xbg-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 10px 12px 64px;
+  background: rgba(0, 0, 0, 0.7);
+  text-align: left;
+}
+
+/* --- Additions (shared with the Phone Gallery app) ------------------------------------------------- */
+
+#xbg-overlay .xbg-cards-title {
+  grid-column: 1 / -1;
+  margin: 8px 0 -6px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+/* Albums tab (no filter row): one divider under the tabs, not two */
+#xbg-overlay .xbg-bar:has(.xbg-controls.xbg-hidden) .xbg-tabs,
+#xbg-overlay .xbg-bar:has(.xbg-controls.xbg-collapsed) .xbg-tabs {
+  border-bottom: 0;
+  margin-bottom: -10px;
+}
+
+/* --- Star, delete, recycle bin, hidden folders ------------------------------ */
+
+/* Selection bar: icon buttons with small labels */
+#xbg-overlay .xbg-select-actions {
+  display: flex;
+  gap: 2px;
+}
+
+#xbg-overlay .xbg-bar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 52px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+}
+
+#xbg-overlay .xbg-bar-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+#xbg-overlay .xbg-bar-btn small {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#xbg-overlay .xbg-bar-btn:disabled {
+  opacity: 0.35;
+}
+
+#xbg-overlay .xbg-danger-text svg path {
+  stroke: #f4212e;
+}
+
+/* Grid badges */
+#xbg-overlay .xbg-badge-left {
+  right: auto;
+  left: 6px;
+}
+
+#xbg-overlay .xbg-star-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 4px;
+  color: #ffd400;
+  font-size: 16px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+/* Feed buttons */
+#xbg-overlay .xbg-star-btn.xbg-on {
+  background: #f5b400;
+}
+
+#xbg-overlay .xbg-danger-btn {
+  background: rgba(244, 33, 46, 0.75);
+}
+
+/* Recycle bin cover */
+#xbg-overlay .xbg-dim img {
+  opacity: 0.55;
+}
+
+/* On/off switch in "Show in All" */
+#xbg-overlay .xbg-switch {
+  flex: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--xbg-line-strong);
+  transition: background 0.15s ease;
+}
+
+#xbg-overlay .xbg-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+#xbg-overlay .xbg-switch.xbg-on {
+  background: var(--xbg-red);
+}
+
+#xbg-overlay .xbg-switch.xbg-on::after {
+  transform: translateX(18px);
+}
+
+/* --- Gallery layout (v1.2) ------------------------------------------------- */
+
+/* No sideways wiggle anywhere */
+#xbg-overlay .xbg-scroll {
+  overflow-x: hidden;
+}
+
+/* 4 photos per row */
+#xbg-overlay .xbg-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+}
+
+#xbg-overlay .xbg-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Video length / GIF: bottom-left pill; star: top-right */
+#xbg-overlay .xbg-badge-time {
+  top: auto;
+  right: auto;
+  left: 5px;
+  bottom: 5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+#xbg-overlay .xbg-star-badge {
+  left: auto;
+  bottom: auto;
+  top: 4px;
+  right: 6px;
+  color: #fff;
+  font-size: 15px;
+}
+
+/* --- Albums page ---------------------------------------------------------- */
+
+#xbg-overlay .xbg-albums {
+  max-width: 935px;
+  margin: 0 auto;
+  padding: 14px 16px 0;
+}
+
+#xbg-overlay .xbg-albums .xbg-cards-title {
+  margin: 22px 0 10px;
+}
+
+#xbg-overlay .xbg-album-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 12px;
+}
+
+#xbg-overlay .xbg-album {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+#xbg-overlay .xbg-album .xbg-card-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#xbg-overlay .xbg-album .xbg-card-count {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-album-cover {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-album-cover > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#xbg-overlay .xbg-album-cover.xbg-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--xbg-line-strong);
+  background: transparent;
+  color: var(--xbg-muted);
+  font-size: 30px;
+}
+
+#xbg-overlay .xbg-starred-cover::after {
+  content: "★";
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  color: #fff;
+  font-size: 18px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* The "All" album: newest photo as a slightly tilted Polaroid */
+#xbg-overlay .xbg-polaroid-bg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #3a3326, #1c1a17);
+}
+
+#xbg-overlay .xbg-polaroid {
+  width: 66%;
+  padding: 6% 6% 20%;
+  background: #fbfaf6;
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  transform: rotate(-6deg);
+}
+
+#xbg-overlay .xbg-polaroid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: #ddd;
+}
+
+/* "Others": 2x2 of the small folders, last one showing "+N" */
+#xbg-overlay .xbg-others {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px;
+  background: var(--xbg-surface);
+}
+
+#xbg-overlay .xbg-others > div {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+#xbg-overlay .xbg-others img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+#xbg-overlay .xbg-others span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* "Media types" list */
+#xbg-overlay .xbg-type-list {
+  margin-bottom: 14px;
+  border-radius: 16px;
+  background: var(--xbg-surface);
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-type-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 17px;
+}
+
+#xbg-overlay .xbg-type-row + .xbg-type-row {
+  border-top: 1px solid var(--xbg-line);
+}
+
+#xbg-overlay .xbg-type-row svg {
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+
+#xbg-overlay .xbg-type-row svg path {
+  stroke: var(--xbg-text);
+  fill: none;
+}
+
+#xbg-overlay .xbg-type-name {
+  flex: 1;
+}
+
+#xbg-overlay .xbg-type-count,
+#xbg-overlay .xbg-type-arrow {
+  color: var(--xbg-muted);
+}
+
+#xbg-overlay .xbg-type-arrow {
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* --- Feed: just the pictures ---------------------------------------------- */
+
+#xbg-overlay .xbg-post-media {
+  cursor: pointer;
+}
+
+#xbg-overlay .xbg-post-media .xbg-badge-time {
+  position: absolute;
+}
+
+/* --- Full-screen view ------------------------------------------------------ */
+
+#xbg-overlay .xbg-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  background: #000;
+  color: #fff;
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-v-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: pan-y pinch-zoom;
+}
+
+#xbg-overlay .xbg-v-stage img,
+#xbg-overlay .xbg-v-stage video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+#xbg-overlay .xbg-v-top,
+#xbg-overlay .xbg-v-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+#xbg-overlay .xbg-viewer.xbg-ui-on .xbg-v-top,
+#xbg-overlay .xbg-viewer.xbg-ui-on .xbg-v-bottom {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-v-top {
+  top: 0;
+  gap: 12px;
+  padding: 16px 12px 28px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  background: linear-gradient(rgba(0, 0, 0, 0.7), transparent);
+}
+
+#xbg-overlay .xbg-v-titles {
+  min-width: 0;
+}
+
+#xbg-overlay .xbg-v-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-v-sub {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#xbg-overlay .xbg-v-icon {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+#xbg-overlay .xbg-v-icon svg,
+#xbg-overlay .xbg-v-action svg {
+  width: 24px;
+  height: 24px;
+}
+
+#xbg-overlay .xbg-v-bottom {
+  bottom: 0;
+  justify-content: space-around;
+  padding: 28px 4px 14px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+}
+
+#xbg-overlay .xbg-v-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 52px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+}
+
+#xbg-overlay .xbg-v-action small {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#xbg-overlay .xbg-v-action.xbg-on svg path {
+  fill: #fff;
+}
+
+/* Details sheet */
+#xbg-overlay .xbg-detail {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--xbg-line);
+}
+
+#xbg-overlay .xbg-detail span {
+  color: var(--xbg-muted);
+}
+
+#xbg-overlay .xbg-detail b {
+  text-align: right;
+  word-break: break-all;
+}
+
+#xbg-overlay .xbg-setting {
+  padding: 12px 0;
+}
+
+/* --- Show/hide-header button (iPhone AssistiveTouch style) ---------------- */
+
+#xbg-overlay .xbg-hbtn {
+  position: fixed;
+  z-index: 4;
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(30, 30, 30, 0.72);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  opacity: 0.5;
+  touch-action: none;
+  transition: left 0.2s ease, top 0.2s ease, opacity 0.3s ease, transform 0.15s ease;
+}
+
+#xbg-overlay .xbg-hbtn.xbg-awake {
+  opacity: 1;
+}
+
+#xbg-overlay .xbg-hbtn.xbg-dragging {
+  transition: none;
+  transform: scale(1.08);
+}
+
+/* Concentric white rings, like AssistiveTouch */
+#xbg-overlay .xbg-hbtn-ring {
+  position: absolute;
+  inset: 11px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 34%, rgba(255, 255, 255, 0.55) 35% 52%, rgba(255, 255, 255, 0.3) 53% 70%, rgba(255, 255, 255, 0.18) 71% 100%);
+  pointer-events: none;
+}
+
+/* Header switched off with the button */
+#xbg-overlay.xbg-header-off .xbg-bar {
+  transform: translateY(-100%);
+}
+
+/* --- Light theme ------------------------------------------------------------ */
+
+#xbg-overlay.xbg-light {
+  --xbg-bg: #f2f3f5;
+  --xbg-surface: #ffffff;
+  --xbg-sheet: #ffffff;
+  --xbg-text: #111418;
+  --xbg-muted: #6b7380;
+  --xbg-accent: #ff3b30; /* white wouldn't show on a light page: red */
+  --xbg-on-accent: #fff;
+  --xbg-line: #e3e5e8;
+  --xbg-line-strong: #c4c8cf;
+  --xbg-bar-bg: rgba(242, 243, 245, 0.95);
+  --xbg-seg-on: #ffffff;
+}
+
+#xbg-overlay.xbg-light .xbg-backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+#xbg-overlay.xbg-light .xbg-tile,
+#xbg-overlay.xbg-light .xbg-post-media {
+  background: #e3e5e8;
+}
+
+#xbg-overlay.xbg-light .xbg-select-bar svg path,
+#xbg-overlay.xbg-light .xbg-sheet svg path {
+  stroke: var(--xbg-text);
+}
+
+#xbg-overlay.xbg-light .xbg-tile.xbg-selected::after {
+  background: var(--xbg-accent);
+}
+
+#xbg-overlay.xbg-light .xbg-polaroid-bg {
+  background: linear-gradient(145deg, #e9e2d3, #cfc6b4);
+}
+
+/* Labels on photos stay white in both themes */
+#xbg-overlay .xbg-badge {
+  color: #fff;
+}
+
+/* --- v1.2.2 ------------------------------------------------------------------- */
+
+/* No blue flash when tapping */
+#xbg-overlay,
+#xbg-overlay * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Menus and messages appear above the full-screen view */
+#xbg-overlay .xbg-backdrop {
+  z-index: 9;
+}
+
+#xbg-overlay .xbg-toast {
+  z-index: 10;
+}
+
+/* Files that can't be shown: a dark tile with a cracked Polaroid */
+#xbg-overlay .xbg-broken {
+  width: 100%;
+  height: 100%;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj4KPGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjYjljMGM5Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNmQ3NDdkIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+CjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0xIC0zKSByb3RhdGUoLTQgNTIgMzApIj4KPHBhdGggZD0iTTI4IDE0aDQ4YTMgMyAwIDAgMSAzIDN2MjkgTDc2IDQ2IEw2OCA1MiBMNjAgNDUgTDUyIDUzIEw0NCA0NiBMMzYgNTIgTDI4IDQ1IFYxN2EzIDMgMCAwIDEgMy0zeiIgZmlsbD0idXJsKCNnKSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTMgMCkiLz4KPHBhdGggZD0iTTMzIDIwaDM4djI1IEw2OCA0OSBMNjAgNDIgTDUyIDUwIEw0NCA0MyBMMzYgNDkgTDMzIDQ2eiIgZmlsbD0iIzI2MjkyZCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTMgMCkiLz4KPC9nPgo8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyIDQpIHJvdGF0ZSgzIDUyIDcwKSI+CjxwYXRoIGQ9Ik0yOCA0NSBMMzYgNTIgTDQ0IDQ2IEw1MiA1MyBMNjAgNDUgTDY4IDUyIEw3NiA0NiBMNzkgNDYgVjgzYTMgMyAwIDAgMS0zIDNIMjhhMyAzIDAgMCAxLTMtM1Y0OHoiIGZpbGw9InVybCgjZykiLz4KPHBhdGggZD0iTTMzIDUxIEwzNiA1NCBMNDQgNDggTDUyIDU1IEw2MCA0NyBMNjggNTQgTDcxIDUxIFY2NiBIMzN6IiBmaWxsPSIjMjYyOTJkIi8+CjwvZz48L3N2Zz4=") center / 46% no-repeat, linear-gradient(160deg, #2b2d31, #0d0e10);
+  color: #c9ced6;
+  text-align: center;
+}
+
+#xbg-overlay .xbg-v-stage .xbg-broken {
+  width: min(80vw, 420px);
+  height: min(80vw, 420px);
+  border-radius: 18px;
+  background-size: 36%, auto;
+  background-position: center 30%, center;
+  justify-content: flex-end;
+  padding: 0 20px 26px;
+  box-sizing: border-box;
+}
+
+#xbg-overlay .xbg-v-stage .xbg-broken .xbg-secondary {
+  width: auto;
+  padding: 10px 18px;
+  color: #fff;
+}
+
+/* Full-screen view: iPhone-style round "glass" buttons */
+#xbg-overlay .xbg-v-top {
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px 30px;
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+#xbg-overlay .xbg-v-bottom {
+  justify-content: space-between;
+  padding: 30px 14px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+#xbg-overlay .xbg-glass {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(14px) saturate(1.4);
+  color: #fff;
+}
+
+#xbg-overlay .xbg-round {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+#xbg-overlay .xbg-pill {
+  border-radius: 999px;
+}
+
+#xbg-overlay .xbg-v-titles {
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 22px;
+}
+
+#xbg-overlay .xbg-v-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+#xbg-overlay .xbg-v-sub {
+  font-size: 12px;
+}
+
+#xbg-overlay .xbg-v-group {
+  gap: 6px;
+  padding: 0 10px;
+  height: 48px;
+}
+
+#xbg-overlay .xbg-v-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+#xbg-overlay .xbg-glass svg {
+  width: 24px;
+  height: 24px;
+}
+
+#xbg-overlay .xbg-glass svg path {
+  stroke: #fff;
+}
+
+#xbg-overlay .xbg-v-btn.xbg-on svg path {
+  fill: #fff;
+}
+
+#xbg-overlay .xbg-v-btn.xbg-danger-text svg path {
+  stroke: var(--xbg-red);
+}
+
+/* Header button: round */
+#xbg-overlay .xbg-hbtn {
+  border-radius: 50%;
+}
+
+#xbg-overlay .xbg-hbtn-ring {
+  inset: 10px;
+}
+
+/* --- iPhone-style confirmation -------------------------------------------- */
+
+#xbg-overlay .xbg-alert-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  animation: xbg-alert-fade 0.15s ease-out;
+}
+
+#xbg-overlay .xbg-alert {
+  width: min(280px, 100%);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(44, 44, 46, 0.92);
+  backdrop-filter: blur(20px) saturate(1.6);
+  color: #fff;
+  text-align: center;
+  animation: xbg-alert-pop 0.18s ease-out;
+}
+
+#xbg-overlay .xbg-alert-text {
+  padding: 19px 16px 18px;
+}
+
+#xbg-overlay .xbg-alert-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+#xbg-overlay .xbg-alert-message {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+#xbg-overlay .xbg-alert-link {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+#xbg-overlay .xbg-alert-buttons {
+  display: flex;
+  border-top: 0.5px solid rgba(255, 255, 255, 0.2);
+}
+
+#xbg-overlay .xbg-alert-buttons button {
+  flex: 1;
+  padding: 11px 8px 12px;
+  border: 0;
+  background: transparent;
+  font-size: 17px;
+}
+
+#xbg-overlay .xbg-alert-buttons button + button {
+  border-left: 0.5px solid rgba(255, 255, 255, 0.2);
+}
+
+#xbg-overlay .xbg-alert-cancel {
+  color: #fff;
+}
+
+#xbg-overlay .xbg-alert-action {
+  color: var(--xbg-red);
+  font-weight: 600;
+}
+
+#xbg-overlay.xbg-light .xbg-alert {
+  background: rgba(242, 242, 247, 0.94);
+  color: #000;
+}
+
+#xbg-overlay.xbg-light .xbg-alert-buttons,
+#xbg-overlay.xbg-light .xbg-alert-buttons button + button {
+  border-color: rgba(60, 60, 67, 0.29);
+}
+
+#xbg-overlay.xbg-light .xbg-alert-cancel {
+  color: #000;
+}
+
+#xbg-overlay.xbg-light .xbg-alert-link {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+@keyframes xbg-alert-fade {
+  from { opacity: 0; }
+}
+
+@keyframes xbg-alert-pop {
+  from { transform: scale(1.12); opacity: 0; }
+}
+
+/* --- Fast-scroll bar (iPhone Photos style) --------------------------------- */
+
+#xbg-overlay .xbg-scrubber {
+  position: fixed;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 0; /* positioned by its centre line */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+#xbg-overlay .xbg-scrubber.xbg-on {
+  opacity: 1;
+}
+
+/* A wide, invisible grab area around the slim capsule */
+#xbg-overlay .xbg-scrub-thumb {
+  position: relative;
+  width: 36px;
+  height: 56px;
+  pointer-events: none;
+  touch-action: none;
+}
+
+#xbg-overlay .xbg-scrubber.xbg-on .xbg-scrub-thumb {
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-scrub-thumb::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 5px;
+  width: 6px;
+  height: 40px;
+  border-radius: 3px;
+  background: rgba(235, 235, 245, 0.75);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: width 0.15s ease, right 0.15s ease, background 0.15s ease;
+}
+
+#xbg-overlay .xbg-scrubber.xbg-dragging .xbg-scrub-thumb::after {
+  right: 4px;
+  width: 8px;
+  background: #fff;
+}
+
+/* The date shown beside the handle while dragging */
+#xbg-overlay .xbg-scrub-label {
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(30, 30, 32, 0.88);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+#xbg-overlay .xbg-scrubber.xbg-dragging .xbg-scrub-label {
+  opacity: 1;
+  transform: none;
+}
+
+#xbg-overlay.xbg-light .xbg-scrub-thumb::after {
+  background: rgba(60, 60, 67, 0.55);
+}
+
+#xbg-overlay.xbg-light .xbg-scrubber.xbg-dragging .xbg-scrub-thumb::after {
+  background: rgba(60, 60, 67, 0.8);
+}
+
+#xbg-overlay.xbg-light .xbg-scrub-label {
+  background: rgba(255, 255, 255, 0.92);
+  color: #000;
+}
+
+/* Confirmation: see-through frosted glass, with a press highlight on the buttons */
+#xbg-overlay .xbg-alert-backdrop {
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(3px);
+}
+
+#xbg-overlay .xbg-alert {
+  background: rgba(44, 44, 46, 0.6);
+  backdrop-filter: blur(28px) saturate(1.8);
+}
+
+#xbg-overlay.xbg-light .xbg-alert {
+  background: rgba(242, 242, 247, 0.62);
+}
+
+#xbg-overlay .xbg-alert-buttons button:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#xbg-overlay.xbg-light .xbg-alert-buttons button:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* Grid / Months / Years: the selected one is red */
+#xbg-overlay .xbg-seg button.xbg-on {
+  color: var(--xbg-red);
+}
+
+/* Smaller broken-Polaroid icon */
+#xbg-overlay .xbg-broken {
+  background-size: 30%, auto;
+}
+
+#xbg-overlay .xbg-v-stage .xbg-broken {
+  background-size: 22%, auto;
+  background-position: center 34%, center;
+}
+
+/* Selected Grid / Months / Years: white in dark mode, red in light mode */
+#xbg-overlay .xbg-seg button.xbg-on {
+  color: #fff;
+}
+
+#xbg-overlay.xbg-light .xbg-seg button.xbg-on {
+  color: var(--xbg-red);
+}
+
+/* Selection tick like the iPhone: small filled circle with a white ring in the
+   bottom-right corner; nothing on unselected photos. */
+#xbg-overlay.xbg-selecting .xbg-tile:not(.xbg-selected)::after {
+  display: none;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected::after {
+  content: "";
+  top: auto;
+  left: auto;
+  right: 5px;
+  bottom: 5px;
+  width: 21px;
+  height: 21px;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  box-sizing: border-box;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  background: var(--xbg-red)
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTYuNSAxMi41bDMuNSAzLjUgNy41LTgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=")
+    center / 15px no-repeat;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected img {
+  opacity: 0.72;
+}
+
+/* Keep the video length clear of the tick */
+#xbg-overlay .xbg-tile.xbg-selected .xbg-badge-time {
+  opacity: 0.9;
+}
+
+#xbg-overlay.xbg-light .xbg-tile.xbg-selected::after {
+  background-color: var(--xbg-red);
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTYuNSAxMi41bDMuNSAzLjUgNy41LTgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=");
+}
+
+/* Delete confirmation as a bottom action sheet: message, Delete, Cancel */
+#xbg-overlay .xbg-alert-backdrop.xbg-sheet-style {
+  align-items: flex-end;
+  padding: 12px 12px max(14px, env(safe-area-inset-bottom));
+}
+
+#xbg-overlay .xbg-action-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 100%);
+  border-radius: 26px;
+  animation: xbg-sheet-up 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-text {
+  padding: 22px 26px 14px;
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-message {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#xbg-overlay .xbg-action-sheet > button {
+  padding: 16px 8px;
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-action {
+  font-weight: 500;
+}
+
+#xbg-overlay .xbg-action-sheet .xbg-alert-cancel {
+  margin: 0 22px;
+  padding: 16px 8px 18px;
+  border-top: 0.5px solid rgba(255, 255, 255, 0.2);
+  font-weight: 500;
+}
+
+#xbg-overlay .xbg-action-sheet > button:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+#xbg-overlay.xbg-light .xbg-action-sheet {
+  background: rgba(255, 255, 255, 0.93);
+}
+
+#xbg-overlay.xbg-light .xbg-action-sheet .xbg-alert-title,
+#xbg-overlay.xbg-light .xbg-action-sheet .xbg-alert-message {
+  color: rgba(60, 60, 67, 0.75);
+}
+
+#xbg-overlay.xbg-light .xbg-action-sheet .xbg-alert-cancel {
+  border-top-color: rgba(60, 60, 67, 0.2);
+}
+
+#xbg-overlay.xbg-light .xbg-action-sheet > button:active {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+@keyframes xbg-sheet-up {
+  from { transform: translateY(110%); }
+}
+
+/* Smaller glass buttons in the photo view */
+#xbg-overlay .xbg-viewer .xbg-round {
+  width: 40px;
+  height: 40px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-group {
+  height: 40px;
+  gap: 2px;
+  padding: 0 6px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-btn {
+  width: 38px;
+  height: 38px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-glass svg {
+  width: 20px;
+  height: 20px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-titles {
+  padding: 4px 18px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-title {
+  font-size: 14px;
+}
+
+#xbg-overlay .xbg-viewer .xbg-v-sub {
+  font-size: 11px;
+}
+
+/* Fast scrolling: soft grey placeholders, and photos fade in when ready */
+#xbg-overlay .xbg-tile,
+#xbg-overlay .xbg-post-media {
+  background: #1c1c1e;
+  contain-intrinsic-size: auto 100px;
+}
+
+#xbg-overlay.xbg-light .xbg-tile,
+#xbg-overlay.xbg-light .xbg-post-media {
+  background: #e5e5ea;
+}
+
+#xbg-overlay .xbg-tile img,
+#xbg-overlay .xbg-post-media img {
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
+}
+
+#xbg-overlay .xbg-tile img.xbg-in,
+#xbg-overlay .xbg-post-media img.xbg-in {
+  opacity: 1;
+}
+
+#xbg-overlay .xbg-tile.xbg-selected img.xbg-in {
+  opacity: 0.72;
+}
+
+/* All / Albums underline: white in dark mode, red in light mode */
+#xbg-overlay .xbg-tab.xbg-on {
+  border-bottom-color: #fff;
+}
+
+#xbg-overlay.xbg-light .xbg-tab.xbg-on {
+  border-bottom-color: var(--xbg-red);
+}
+
+/* The grid draws only the rows near the screen; each tile is placed exactly */
+#xbg-overlay .xbg-grid {
+  display: block;
+  position: relative;
+}
+
+#xbg-overlay .xbg-grid > .xbg-tile,
+#xbg-overlay .xbg-grid > .xbg-section {
+  position: absolute;
+  aspect-ratio: auto;
+  content-visibility: visible;
+  box-sizing: border-box;
+}
+
+#xbg-overlay .xbg-grid > .xbg-section {
+  overflow: hidden;
+}
+
+/* Swipe up/down to close a photo: the photo follows the finger, buttons step aside */
+#xbg-overlay .xbg-v-stage {
+  touch-action: pinch-zoom;
+}
+
+#xbg-overlay .xbg-viewer.xbg-v-dragging .xbg-v-top,
+#xbg-overlay .xbg-viewer.xbg-v-dragging .xbg-v-bottom {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Jump to the very top / bottom: small glass circles at the ends of the fast-scroll path */
+#xbg-overlay .xbg-jump {
+  position: fixed;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(30, 30, 32, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#xbg-overlay .xbg-jump.xbg-on {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-jump:active {
+  transform: scale(0.9);
+}
+
+#xbg-overlay .xbg-jump svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#xbg-overlay.xbg-light .xbg-jump {
+  border-color: rgba(60, 60, 67, 0.15);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+#xbg-overlay.xbg-light .xbg-jump svg {
+  stroke: #000;
+}
+
+/* Loading progress: a ring like the iPhone's App Store download circle */
+#xbg-overlay .xbg-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  vertical-align: -7px;
+  color: var(--xbg-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+#xbg-overlay .xbg-progress.xbg-hidden {
+  display: none !important;
+}
+
+#xbg-overlay .xbg-ring {
+  width: 24px;
+  height: 24px;
+  transform: rotate(-90deg); /* start at 12 o'clock */
+}
+
+#xbg-overlay .xbg-ring circle {
+  fill: none;
+  stroke-width: 3;
+}
+
+#xbg-overlay .xbg-ring-track {
+  stroke: var(--xbg-line-strong);
+  opacity: 0.6;
+}
+
+#xbg-overlay .xbg-ring-fill {
+  stroke: var(--xbg-accent);
+  stroke-linecap: round;
+  stroke-dasharray: 0 100;
+  transition: stroke-dasharray 0.4s ease;
+}
+
+#xbg-overlay .xbg-ring-stop {
+  fill: var(--xbg-accent);
+}
+
+/* Total not known yet (first load): a quarter ring spins */
+#xbg-overlay .xbg-progress-unknown .xbg-ring {
+  animation: xbg-ring-spin 0.9s linear infinite;
+}
+
+#xbg-overlay .xbg-progress-unknown .xbg-ring-fill {
+  stroke-dasharray: 25 100;
+  transition: none;
+}
+
+@keyframes xbg-ring-spin {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(270deg); }
+}
+
+/* --- Floating ball (on every X page) ---------------------------------------- */
+
+#xbg-ball {
+  position: fixed;
+  z-index: 2147483000;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 30, 32, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 22px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  opacity: 0.55;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+  transition: left 0.2s ease, top 0.2s ease, opacity 0.3s ease, transform 0.15s ease;
+}
+
+#xbg-ball svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+
+#xbg-ball.xbg-awake {
+  opacity: 1;
+}
+
+#xbg-ball.xbg-dragging {
+  transition: none;
+  transform: scale(1.1);
+}
+
+/* All posts / Collections: one underline that slides between the tabs */
+#xbg-overlay .xbg-tabs {
+  position: relative;
+}
+
+#xbg-overlay .xbg-tab.xbg-on,
+#xbg-overlay.xbg-light .xbg-tab.xbg-on {
+  border-bottom-color: transparent;
+}
+
+#xbg-overlay .xbg-tab-ink {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 50%;
+  height: 2px;
+  background: #fff;
+  pointer-events: none;
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#xbg-overlay.xbg-light .xbg-tab-ink {
+  background: var(--xbg-red);
+}
+
+#xbg-overlay .xbg-scroll {
+  will-change: transform;
+}
+
+/* Filter rows fold away smoothly on Collections and unfold on All posts */
+#xbg-overlay .xbg-controls {
+  max-height: 320px;
+  overflow: hidden;
+  transition: max-height 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease;
+}
+
+#xbg-overlay .xbg-controls.xbg-collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  pointer-events: none;
+}
+
+/* Grid / Months / Years: centred in their segment */
+#xbg-overlay .xbg-seg button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-width: 0;
+}
+
+/* Sort chip: spaced up/down arrows before the label */
+#xbg-overlay .xbg-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#xbg-overlay .xbg-sort-icon {
+  flex: none;
+}
+
+/* Sliding between All posts and Collections: the destination page moves in
+   beside the current one; the header steps aside, leaving only the tabs and
+   the white line, then fades back in. */
+#xbg-overlay .xbg-peek {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--xbg-bg);
+  will-change: transform, opacity;
+}
+
+#xbg-overlay .xbg-peek-inner {
+  position: relative;
+}
+
+#xbg-overlay .xbg-scroll {
+  will-change: transform;
+}
+
+#xbg-overlay .xbg-bar {
+  transition: transform 0.22s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+#xbg-overlay .xbg-bar > .xbg-row,
+#xbg-overlay .xbg-bar > .xbg-controls {
+  transition: opacity 0.2s ease, max-height 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#xbg-overlay .xbg-bar.xbg-swiping {
+  background: #000;
+  border-bottom-color: transparent;
+}
+
+#xbg-overlay.xbg-light .xbg-bar.xbg-swiping {
+  background: var(--xbg-bg);
+}
+
+#xbg-overlay .xbg-bar.xbg-swiping > .xbg-row,
+#xbg-overlay .xbg-bar.xbg-swiping > .xbg-controls {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+#xbg-overlay .xbg-bar.xbg-swiping .xbg-tab {
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+
+#xbg-overlay.xbg-light .xbg-bar.xbg-swiping .xbg-tab {
+  text-shadow: 0 1px 6px rgba(255, 255, 255, 0.8);
+}
+
+/* Feed: the save / open buttons only appear after you tap the post */
+#xbg-overlay .xbg-post-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+#xbg-overlay .xbg-post-media.xbg-ui-on .xbg-post-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Save / open: top centre, smaller */
+#xbg-overlay .xbg-post-media .xbg-post-actions,
+#xbg-overlay .xbg-is-video .xbg-post-actions {
+  top: 44px;
+  bottom: auto;
+  gap: 12px;
+}
+
+#xbg-overlay .xbg-post-actions .xbg-fab-btn {
+  width: 36px;
+  height: 36px;
+}
+
+#xbg-overlay .xbg-post-actions .xbg-fab-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Video: black behind, cover picture until it really plays, then fade in */
+#xbg-overlay .xbg-is-video {
+  background: #000;
+}
+
+#xbg-overlay .xbg-post-media img.xbg-vcover {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  object-fit: cover;
+}
+
+#xbg-overlay .xbg-post-media video {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: transparent;
+  transition: opacity 0.25s ease;
+}
+
+#xbg-overlay .xbg-post-media.xbg-vready video {
+  opacity: 1;
+}
+
+/* Once the video shows, the cover steps away so it never peeks round it */
+#xbg-overlay .xbg-post-media.xbg-vready img.xbg-vcover {
+  opacity: 0;
+  transition: opacity 0s linear 0.3s;
+}
+
+/* Player controls, like the X app: a thin bar and white icons at the bottom */
+#xbg-overlay .xbg-vbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 18px 8px 4px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+#xbg-overlay .xbg-post-media.xbg-ui-on .xbg-vbar,
+#xbg-overlay .xbg-post-media:not(.xbg-vready) .xbg-vbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#xbg-overlay .xbg-vtrack {
+  position: relative;
+  height: 20px;
+  margin: 0 6px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+#xbg-overlay .xbg-vtrack::before,
+#xbg-overlay .xbg-vfill {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+#xbg-overlay .xbg-vtrack::before {
+  right: 0;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+#xbg-overlay .xbg-vfill {
+  width: 0;
+  background: #fff;
+}
+
+#xbg-overlay .xbg-vfill::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+#xbg-overlay .xbg-vrow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#xbg-overlay .xbg-vbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+}
+
+#xbg-overlay .xbg-vbtn svg {
+  width: 22px;
+  height: 22px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+
+#xbg-overlay .xbg-vtime {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+#xbg-overlay .xbg-vspace {
+  flex: 1;
+}
+
+/* Reels: full screen, one post at a time */
+#xbg-overlay .xbg-reels {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  overflow: hidden;
+  background: #000;
+  touch-action: none;
+  overscroll-behavior: contain;
+  opacity: 0;
+  transform: scale(0.94);
+  transition: opacity 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#xbg-overlay .xbg-reels.xbg-reels-in {
+  opacity: 1;
+  transform: none;
+}
+
+#xbg-overlay .xbg-reels-track {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+#xbg-overlay .xbg-reel {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  will-change: transform;
+}
+
+#xbg-overlay .xbg-reel .xbg-post-media {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  aspect-ratio: auto !important;
+  background: #000;
+}
+
+#xbg-overlay .xbg-reel .xbg-post-media > img,
+#xbg-overlay .xbg-reel .xbg-post-media video,
+#xbg-overlay .xbg-reel .xbg-post-media img.xbg-vcover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+#xbg-overlay .xbg-reel .xbg-post-head {
+  padding-top: max(14px, env(safe-area-inset-top));
+}
+
+#xbg-overlay .xbg-reel .xbg-vbar {
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+#xbg-overlay .xbg-reel {
+  max-width: none;
+}
+
+/* Header button, first tap: filters (bottom half of the header) folded away */
+#xbg-overlay.xbg-filters-off .xbg-controls {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  pointer-events: none;
+}
+
+#xbg-overlay.xbg-filters-off .xbg-tabs {
+  border-bottom: 0;
+  margin-bottom: -10px;
+}
+
+/* Button shows which step you're on: half-dimmed ring after the first tap */
+#xbg-overlay .xbg-hbtn.xbg-half .xbg-hbtn-ring {
+  opacity: 0.7;
+}
+
+/* The title row keeps the same height on every tab (a status line's worth of
+   room is always kept), so nothing resizes when you swipe between them */
+#xbg-overlay .xbg-bar > .xbg-row .xbg-status {
+  display: flex;
+  align-items: center;
+  height: 24px; /* room for the loading ring, kept even when empty */
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+#xbg-overlay .xbg-bar > .xbg-row .xbg-status > span:not(.xbg-progress) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#xbg-overlay .xbg-bar > .xbg-row .xbg-progress {
+  flex: none;
+  vertical-align: 0;
+}
+
+#xbg-overlay .xbg-bar > .xbg-row {
+  min-height: 42px;
+}
+
+/* --- Search ------------------------------------------------------------------ */
+
+#xbg-overlay .xbg-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 6px 0 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--xbg-surface);
+  color: var(--xbg-muted);
+  cursor: text;
+}
+
+#xbg-overlay .xbg-search:focus-within {
+  border-color: var(--xbg-accent);
+}
+
+#xbg-overlay .xbg-search-icon {
+  display: flex;
+  flex: none;
+}
+
+#xbg-overlay .xbg-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--xbg-text);
+  font: inherit;
+  font-size: 16px; /* 16px keeps phones from zooming in when you tap it */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#xbg-overlay .xbg-search-input::placeholder {
+  color: var(--xbg-muted);
+}
+
+#xbg-overlay .xbg-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+#xbg-overlay .xbg-search-clear {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--xbg-line-strong);
+  color: var(--xbg-bg);
+  font-size: 11px;
+  line-height: 24px;
+}

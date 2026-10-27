@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock X</title>
+<style>
+  body { margin: 0; font: 15px sans-serif; background: #000; color: #e7e9ea; }
+  nav { position: fixed; left: 0; top: 0; width: 160px; padding: 10px; }
+  nav a { display: block; color: #1d9bf0; margin: 8px 0; }
+  main { margin-left: 180px; max-width: 600px; }
+  article { border-bottom: 1px solid #333; padding: 10px; min-height: 120px; }
+  article img { width: 120px; height: 120px; }
+</style>
+<script>
+  // Errors from the page, including the extension's inject.js (it runs in the page).
+  window.__pageErrors = [];
+  window.addEventListener("error", (e) => window.__pageErrors.push(String(e.message) + " @ " + e.filename + ":" + e.lineno));
+  window.addEventListener("unhandledrejection", (e) => window.__pageErrors.push("unhandled: " + String(e.reason)));
+</script>
+</head>
+<body>
+<nav>
+  <a href="/home" data-nav>Home</a>
+  <a href="/explore" data-nav>Explore</a>
+  <a href="/i/bookmarks" data-nav id="nav-bookmarks">Bookmarks</a>
+</nav>
+<main id="react-root"><div id="timeline"></div></main>
+<script>
+(() => {
+  const TRANSPORT = "__TRANSPORT__";
+  const QID = "QiD123abc";
+  let cursor = null;
+  let loading = false;
+  let gen = 0;
+
+  function api(vars) {
+    const url = `/i/api/graphql/${QID}/Bookmarks?variables=${encodeURIComponent(JSON.stringify(vars))}&features=${encodeURIComponent('{"f":true}')}`;
+    const headers = { authorization: "Bearer MOCKTOKEN", "x-csrf-token": "csrf123", "content-type": "application/json" };
+    if (TRANSPORT === "fetch") return fetch(url, { headers, credentials: "include" }).then((r) => r.ok ? r.json() : Promise.reject(r.status));
+    return new Promise((res, rej) => {
+      const x = new XMLHttpRequest();
+      x.open("GET", url);
+      for (const k in headers) x.setRequestHeader(k, headers[k]);
+      x.onload = () => (x.status === 200 ? res(JSON.parse(x.responseText)) : rej(x.status));
+      x.onerror = () => rej("net");
+      x.send();
+    });
+  }
+
+  function renderEntries(json) {
+    const tl = document.getElementById("timeline");
+    const entries = json.data.bookmark_timeline_v2.timeline.instructions[0].entries;
+    let next = null;
+    for (const e of entries) {
+      if (e.content.cursorType === "Bottom") next = e.content.value;
+      if (!e.entryId.startsWith("tweet-")) continue;
+      const t = e.content.itemContent.tweet_results.result;
+      const user = t.core.user_results.result.legacy.screen_name;
+      const cell = document.createElement("div");
+      cell.setAttribute("data-testid", "cellInnerDiv");
+      const art = document.createElement("article");
+      const a = document.createElement("a");
+      a.href = `/${user}/status/${t.rest_id}`;
+      const time = document.createElement("time");
+      time.setAttribute("datetime", new Date(Date.parse(t.legacy.created_at)).toISOString());
+      time.textContent = "@" + user;
+      a.append(time);
+      const p = document.createElement("p");
+      p.textContent = t.legacy.full_text;
+      art.append(a, p);
+      for (const m of (t.legacy.extended_entities || {}).media || []) {
+        const img = document.createElement("img");
+        img.src = m.media_url_https.replace(/\.jpg$/, "?format=jpg&name=small");
+        art.append(img);
+      }
+      cell.append(art);
+      tl.append(cell);
+    }
+    const added = entries.filter((e) => e.entryId.startsWith("tweet-")).length;
+    cursor = added ? next : null;
+  }
+
+  function loadMore() {
+    if (loading || !cursor || !location.pathname.startsWith("/i/bookmarks")) return;
+    loading = true;
+    const my = gen;
+    api({ count: 20, cursor, includePromotedContent: true }).then((j) => { if (my === gen) renderEntries(j); }, () => {}).finally(() => (loading = false));
+  }
+
+  function render() {
+    gen++;
+    cursor = null;
+    const tl = document.getElementById("timeline");
+    tl.replaceChildren();
+    const path = location.pathname;
+    document.title = path.startsWith("/i/bookmarks") ? "Bookmarks / X" : "Home / X";
+    if (path.startsWith("/i/bookmarks")) {
+      const h = document.createElement("h2");
+      h.textContent = "Bookmarks";
+      tl.append(h);
+      const my = gen;
+      loading = true;
+      api({ count: 20, includePromotedContent: true }).then((j) => { if (my === gen) renderEntries(j); }, (s) => {
+        const err = document.createElement("p");
+        err.id = "load-error";
+        err.textContent = "Something went wrong. (" + s + ")";
+        tl.append(err);
+      }).finally(() => (loading = false));
+    } else {
+      const h = document.createElement("h2");
+      h.textContent = path === "/explore" ? "Explore" : "Home timeline";
+      tl.append(h);
+      for (let i = 0; i < 5; i++) {
+        const p = document.createElement("article");
+        p.textContent = "A normal post on the home timeline " + i;
+        tl.append(p);
+      }
+    }
+  }
+
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-nav]");
+    if (!a) return;
+    e.preventDefault();
+    history.pushState({}, "", a.getAttribute("href"));
+    render();
+  });
+  window.addEventListener("popstate", render);
+  window.addEventListener("scroll", () => {
+    if (window.innerHeight + window.scrollY > document.body.scrollHeight - 400) loadMore();
+  }, { passive: true });
+  render();
+})();
+</script>
+</body>
+</html>
