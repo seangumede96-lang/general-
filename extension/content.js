@@ -1409,10 +1409,12 @@
     }
     if (!backSteps.pushed) return;
     backSteps.pushed--;
+    // Menus don't add a step of their own, so closing one used up the step of
+    // whatever is under it: put that step back while the gallery stays open.
     if (ui.alert && ui.alert.isConnected) {
       // A confirmation was open: back just closes it.
       ui.alert.remove();
-      if (feedOpen() || selectMode) addBackStep();
+      if (galleryOpen()) addBackStep();
     } else if (ui.sheet) {
       // A menu was open: back just closes the menu. While selecting, keep the
       // selection (the menu's "done" step would otherwise end it).
