@@ -88,6 +88,8 @@ class Browser:
             "browser.dom.window.dump.enabled": True,
             # permissions.request() grants without the doorhanger (it can't be clicked from WebDriver).
             "extensions.webextOptionalPermissionPrompts": False,
+            # Touch events, so finger swipes can be played back (see swipe()).
+            "dom.w3c_touch_events.enabled": 1,
             "media.autoplay.default": 0,
             "media.autoplay.blocking_policy": 0,
             "browser.download.folderList": 2,
@@ -214,6 +216,32 @@ class Browser:
     def first_tile_key(self):
         """The tile drawn top-left (tiles are positioned, so page order isn't screen order)."""
         return self.js("const t=[...document.querySelectorAll('#xbg-overlay .xbg-grid .xbg-tile')].sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)||parseFloat(a.style.left)-parseFloat(b.style.left))[0]; return t ? t.dataset.key : null")
+
+    def swipe(self, el, dx, dy=0, ms=250, steps=10, start=None):
+        """Drag a finger across `el` (an element or CSS selector) by dx, dy,
+        sending real touchstart/touchmove/touchend events step by step."""
+        if isinstance(el, str):
+            el = self.q(el)
+        return self.d.execute_async_script(
+            """const [el, dx, dy, ms, steps, start, done] = arguments;
+            const r = el.getBoundingClientRect();
+            const x0 = start ? start[0] : r.left + r.width / 2, y0 = start ? start[1] : r.top + r.height / 2;
+            const fire = (type, x, y) => {
+              const t = new Touch({ identifier: 7, target: el, clientX: x, clientY: y, pageX: x, pageY: y });
+              const live = type === "touchend" ? [] : [t];
+              el.dispatchEvent(new TouchEvent(type, { touches: live, targetTouches: live, changedTouches: [t], bubbles: true, cancelable: true }));
+            };
+            fire("touchstart", x0, y0);
+            let i = 0;
+            const step = () => {
+              i++;
+              fire("touchmove", x0 + dx * i / steps, y0 + dy * i / steps);
+              if (i < steps) setTimeout(step, ms / steps);
+              else setTimeout(() => { fire("touchend", x0 + dx, y0 + dy); done(true); }, 16);
+            };
+            setTimeout(step, ms / steps);""",
+            el, dx, dy, ms, steps, start,
+        )
 
     def zoom(self, z):
         """Page zoom (like Ctrl +). Used to get phone-sized pages, since

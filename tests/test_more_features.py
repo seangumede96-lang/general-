@@ -75,7 +75,7 @@ def test_slash_starts_search_even_with_header_hidden(browser):
     ActionChains(b.d).send_keys("/").perform()
     time.sleep(0.3)
     assert b.js("return document.activeElement.classList.contains('xbg-search-input')")
-    assert b.visible(".xbg-search-input")
+    assert b.visible(".xbg-bar .xbg-search-input")
 
 
 def test_unsave_from_feed_inside_collection(browser):

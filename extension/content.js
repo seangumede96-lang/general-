@@ -1442,7 +1442,16 @@
       if (!swipe.decided) {
         if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
         swipe.decided = true;
-        if (!(dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.3)) return (swipe = null);
+        if (Math.abs(dx) <= Math.abs(dy) * 1.3) return (swipe = null);
+        // Leftwards on a post: "Save to…" (the post follows the finger a little).
+        if (dx < 0) swipe.post = e.target.closest(".xbg-post");
+        if (dx < 0 && !swipe.post) return (swipe = null);
+      }
+      if (swipe.post) {
+        swipe.dx = Math.min(0, dx);
+        swipe.post.style.transition = "none";
+        swipe.post.style.transform = `translateX(${rubberBand(swipe.dx, window.innerWidth / 2)}px)`;
+        return;
       }
       swipe.dx = Math.max(0, dx);
       lightbox.style.transition = "none";
@@ -1450,6 +1459,14 @@
     }, { passive: true });
     const endSwipe = () => {
       if (!swipe || !swipe.decided) return (swipe = null);
+      if (swipe.post) {
+        const { post, dx } = swipe;
+        swipe = null;
+        post.style.transition = "transform 0.2s ease-out";
+        post.style.transform = "";
+        if (dx < -70) openPicker([post.dataset.key], () => afterSave(post.dataset.key));
+        return;
+      }
       const speed = swipe.dx / Math.max(Date.now() - swipe.at, 1);
       const far = swipe.dx > window.innerWidth * 0.22 || (speed > 0.5 && swipe.dx > 40);
       swipe = null;
@@ -2636,7 +2653,27 @@
         el("p", { class: "xbg-note" }, "This video can’t play here. Tap the ↗ button to watch it on X.")
       );
     }
-    const save = el("button", { class: "xbg-fab-btn xbg-save-btn", onclick: () => openPicker([item.key], () => afterSave(item.key)) });
+    // Tap: choose collections. Long-press: straight into the one used last.
+    let held = null;
+    const save = el("button", { class: "xbg-fab-btn xbg-save-btn", onclick: () => {
+      if (held === "done") return void (held = null);
+      openPicker([item.key], () => afterSave(item.key));
+    } });
+    save.addEventListener("pointerdown", () => {
+      clearTimeout(held);
+      held = setTimeout(() => {
+        held = "done";
+        if (navigator.vibrate) navigator.vibrate(15);
+        quickSave(item.key);
+      }, 500);
+    });
+    const letGo = () => {
+      if (held !== "done") clearTimeout(held), (held = null);
+    };
+    save.addEventListener("pointerup", letGo);
+    save.addEventListener("pointerleave", letGo);
+    save.addEventListener("pointercancel", letGo);
+    save.addEventListener("contextmenu", (e) => e.preventDefault()); // a long-press isn't a right-click menu
     paintSave(save, item.key);
     const actions = el("div", { class: "xbg-post-actions" }, save);
     if (item.tweet) {
@@ -2647,11 +2684,45 @@
     }
     media.append(head, actions);
     // The buttons (and a video's controls) stay hidden until you tap the post.
+    // Two quick taps save it to the collection used last (like Instagram's
+    // double-tap); a single tap waits a moment to be sure it isn't the first.
+    let tapTimer = null;
     media.addEventListener("click", (e) => {
       if (e.target.closest("button, a, .xbg-vbar")) return;
-      showPostUi(media, !media.classList.contains("xbg-ui-on"));
+      if (tapTimer) {
+        clearTimeout(tapTimer);
+        tapTimer = null;
+        popSaved(media);
+        return quickSave(item.key);
+      }
+      tapTimer = setTimeout(() => {
+        tapTimer = null;
+        showPostUi(media, !media.classList.contains("xbg-ui-on"));
+      }, 260);
     });
     return el("article", { class: "xbg-post", "data-key": item.key }, media);
+  }
+
+  // The collection posts were last added to: where quick saves go.
+  const lastUsedCollection = () => collections.reduce((best, c) => ((c.used || 0) > ((best && best.used) || 0) ? c : best), null);
+
+  function quickSave(key) {
+    const c = lastUsedCollection();
+    if (!c) return openPicker([key], () => afterSave(key)); // nothing used yet: choose
+    if (c.keys.includes(key)) return toast(`Already in “${c.name}”`);
+    setMembership(c, [key], true);
+    afterSave(key);
+    toast(`Saved to “${c.name}”`, { label: "Undo", run: () => {
+      setMembership(c, [key], false);
+      afterSave(key);
+    } });
+  }
+
+  // A bookmark that pops up over the picture after a double-tap.
+  function popSaved(media) {
+    const pop = el("span", { class: "xbg-pop" }, icon(BOOKMARK_PATH, true));
+    media.append(pop);
+    setTimeout(() => pop.remove(), 800);
   }
 
   function showPostUi(media, on) {

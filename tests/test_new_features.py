@@ -285,3 +285,122 @@ def test_choose_cover(browser):
     item = [i for i in b.storage()["xbg_cache_0"] if i["key"] == chosen][0]
     assert first == item["thumb"], "the card doesn't start with the chosen picture"
     assert [c for c in b.storage()["xbg_collections"] if c["name"] == "Covered"][0]["cover"] == chosen
+
+
+# --- Quick save and gestures --------------------------------------------------
+
+def open_post(b, index):
+    tile = b.qa(".xbg-grid .xbg-tile")[index]
+    key = tile.get_attribute("data-key")
+    tile.click()
+    b.wait(lambda d: b.visible(".xbg-lightbox"), 5)
+    time.sleep(0.5)
+    return key, f'.xbg-post[data-key="{key}"]'
+
+
+def in_collection(b, name):
+    return [c for c in b.storage()["xbg_collections"] if c["name"] == name][0]["keys"]
+
+
+def test_long_press_save_goes_to_last_collection(browser):
+    b = browser
+    open_loaded(b)
+    fill_collection(b, "Older", 1)
+    fill_collection(b, "Latest", 1)  # used last
+    b.click('.xbg-tab[data-view="all"]')
+    time.sleep(0.4)
+    key, post = open_post(b, 9)
+    b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+    time.sleep(0.3)
+    ActionChains(b.d).click_and_hold(b.q(f"{post} .xbg-save-btn")).pause(0.8).release().perform()
+    time.sleep(0.5)
+    assert not b.qa("#xbg-overlay .xbg-backdrop"), "a long-press shouldn't open the picker"
+    assert toast_text(b).startswith("Saved to “Latest”")
+    assert "xbg-on" in b.q(f"{post} .xbg-save-btn").get_attribute("class")
+    time.sleep(0.6)
+    assert key in in_collection(b, "Latest") and key not in in_collection(b, "Older")
+    # Undo takes it out again.
+    b.click(".xbg-toast .xbg-toast-action")
+    time.sleep(0.8)
+    assert key not in in_collection(b, "Latest")
+    assert "xbg-on" not in b.q(f"{post} .xbg-save-btn").get_attribute("class")
+    # A normal tap still opens the picker.
+    b.q(f"{post} .xbg-save-btn").click()
+    b.wait(lambda d: b.visible(".xbg-sheet"), 3)
+
+
+def test_long_press_with_no_collections_opens_picker(browser):
+    b = browser
+    open_loaded(b)
+    key, post = open_post(b, 2)
+    b.js(f"document.querySelector('{post} .xbg-post-media').classList.add('xbg-ui-on')")
+    time.sleep(0.3)
+    ActionChains(b.d).click_and_hold(b.q(f"{post} .xbg-save-btn")).pause(0.8).release().perform()
+    b.wait(lambda d: b.visible(".xbg-sheet"), 3)
+
+
+def test_double_tap_saves(browser):
+    b = browser
+    open_loaded(b)
+    fill_collection(b, "Hearts", 1)
+    b.click('.xbg-tab[data-view="all"]')
+    time.sleep(0.4)
+    key, post = open_post(b, 6)
+    ActionChains(b.d).double_click(b.q(f"{post} .xbg-post-media")).perform()
+    time.sleep(0.15)
+    assert b.qa(f"{post} .xbg-pop"), "no bookmark popped up"
+    b.shot("G-double-tap")
+    time.sleep(0.8)
+    assert key in in_collection(b, "Hearts")
+    assert not b.js(f"return document.querySelector('{post} .xbg-post-media').classList.contains('xbg-ui-on')"), "a double-tap also toggled the buttons"
+    # A single tap still shows the buttons.
+    b.q(f"{post} .xbg-post-media").click()
+    time.sleep(0.5)
+    assert b.js(f"return document.querySelector('{post} .xbg-post-media').classList.contains('xbg-ui-on')")
+
+
+def test_swipe_left_opens_save_to(browser):
+    b = browser
+    open_loaded(b)
+    key, post = open_post(b, 3)
+    b.swipe(post + " .xbg-post-media", -160, 5)
+    b.wait(lambda d: b.visible(".xbg-sheet"), 3, "swiping left didn't open Save to…")
+    assert b.q(".xbg-sheet-title").text == "Save to…"
+    b.click_text("Done", ".xbg-sheet button")
+    time.sleep(0.4)
+    assert b.visible(".xbg-lightbox"), "the feed closed"
+    # A short swipe does nothing.
+    b.swipe(post + " .xbg-post-media", -40, 0)
+    time.sleep(0.4)
+    assert not b.visible(".xbg-sheet")
+
+
+# Gestures that were already there, now testable with touch.
+
+def test_swipe_right_closes_the_feed(browser):
+    b = browser
+    open_loaded(b)
+    key, post = open_post(b, 3)
+    b.swipe(post + " .xbg-post-media", 400, 5, start=None)
+    time.sleep(0.6)
+    assert not b.visible(".xbg-lightbox") and b.gallery_open()
+
+
+def test_swipe_between_all_posts_and_collections(browser):
+    b = browser
+    open_loaded(b)
+    b.swipe(".xbg-scroll", -600, 0, ms=300)
+    time.sleep(1)
+    assert b.js("return document.querySelector('.xbg-tab[data-view=collections]').classList.contains('xbg-on')")
+    b.swipe(".xbg-scroll", 600, 0, ms=300)
+    time.sleep(1)
+    assert b.js("return document.querySelector('.xbg-tab[data-view=all]').classList.contains('xbg-on')")
+
+
+def test_long_press_tile_starts_selecting(browser):
+    b = browser
+    open_loaded(b)
+    tile = b.qa(".xbg-grid .xbg-tile")[1]
+    b.swipe(tile, 0, 0, ms=700, steps=2)  # finger held still for 0.7s
+    time.sleep(0.3)
+    assert b.visible(".xbg-select-bar") and b.q(".xbg-select-info").text == "1 selected"

@@ -63,13 +63,13 @@ def test_sort_oldest_first_and_back(browser):
     b = browser
     open_loaded(b)
     first_newest = b.js("return document.querySelector('.xbg-grid .xbg-tile').dataset.key")
-    b.click(".xbg-sort")
+    b.click(".xbg-bar .xbg-sort")
     b.click_text("Oldest first", ".xbg-pick")
     time.sleep(0.3)
     first_oldest = b.js("return document.querySelector('.xbg-grid .xbg-tile').dataset.key")
     assert first_oldest != first_newest
-    assert "Oldest" in b.q(".xbg-sort").text
-    b.click(".xbg-sort")
+    assert "Oldest" in b.q(".xbg-bar .xbg-sort").text
+    b.click(".xbg-bar .xbg-sort")
     b.click_text("Newest first", ".xbg-pick")
     time.sleep(0.3)
     assert b.js("return document.querySelector('.xbg-grid .xbg-tile').dataset.key") == first_newest
@@ -103,7 +103,7 @@ def test_search_words_name_and_clear(browser):
     b = browser
     open_loaded(b)
     total = b.count_text()
-    box = b.q(".xbg-search-input")
+    box = b.q(".xbg-bar .xbg-search-input")
     box.send_keys("noodles")
     b.wait(lambda d: "found" in b.count_text(), 5)
     n = int(b.count_text().split()[0])
@@ -118,13 +118,13 @@ def test_search_words_name_and_clear(browser):
     b.shot("A5-nomatch")
     b.click_text("Clear search", ".xbg-empty button")
     b.wait(lambda d: b.count_text() == total, 5)
-    assert b.q(".xbg-search-input").get_attribute("value") == ""
+    assert b.q(".xbg-bar .xbg-search-input").get_attribute("value") == ""
 
 
 def test_emoji_search(browser):
     b = browser
     open_loaded(b)
-    box = b.q(".xbg-search-input")
+    box = b.q(".xbg-bar .xbg-search-input")
     box.send_keys("🍜")
     b.wait(lambda d: "found" in b.count_text(), 5)
     assert int(b.count_text().split()[0]) > 0

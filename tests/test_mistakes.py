@@ -67,7 +67,7 @@ def test_back_button_steps_out_one_level_at_a_time(browser):
     b.qa(".xbg-grid .xbg-tile")[0].click()
     back(b)
     assert b.gallery_open() and not b.visible(".xbg-select-bar"), "Back should end selecting"
-    b.click(".xbg-sort")
+    b.click(".xbg-bar .xbg-sort")
     back(b)
     assert b.gallery_open() and not b.qa("#xbg-overlay .xbg-backdrop"), "Back should close the menu"
     back(b)
@@ -94,10 +94,10 @@ def test_escape_key(browser):
     b.wait(lambda d: b.visible(".xbg-lightbox"), 5)
     esc(b)
     assert not b.visible(".xbg-lightbox") and b.gallery_open()
-    b.q(".xbg-search-input").send_keys("sunset")
+    b.q(".xbg-bar .xbg-search-input").send_keys("sunset")
     b.wait(lambda d: "found" in b.count_text(), 5)
     esc(b)
-    assert b.q(".xbg-search-input").get_attribute("value") == "" and b.gallery_open()
+    assert b.q(".xbg-bar .xbg-search-input").get_attribute("value") == "" and b.gallery_open()
     esc(b)
     assert not b.gallery_open()
 
@@ -132,7 +132,7 @@ def test_fast_tab_switching(browser):
 def test_odd_search_text(browser):
     b = browser
     open_loaded(b)
-    box = b.q(".xbg-search-input")
+    box = b.q(".xbg-bar .xbg-search-input")
     for text in ["(.*[", "\\", "<b>bold</b>", "'; DROP TABLE", "🎌", "日本語"]:
         box.clear()
         box.send_keys(text)

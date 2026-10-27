@@ -110,7 +110,7 @@ def test_large_library(browser):
     b.shot("F6-large-bottom")
     # Search across thousands is responsive.
     t = time.time()
-    b.q(".xbg-search-input").send_keys("noodles")
+    b.q(".xbg-bar .xbg-search-input").send_keys("noodles")
     b.wait(lambda d: "found" in b.count_text(), 5)
     assert time.time() - t < 3
     print(f"3000 bookmarks loaded in {load_s:.1f}s")
