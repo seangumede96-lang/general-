@@ -5,9 +5,10 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, normalize, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openDb } from './db.js';
+import { openDb, SECRET_SETTINGS } from './db.js';
 import { streamChat, listModels } from './model.js';
 import { createTools } from './tools.js';
+import { createGpuManager, GpuError, TEST_POD } from './gpu.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -31,15 +32,33 @@ async function readJson(req) {
 	catch { throw new HttpError(400, 'Invalid JSON'); }
 }
 
-const publicSettings = (s) => ({ ...s, apiKey: undefined, hasApiKey: Boolean(s.apiKey) });
+function publicSettings(s) {
+	const out = { ...s };
+	for (const key of SECRET_SETTINGS) {
+		delete out[key];
+		out[`has${key[0].toUpperCase()}${key.slice(1)}`] = Boolean(s[key]);
+	}
+	return out;
+}
 const titleFrom = (text) => {
 	const one = text.replace(/\s+/g, ' ').trim();
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 	const db = openDb(dataDir);
-	const tools = createTools({ db });
+	const gpu = createGpuManager({ db, clock });
+	const tools = createTools({ db, gpu });
+	// The watchdog stops idle and expired pods. unref: it must not keep the process alive.
+	const watchdog = watchdogMs ? setInterval(() => gpu.tick().catch((err) => console.error('[gpu]', err.message)), watchdogMs) : null;
+	watchdog?.unref();
+	const gpuCall = async (fn) => {
+		try { return await fn(); }
+		catch (err) {
+			if (err instanceof GpuError) throw new HttpError(err.code === 'refused' || err.code === 'invalid' ? 409 : err.code === 'not_configured' ? 400 : 502, err.message);
+			throw err;
+		}
+	};
 	/** conversationId -> { text, thinking, controller, awaiting } for a turn in flight */
 	const live = new Map();
 	/** conversationId -> Set<ServerResponse> of attached SSE clients */
@@ -111,11 +130,21 @@ export function createApp({ dataDir }) {
 		if (prep.error) return { status: 'error', output: prep.error };
 		if (turn.controller.signal.aborted) return cancelled;
 		if (prep.tool.risk === 'danger') {
+			// A tool may refuse outright or add a note (such as a price) before the user is asked.
+			let note = '';
+			if (prep.tool.preview) {
+				const preview = await prep.tool.preview(prep.args).catch((err) => ({ refuse: err.message }));
+				if (preview.refuse) return { status: 'error', output: preview.refuse };
+				note = preview.note || '';
+			}
+			if (turn.controller.signal.aborted) return cancelled;
 			const decision = await new Promise((resolve) => {
 				turn.awaiting.set(call.id, resolve);
-				broadcast(id, { t: 'approval', id: call.id, waiting: true });
+				turn.notes.set(call.id, note);
+				broadcast(id, { t: 'approval', id: call.id, waiting: true, note });
 			});
 			turn.awaiting.delete(call.id);
+			turn.notes.delete(call.id);
 			broadcast(id, { t: 'approval', id: call.id, waiting: false });
 			if (turn.controller.signal.aborted) return cancelled;
 			if (decision !== 'allow') return { status: 'denied', output: 'The user declined this action. Do not try it again unless they ask.' };
@@ -125,7 +154,7 @@ export function createApp({ dataDir }) {
 	}
 
 	async function runTurn(id) {
-		const turn = { text: '', thinking: '', controller: new AbortController(), awaiting: new Map() };
+		const turn = { text: '', thinking: '', controller: new AbortController(), awaiting: new Map(), notes: new Map() };
 		const { signal } = turn.controller;
 		live.set(id, turn);
 		broadcast(id, { t: 'turn', phase: 'start' });
@@ -234,12 +263,30 @@ export function createApp({ dataDir }) {
 		['GET', /^\/api\/settings$/, () => publicSettings(db.getSettings())],
 		['PUT', /^\/api\/settings$/, async (req) => {
 			const patch = await readJson(req);
-			// An empty apiKey means "leave the saved key alone"; clearApiKey removes it.
-			if (patch.apiKey === '') delete patch.apiKey;
-			if (patch.clearApiKey) patch.apiKey = '';
+			// An empty secret means "leave the saved one alone"; clear<Name> removes it.
+			for (const key of SECRET_SETTINGS) {
+				if (patch[key] === '') delete patch[key];
+				if (patch[`clear${key[0].toUpperCase()}${key.slice(1)}`]) patch[key] = '';
+			}
 			db.setSettings(patch);
 			return publicSettings(db.getSettings());
 		}],
+		['GET', /^\/api\/system$/, () => gpu.status()],
+		['POST', /^\/api\/system\/quote$/, async (req) => {
+			const { minutes } = await readJson(req);
+			return gpuCall(() => gpu.quote({ minutes }));
+		}],
+		// Starting a pod spends money, so the caller must echo back the estimate it was shown.
+		['POST', /^\/api\/system\/pods$/, async (req) => {
+			const { minutes, confirmEstimate } = await readJson(req);
+			return gpuCall(async () => {
+				const q = await gpu.quote({ minutes });
+				if (!q.allowed) throw new GpuError(q.reason, 'refused');
+				if (confirmEstimate !== q.estimate) throw new GpuError(`The price changed to ${q.estimate.toFixed(2)} USD. Review the new quote and confirm again.`, 'refused');
+				return gpu.start({ minutes, purpose: 'Test pod', spec: TEST_POD });
+			});
+		}],
+		['DELETE', /^\/api\/system\/pods\/([\w-]+)$/, (_req, podId) => gpuCall(() => gpu.stop(podId, 'stopped by you')).then((pod) => pod || { ok: true })],
 		['GET', /^\/api\/models$/, async () => {
 			const s = db.getSettings();
 			try { return { models: await listModels({ baseUrl: s.baseUrl, apiKey: s.apiKey, signal: AbortSignal.timeout(8000) }) }; }
@@ -257,7 +304,7 @@ export function createApp({ dataDir }) {
 		mustGet(id);
 		res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
 		const turn = live.get(id);
-		res.write(`data: ${JSON.stringify({ t: 'snapshot', working: Boolean(turn), text: turn?.text || '', thinking: turn?.thinking || '', awaiting: [...(turn?.awaiting.keys() || [])], messages: db.listMessages(id) })}\n\n`);
+		res.write(`data: ${JSON.stringify({ t: 'snapshot', working: Boolean(turn), text: turn?.text || '', thinking: turn?.thinking || '', awaiting: [...(turn?.awaiting.keys() || [])].map((callId) => ({ id: callId, note: turn.notes.get(callId) || '' })), messages: db.listMessages(id) })}\n\n`);
 		if (!subscribers.has(id)) subscribers.set(id, new Set());
 		subscribers.get(id).add(res);
 		const ping = setInterval(() => res.write(': ping\n\n'), 20000);
@@ -317,7 +364,9 @@ export function createApp({ dataDir }) {
 			server.once('error', reject);
 			server.listen(port, host, () => resolve(server.address()));
 		}),
+		gpu,
 		async close() {
+			clearInterval(watchdog);
 			for (const turn of live.values()) cancelTurn(turn);
 			for (const set of subscribers.values()) for (const res of set) res.end();
 			server.closeAllConnections?.();

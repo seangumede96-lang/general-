@@ -14,7 +14,7 @@ const state = {
 	messages: [],      // saved messages of the open conversation
 	working: false,
 	live: null,        // { text, thinking } for the reply being generated
-	awaiting: new Set(), // ids of tool calls waiting for the user's approval
+	awaiting: new Map(), // tool-call id -> note (such as a price) for calls waiting for approval
 	events: null       // EventSource of the open conversation
 };
 
@@ -94,7 +94,10 @@ const TOOL_LABELS = {
 	read_file: (a) => `Read ${a.path || 'a file'}`,
 	write_file: (a) => `Write ${a.path || 'a file'}`,
 	remember: () => 'Save to memory',
-	recall: (a) => (a.query ? `Search memory for "${a.query}"` : 'Review recent memories')
+	recall: (a) => (a.query ? `Search memory for "${a.query}"` : 'Review recent memories'),
+	gpu_status: () => 'Check GPU budget',
+	start_gpu: (a) => `Start a GPU for ${a.minutes ?? '?'} min`,
+	stop_gpu: () => 'Stop the GPU'
 };
 const STATUS_TEXT = { running: 'Running', awaiting: 'Needs approval', ok: 'Done', error: 'Failed', denied: 'Declined' };
 
@@ -124,7 +127,10 @@ function toolNode(call, result) {
 	};
 	allow.addEventListener('click', decide('allow'));
 	deny.addEventListener('click', decide('deny'));
-	return el('div', { className: 'approval' }, details, el('div', { className: 'approval-actions' }, deny, allow));
+	const note = state.awaiting.get(call.id);
+	return el('div', { className: 'approval' }, details,
+		...(note ? [el('div', { className: 'approval-note', textContent: note })] : []),
+		el('div', { className: 'approval-actions' }, deny, allow));
 }
 
 function messageNode(m, results) {
@@ -179,8 +185,9 @@ function closeEvents() {
 }
 
 function showBlank() {
+	setView('chat');
 	closeEvents();
-	Object.assign(state, { currentId: null, messages: [], working: false, live: null, awaiting: new Set() });
+	Object.assign(state, { currentId: null, messages: [], working: false, live: null, awaiting: new Map() });
 	els.title.textContent = 'New chat';
 	history.replaceState(null, '', location.pathname);
 	renderSidebar();
@@ -189,6 +196,7 @@ function showBlank() {
 
 /** Open a conversation and resolve once its event stream has delivered the first snapshot. */
 function openConversation(id) {
+	setView('chat');
 	closeEvents();
 	setDrawer(false);
 	state.currentId = id;
@@ -218,7 +226,7 @@ function handleEvent(ev) {
 			state.messages = ev.messages;
 			state.working = ev.working;
 			state.live = ev.working ? { text: ev.text, thinking: ev.thinking } : null;
-			state.awaiting = new Set(ev.awaiting || []);
+			state.awaiting = new Map((ev.awaiting || []).map((a) => [a.id, a.note]));
 			renderThread();
 			break;
 		case 'message':
@@ -227,7 +235,7 @@ function handleEvent(ev) {
 			renderThread();
 			break;
 		case 'approval':
-			if (ev.waiting) state.awaiting.add(ev.id); else state.awaiting.delete(ev.id);
+			if (ev.waiting) state.awaiting.set(ev.id, ev.note || ''); else state.awaiting.delete(ev.id);
 			renderThread();
 			break;
 		case 'user':
@@ -361,9 +369,126 @@ els.settingsForm.addEventListener('submit', async (e) => {
 	}
 });
 
+/* ---------- System page ---------- */
+
+const sys = {
+	view: $('system'), error: $('sys-error'), remaining: $('sys-remaining'), meter: $('sys-meter'), spent: $('sys-spent'),
+	unknown: $('sys-unknown'), active: $('sys-active'), minutes: $('sys-minutes'), quoteOut: $('sys-quote-out'),
+	form: $('sys-form'), formStatus: $('sys-form-status'), history: $('sys-history'), timer: 0
+};
+const money = (n) => `$${Number(n).toFixed(2)}`;
+const clock = (secs) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+
+function setView(view) {
+	const system = view === 'system';
+	document.body.classList.toggle('view-system', system);
+	sys.view.hidden = !system;
+	clearInterval(sys.timer);
+	if (system) {
+		closeEvents();
+		state.currentId = null;
+		els.title.textContent = 'System';
+		renderSidebar();
+		refreshSystem(true);
+		sys.timer = setInterval(() => refreshSystem(false), 5000);
+	}
+}
+
+function kv(pairs) {
+	return el('div', { className: 'kv' }, ...pairs.map(([k, v]) => el('span', {}, `${k} `, el('b', { textContent: v }))));
+}
+
+async function stopPod(id, label) {
+	if (!confirm(`Delete ${label} now? Anything on it is lost.`)) return;
+	try { await api('DELETE', `/api/system/pods/${id}`); } catch (err) { alert(err.message); }
+	refreshSystem(false);
+}
+
+async function refreshSystem(fillForm) {
+	let s;
+	try { s = await api('GET', '/api/system'); } catch (err) { sys.error.hidden = false; sys.error.textContent = err.message; return; }
+	if (sys.view.hidden) return;
+	sys.error.hidden = !s.error;
+	sys.error.textContent = s.error || '';
+
+	const { total, spent, remaining } = s.budget;
+	sys.remaining.textContent = money(remaining);
+	sys.meter.style.width = `${total > 0 ? Math.min(100, spent / total * 100) : 100}%`;
+	sys.meter.parentElement.classList.toggle('low', total > 0 && remaining / total < 0.15);
+	sys.spent.textContent = `${money(spent)} spent of ${money(total)}`;
+
+	sys.unknown.replaceChildren(...s.unknown.map((p) => {
+		const del = el('button', { type: 'button', className: 'btn-danger', textContent: 'Delete' });
+		del.addEventListener('click', () => stopPod(p.id, `"${p.name}"`));
+		return el('div', { className: 'card warn' },
+			el('div', { className: 'card-cap', textContent: 'Pod not started by this app' }),
+			el('div', { className: 'pod' },
+				el('div', { className: 'pod-main' }, el('div', { className: 'pod-title', textContent: p.name || p.id }), kv([['Status', p.status], ['Rate', `${money(p.rate)}/h`]])),
+				del));
+	}));
+
+	if (!s.configured) sys.active.replaceChildren(el('div', { className: 'muted', textContent: 'Add a RunPod API key below to get started.' }));
+	else if (!s.active.length) sys.active.replaceChildren(el('div', { className: 'muted', textContent: 'Nothing is running. Nothing is being charged.' }));
+	else sys.active.replaceChildren(...s.active.map((p) => {
+		const stop = el('button', { type: 'button', className: 'btn-danger', textContent: 'Stop' });
+		stop.addEventListener('click', () => stopPod(p.id, 'the running pod'));
+		return el('div', { className: 'pod' },
+			el('div', { className: 'pod-main' },
+				el('div', { className: 'pod-title', textContent: `${p.gpu} · ${p.purpose || p.name}` }),
+				kv([['Cost so far', money(p.cost)], ['Rate', `${money(p.rate)}/h`], ['Time left', clock(p.secondsLeft)], ['Idle stop in', clock(p.idleStopInSeconds)]])),
+			stop);
+	}));
+
+	sys.history.replaceChildren(...(s.history.length ? s.history.map((p) => el('div', { className: 'hist' },
+		el('span', {}, `${new Date(p.created_at).toLocaleDateString()} · ${p.gpu} · ${p.purpose || p.name}`, el('span', { className: 'muted', textContent: ` (${p.end_reason || 'ended'})` })),
+		el('span', { textContent: `${p.final ? '' : '≈ '}${money(p.cost)}` })))
+		: [el('div', { className: 'muted', textContent: 'No pods yet.' })]));
+
+	if (fillForm) {
+		const settings = await api('GET', '/api/settings');
+		for (const name of ['budgetTotal', 'maxPodMinutes', 'idleMinutes']) sys.form.elements[name].value = settings[name];
+		sys.form.elements.runpodApiKey.value = '';
+		sys.form.elements.runpodApiKey.placeholder = settings.hasRunpodApiKey ? 'Saved (hidden)' : 'Not set';
+		sys.formStatus.textContent = '';
+		sys.quoteOut.replaceChildren();
+	}
+}
+
+$('sys-quote').addEventListener('click', async () => {
+	const minutes = Number(sys.minutes.value);
+	sys.quoteOut.replaceChildren(el('div', { className: 'muted small', textContent: 'Checking prices…' }));
+	let q;
+	try { q = await api('POST', '/api/system/quote', { minutes }); }
+	catch (err) { sys.quoteOut.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); return; }
+	if (!q.allowed) { sys.quoteOut.replaceChildren(el('div', { className: 'sys-alert', textContent: q.reason })); return; }
+	const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Start for up to ${money(q.estimate)}` });
+	go.addEventListener('click', async () => {
+		go.disabled = true;
+		go.textContent = 'Starting…';
+		try {
+			await api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate });
+			sys.quoteOut.replaceChildren();
+		} catch (err) { sys.quoteOut.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
+		refreshSystem(false);
+	});
+	sys.quoteOut.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: q.summary }), el('span', { className: 'spacer' }), go));
+});
+
+sys.form.addEventListener('submit', async (e) => {
+	e.preventDefault();
+	try {
+		await api('PUT', '/api/settings', Object.fromEntries(new FormData(sys.form)));
+		sys.formStatus.textContent = 'Saved.';
+		refreshSystem(true);
+	} catch (err) { sys.formStatus.textContent = err.message; }
+});
+
+$('open-system').addEventListener('click', () => { setDrawer(false); history.replaceState(null, '', '#system'); setView('system'); });
+
 /* ---------- Start ---------- */
 
 await refreshConversations();
 const wanted = location.hash.slice(1);
-if (wanted && state.conversations.some((c) => c.id === wanted)) await openConversation(wanted);
+if (wanted === 'system') setView('system');
+else if (wanted && state.conversations.some((c) => c.id === wanted)) await openConversation(wanted);
 else showBlank();

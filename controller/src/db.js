@@ -12,8 +12,18 @@ export const SETTING_DEFAULTS = {
 	systemPrompt: 'You are a capable, direct assistant. Format answers in Markdown.',
 	temperature: '0.7',
 	// One absolute folder per line. The assistant's file tools cannot leave these.
-	allowedDirs: ''
+	allowedDirs: '',
+	runpodApiKey: '',
+	runpodBaseUrl: '',
+	podCloud: 'COMMUNITY',
+	// Total you are willing to spend on GPUs. Pods are refused once this is used up.
+	budgetTotal: '50',
+	maxPodMinutes: '60',
+	idleMinutes: '10'
 };
+
+/** Settings that hold credentials: stored, used, never sent to the browser. */
+export const SECRET_SETTINGS = ['apiKey', 'runpodApiKey'];
 
 export function openDb(dataDir) {
 	mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -40,6 +50,19 @@ export function openDb(dataDir) {
 		);
 		CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation_id, id);
 		CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS pods (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			gpu TEXT NOT NULL,
+			rate REAL NOT NULL,          -- USD per hour, as reported by RunPod at creation
+			purpose TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			last_used_at INTEGER NOT NULL,
+			deadline_at INTEGER NOT NULL,
+			ended_at INTEGER,
+			end_reason TEXT,
+			actual_cost REAL             -- from RunPod billing once available; else estimated from rate
+		);
 		CREATE TABLE IF NOT EXISTS facts (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			text TEXT NOT NULL,
@@ -66,6 +89,12 @@ export function openDb(dataDir) {
 		insertFact: db.prepare('INSERT INTO facts (text, created_at) VALUES (?, ?)'),
 		searchFacts: db.prepare("SELECT id, text, created_at FROM facts WHERE text LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT 20"),
 		recentFacts: db.prepare('SELECT id, text, created_at FROM facts ORDER BY id DESC LIMIT 20'),
+		listPods: db.prepare('SELECT * FROM pods ORDER BY created_at DESC'),
+		getPod: db.prepare('SELECT * FROM pods WHERE id = ?'),
+		insertPod: db.prepare('INSERT INTO pods (id, name, gpu, rate, purpose, created_at, last_used_at, deadline_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+		endPod: db.prepare('UPDATE pods SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL'),
+		touchPod: db.prepare('UPDATE pods SET last_used_at = ? WHERE id = ?'),
+		setPodActualCost: db.prepare('UPDATE pods SET actual_cost = ? WHERE id = ?'),
 		allSettings: db.prepare('SELECT key, value FROM settings'),
 		setSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
 	};
@@ -99,6 +128,12 @@ export function openDb(dataDir) {
 			if (!words) return q.recentFacts.all();
 			return q.searchFacts.all(`%${words.replace(/[\\%_]/g, '\\$&')}%`);
 		},
+		listPods: () => q.listPods.all(),
+		getPod: (id) => q.getPod.get(id),
+		insertPod: (p) => { q.insertPod.run(p.id, p.name, p.gpu, p.rate, p.purpose, p.created_at, p.last_used_at, p.deadline_at); },
+		endPod: (id, at, reason) => { q.endPod.run(at, reason, id); },
+		touchPod: (id, at) => { q.touchPod.run(at, id); },
+		setPodActualCost: (id, cost) => { q.setPodActualCost.run(cost, id); },
 		getSettings() {
 			const out = { ...SETTING_DEFAULTS };
 			for (const row of q.allSettings.all()) if (row.key in out) out[row.key] = row.value;

@@ -16,11 +16,19 @@ Built and tested against a mock model:
 - **Phone files:** list, read and write, limited to folders you list in Settings.
   Paths and symlinks that lead outside those folders are refused.
 - **Memory:** `remember` and `recall` persist facts across conversations.
+- **GPU control (System page):** rents a RunPod pod only after showing the worst-case
+  price, refuses anything over the remaining budget or the per-pod time limit, allows one
+  pod at a time, and deletes it when idle, when its time is up, or on request. Each pod
+  also carries its own timer to delete itself if the phone goes offline. Every pod is
+  recorded in a cost ledger; RunPod's actual bill replaces the estimate when available.
+  Pods on the account that this app did not start are flagged.
 
-Not built yet: RunPod start/stop and spend cap, Backblaze B2, ComfyUI, Character and
-Video studios, MCP extensions, key encryption and login. See `../docs/PLAN.md`.
+Not built yet: a real workload on the pod (the brain, ComfyUI), Backblaze B2, Character
+and Video studios, MCP extensions, key encryption and login. See `../docs/PLAN.md`.
 
-Not yet tried on a real phone or with a real model.
+Not yet tried on a real phone, a real model or the real RunPod API. Two things can only
+be confirmed with a real pod: that the pod's own self-delete timer works with the key
+RunPod injects, and that the ledger matches RunPod's billing.
 
 ## Run it
 
@@ -53,13 +61,16 @@ npm test
 
 The tests start the server against a scripted mock model and cover streaming, history,
 reasoning separation, stop, reconnecting mid-reply, restart persistence, error reporting,
-API-key handling, multi-step tool use, approvals, folder limits and memory.
+API-key handling, multi-step tool use, approvals, folder limits, memory, and the pod
+lifecycle (budget refusals, idle and deadline shutdown, billing reconciliation) against a
+mock RunPod API.
 
 ## Layout
 
 - `src/server.js`: HTTP API, per-conversation event stream, turn runner
 - `src/model.js`: OpenAI-compatible streaming client, including tool calls
 - `src/tools.js`: tool registry, argument validation, folder limits
+- `src/gpu.js`: RunPod pod lifecycle, budget checks, cost ledger (REST API v2)
 - `src/db.js`: SQLite storage
 - `public/`: the chat page (plain HTML, CSS and JS, no build step)
 

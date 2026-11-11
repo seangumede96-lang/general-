@@ -6,6 +6,7 @@
 // here in code, so a confused or manipulated model cannot step outside them.
 import { readdir, readFile, writeFile, stat, realpath, mkdir } from 'node:fs/promises';
 import { resolve, dirname, sep, basename, join } from 'node:path';
+import { TEST_POD } from './gpu.js';
 
 const MAX_READ_BYTES = 64 * 1024;
 const MAX_OUTPUT_CHARS = 16 * 1024;
@@ -64,7 +65,7 @@ async function resolveAllowed(path, allowedDirs) {
 	throw new ToolError(`"${path}" is outside the folders shared with the assistant (${allowedDirs.join(', ')}).`);
 }
 
-export function createTools({ db }) {
+export function createTools({ db, gpu }) {
 	const dirs = () => parseAllowedDirs(db.getSettings().allowedDirs);
 
 	const tools = [
@@ -137,6 +138,46 @@ export function createTools({ db }) {
 			async run({ query }) {
 				const rows = db.searchFacts(query);
 				return rows.length ? rows.map((r) => `#${r.id} (${new Date(r.created_at).toISOString().slice(0, 10)}): ${r.text}`).join('\n') : 'No matching memories.';
+			}
+		},
+		{
+			name: 'gpu_status',
+			risk: 'read',
+			description: 'Show the GPU budget (spent and remaining) and any pod that is running now.',
+			parameters: { type: 'object', properties: {} },
+			async run() {
+				const b = gpu.budget();
+				const pod = gpu.activePod();
+				const line = `Budget: $${b.spent.toFixed(2)} spent, $${b.remaining.toFixed(2)} left of $${b.total.toFixed(2)}.`;
+				return pod ? `${line}\nRunning: ${pod.gpu} at $${pod.rate}/h (${pod.purpose || 'no purpose given'}), pod ${pod.id}.` : `${line}\nNo pod is running.`;
+			}
+		},
+		{
+			name: 'start_gpu',
+			risk: 'danger',
+			description: 'Rent a GPU pod for a fixed number of minutes. Costs money: the user sees the price and must approve. The pod is deleted automatically when the time is up or it sits idle.',
+			parameters: { type: 'object', properties: { minutes: { type: 'integer', description: 'Maximum lifetime in minutes.' }, purpose: { type: 'string', description: 'What the pod is for.' } }, required: ['minutes', 'purpose'] },
+			async preview({ minutes }) {
+				const q = await gpu.quote({ minutes });
+				return q.allowed ? { note: q.summary } : { refuse: `Cannot start a GPU: ${q.reason}` };
+			},
+			async run({ minutes, purpose }) {
+				try {
+					const pod = await gpu.start({ minutes, purpose, spec: TEST_POD });
+					return `Started pod ${pod.id}: ${pod.gpu} at $${pod.rate}/h, deleted automatically within ${minutes} minutes.`;
+				} catch (err) { throw new ToolError(err.message); }
+			}
+		},
+		{
+			name: 'stop_gpu',
+			risk: 'write',
+			description: 'Delete the running GPU pod now to stop charges.',
+			parameters: { type: 'object', properties: {} },
+			async run() {
+				const pod = gpu.activePod();
+				if (!pod) return 'No pod is running.';
+				try { await gpu.stop(pod.id, 'stopped by the assistant'); } catch (err) { throw new ToolError(err.message); }
+				return `Pod ${pod.id} deleted.`;
 			}
 		}
 	];

@@ -18,6 +18,10 @@
 	</div>
 	<nav id="conversations"></nav>
 	<div class="side-bottom">
+		<button id="open-system" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+			System
+		</button>
 		<button id="open-settings" class="side-btn">
 			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
 			Settings
@@ -42,6 +46,55 @@
 			<h1>What can I help with?</h1>
 		</div>
 	</div>
+
+	<section id="system" hidden>
+		<div class="sys-wrap">
+			<p id="sys-error" class="sys-alert" role="alert" hidden></p>
+
+			<div class="card">
+				<div class="card-cap">GPU budget</div>
+				<div class="budget-row"><span id="sys-remaining" class="big">–</span><span class="muted">left</span></div>
+				<div class="meter" role="img" aria-label="Budget used"><div id="sys-meter"></div></div>
+				<div id="sys-spent" class="muted small"></div>
+			</div>
+
+			<div id="sys-unknown"></div>
+
+			<div class="card">
+				<div class="card-cap">Running now</div>
+				<div id="sys-active"></div>
+			</div>
+
+			<div class="card" id="sys-start-card">
+				<div class="card-cap">Test pod</div>
+				<p class="muted small">Rents the cheapest 24 GB GPU and does nothing with it. Use it once to prove start, cost tracking and automatic shutdown.</p>
+				<div class="row">
+					<label class="inline">Minutes <input id="sys-minutes" type="number" min="1" value="5" inputmode="numeric"></label>
+					<button id="sys-quote" type="button" class="btn-ghost">Get price</button>
+				</div>
+				<div id="sys-quote-out"></div>
+			</div>
+
+			<form class="card" id="sys-form">
+				<div class="card-cap">RunPod</div>
+				<label>API key
+					<input name="runpodApiKey" type="password" autocomplete="off" placeholder="Not set">
+					<small>Stored on this device only. Leave blank to keep the saved key.</small>
+				</label>
+				<div class="grid3">
+					<label>Budget (USD) <input name="budgetTotal" type="number" min="0" step="0.01"></label>
+					<label>Max minutes per pod <input name="maxPodMinutes" type="number" min="1"></label>
+					<label>Stop when idle (min) <input name="idleMinutes" type="number" min="1"></label>
+				</div>
+				<div class="row"><span id="sys-form-status" class="muted small" role="status"></span><span class="spacer"></span><button type="submit" class="btn-primary">Save</button></div>
+			</form>
+
+			<div class="card">
+				<div class="card-cap">History</div>
+				<div id="sys-history"></div>
+			</div>
+		</div>
+	</section>
 
 	<form id="composer">
 		<div class="composer-box">
