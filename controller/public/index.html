@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#212121">
+<title>Assistant</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="scrim" hidden></div>
+<aside id="sidebar" aria-label="Conversations">
+	<div class="side-top">
+		<button id="new-chat" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+			New chat
+		</button>
+	</div>
+	<nav id="conversations"></nav>
+	<div class="side-bottom">
+		<button id="open-settings" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
+			Settings
+		</button>
+	</div>
+</aside>
+
+<main>
+	<header>
+		<button id="menu" class="icon-btn" aria-label="Open conversations">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+		</button>
+		<div id="title">New chat</div>
+		<button id="header-new" class="icon-btn" aria-label="New chat">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+		</button>
+	</header>
+
+	<div id="scroller">
+		<div id="thread"></div>
+		<div id="empty">
+			<h1>What can I help with?</h1>
+		</div>
+	</div>
+
+	<form id="composer">
+		<div class="composer-box">
+			<textarea id="input" rows="1" placeholder="Message" autocomplete="off"></textarea>
+			<button id="send" type="submit" aria-label="Send" disabled>
+				<svg class="i-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+				<svg class="i-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+			</button>
+		</div>
+	</form>
+</main>
+
+<dialog id="settings">
+	<form method="dialog" id="settings-form">
+		<h2>Settings</h2>
+		<label>Model endpoint
+			<input name="baseUrl" type="url" inputmode="url" placeholder="http://127.0.0.1:8000/v1" required>
+			<small>Any OpenAI-compatible address, ending in /v1.</small>
+		</label>
+		<label>API key
+			<input name="apiKey" type="password" autocomplete="off" placeholder="Not set">
+			<small id="key-note">Stored on this device only. Leave blank to keep the saved key.</small>
+		</label>
+		<label>Model
+			<input name="model" list="model-list" placeholder="Use the endpoint's first model" autocomplete="off">
+			<datalist id="model-list"></datalist>
+		</label>
+		<label>System prompt
+			<textarea name="systemPrompt" rows="4"></textarea>
+		</label>
+		<label>Temperature
+			<input name="temperature" type="number" min="0" max="2" step="0.1">
+		</label>
+		<p id="settings-status" role="status"></p>
+		<div class="dialog-actions">
+			<button type="button" id="test-endpoint" class="btn-ghost">Test connection</button>
+			<span class="spacer"></span>
+			<button type="button" id="cancel-settings" class="btn-ghost">Cancel</button>
+			<button type="submit" class="btn-primary">Save</button>
+		</div>
+	</form>
+</dialog>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
