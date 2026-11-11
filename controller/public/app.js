@@ -14,6 +14,7 @@ const state = {
 	messages: [],      // saved messages of the open conversation
 	working: false,
 	live: null,        // { text, thinking } for the reply being generated
+	awaiting: new Set(), // ids of tool calls waiting for the user's approval
 	events: null       // EventSource of the open conversation
 };
 
@@ -88,14 +89,58 @@ function assistantNode({ content, reasoning, status }, streaming = false) {
 	return node;
 }
 
-function messageNode(m) {
+const TOOL_LABELS = {
+	list_files: (a) => (a.path ? `List files in ${a.path}` : 'List shared folders'),
+	read_file: (a) => `Read ${a.path || 'a file'}`,
+	write_file: (a) => `Write ${a.path || 'a file'}`,
+	remember: () => 'Save to memory',
+	recall: (a) => (a.query ? `Search memory for "${a.query}"` : 'Review recent memories')
+};
+const STATUS_TEXT = { running: 'Running', awaiting: 'Needs approval', ok: 'Done', error: 'Failed', denied: 'Declined' };
+
+function toolNode(call, result) {
+	let args = {};
+	try { args = JSON.parse(call.arguments || '{}') ?? {}; } catch { /* shown raw below */ }
+	const status = result ? result.status : state.awaiting.has(call.id) ? 'awaiting' : state.working ? 'running' : 'error';
+	const label = (TOOL_LABELS[call.name] || (() => call.name))(args);
+
+	const details = el('details', { className: `tool ${status}`, open: status === 'awaiting' });
+	const summary = el('summary', {},
+		el('span', { className: 'tool-label', textContent: label }),
+		el('span', { className: 'tool-status', textContent: result || state.working ? STATUS_TEXT[status] : 'Interrupted' }));
+	const body = el('div', { className: 'tool-body' });
+	const shown = Object.entries(args).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n') || call.arguments || '(no input)';
+	body.append(el('div', { className: 'tool-cap', textContent: 'Input' }), el('pre', { textContent: shown }));
+	if (result) body.append(el('div', { className: 'tool-cap', textContent: 'Result' }), el('pre', { textContent: result.content }));
+	details.append(summary, body);
+
+	if (status !== 'awaiting') return details;
+	const allow = el('button', { type: 'button', className: 'btn-primary', textContent: 'Allow' });
+	const deny = el('button', { type: 'button', className: 'btn-ghost', textContent: 'Decline' });
+	const decide = (decision) => async () => {
+		allow.disabled = deny.disabled = true;
+		try { await api('POST', `/api/conversations/${state.currentId}/approvals/${encodeURIComponent(call.id)}`, { decision }); }
+		catch { allow.disabled = deny.disabled = false; }
+	};
+	allow.addEventListener('click', decide('allow'));
+	deny.addEventListener('click', decide('deny'));
+	return el('div', { className: 'approval' }, details, el('div', { className: 'approval-actions' }, deny, allow));
+}
+
+function messageNode(m, results) {
 	if (m.role === 'user') return el('div', { className: 'msg user', textContent: m.content });
 	if (m.role === 'error') return el('div', { className: 'msg error', role: 'alert', textContent: m.content });
-	return assistantNode(m);
+	const calls = m.tool_calls ? JSON.parse(m.tool_calls) : [];
+	if (!calls.length) return assistantNode(m);
+	const group = el('div', { className: 'msg assistant' });
+	if (m.content || m.reasoning) group.append(...assistantNode(m).childNodes);
+	group.append(...calls.map((c) => toolNode(c, results.get(c.id))));
+	return group;
 }
 
 function renderThread() {
-	const nodes = state.messages.map(messageNode);
+	const results = new Map(state.messages.filter((m) => m.role === 'tool').map((m) => [m.tool_call_id, m]));
+	const nodes = state.messages.filter((m) => m.role !== 'tool').map((m) => messageNode(m, results));
 	if (state.working) nodes.push(Object.assign(assistantNode(state.live || {}, true), { id: 'live' }));
 	els.thread.replaceChildren(...nodes);
 	document.body.classList.toggle('is-empty', !nodes.length);
@@ -135,7 +180,7 @@ function closeEvents() {
 
 function showBlank() {
 	closeEvents();
-	Object.assign(state, { currentId: null, messages: [], working: false, live: null });
+	Object.assign(state, { currentId: null, messages: [], working: false, live: null, awaiting: new Set() });
 	els.title.textContent = 'New chat';
 	history.replaceState(null, '', location.pathname);
 	renderSidebar();
@@ -173,6 +218,16 @@ function handleEvent(ev) {
 			state.messages = ev.messages;
 			state.working = ev.working;
 			state.live = ev.working ? { text: ev.text, thinking: ev.thinking } : null;
+			state.awaiting = new Set(ev.awaiting || []);
+			renderThread();
+			break;
+		case 'message':
+			if (!state.messages.some((m) => m.id === ev.message.id)) state.messages.push(ev.message);
+			if (state.live) state.live = { text: '', thinking: '' };
+			renderThread();
+			break;
+		case 'approval':
+			if (ev.waiting) state.awaiting.add(ev.id); else state.awaiting.delete(ev.id);
 			renderThread();
 			break;
 		case 'user':
@@ -190,7 +245,7 @@ function handleEvent(ev) {
 			} else {
 				state.working = false;
 				state.live = null;
-				for (const m of ev.messages || []) if (!state.messages.some((x) => x.id === m.id)) state.messages.push(m);
+				state.awaiting.clear();
 				refreshConversations();
 			}
 			renderThread();

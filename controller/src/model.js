@@ -50,11 +50,13 @@ export async function listModels({ baseUrl, apiKey, signal }) {
 
 /**
  * Run one streamed completion. Calls onText / onThinking with deltas as they arrive and
- * resolves with the full { content, reasoning }. Rejects on HTTP or network failure; an
+ * resolves with the full { content, reasoning, toolCalls }; toolCalls is a list of
+ * { id, name, arguments } with arguments still a raw JSON string (the caller validates it). Rejects on HTTP or network failure; an
  * abort rejects with the AbortError from fetch.
  */
-export async function streamChat({ baseUrl, apiKey, model, messages, temperature, signal, onText, onThinking }) {
+export async function streamChat({ baseUrl, apiKey, model, messages, tools, temperature, signal, onText, onThinking }) {
 	const body = { model, messages, stream: true };
+	if (tools?.length) body.tools = tools;
 	if (Number.isFinite(temperature)) body.temperature = temperature;
 
 	const res = await fetch(`${trimUrl(baseUrl)}/chat/completions`, {
@@ -75,6 +77,7 @@ export async function streamChat({ baseUrl, apiKey, model, messages, temperature
 		(s) => { reasoning += s; onThinking?.(s); }
 	);
 
+	const calls = new Map(); // stream index -> { id, name, arguments }
 	const decoder = new TextDecoder();
 	let pending = '';
 	let done = false;
@@ -95,9 +98,22 @@ export async function streamChat({ baseUrl, apiKey, model, messages, temperature
 			const r = delta.reasoning_content || delta.reasoning;
 			if (typeof r === 'string' && r) { reasoning += r; onThinking?.(r); }
 			if (typeof delta.content === 'string' && delta.content) splitter.push(delta.content);
+			for (const tc of delta.tool_calls || []) {
+				const idx = tc.index ?? 0;
+				const cur = calls.get(idx) || { id: '', name: '', arguments: '' };
+				if (tc.id) cur.id = tc.id;
+				if (tc.function?.name) cur.name = tc.function.name;
+				if (tc.function?.arguments) cur.arguments += tc.function.arguments;
+				calls.set(idx, cur);
+			}
 		}
 		if (done) break;
 	}
 	splitter.flush();
-	return { content, reasoning };
+	const toolCalls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c], i) => ({
+		id: c.id || `call_${Date.now().toString(36)}_${i}`,
+		name: c.name,
+		arguments: c.arguments
+	}));
+	return { content, reasoning, toolCalls };
 }

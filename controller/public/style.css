@@ -104,6 +104,24 @@ details.thinking .thought { white-space: pre-wrap; border-left: 2px solid var(--
 @keyframes pulse { 50% { transform: scale(.7); opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } #sidebar { transition: none !important; } }
 
+/* Tool activity */
+.msg.assistant > .tool, .msg.assistant > .approval { margin-top: 8px; }
+.tool { border: 1px solid var(--border); border-radius: 12px; font-size: 14.5px; }
+.tool summary { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; }
+.tool summary::-webkit-details-marker { display: none; }
+.tool-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-status { flex: none; font-size: 12.5px; color: var(--muted); }
+.tool.running .tool-status::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1s ease-in-out infinite; }
+.tool.error .tool-status, .tool.denied .tool-status { color: var(--danger); }
+.tool.awaiting .tool-status { color: #f2c66d; }
+.tool-body { padding: 0 12px 12px; }
+.tool-cap { color: var(--muted); font-size: 12px; margin: 8px 0 4px; }
+.tool-body pre { margin: 0; padding: 8px 10px; background: #171717; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.approval { border: 1px solid #6b5a2a; border-radius: 14px; background: #262218; }
+.approval .tool { border: 0; }
+.approval-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 12px 12px; }
+.approval-actions button:disabled { opacity: .5; cursor: default; }
+
 /* Composer */
 #composer { padding: 0 12px max(12px, env(safe-area-inset-bottom)); }
 .composer-box {

@@ -10,7 +10,9 @@ export const SETTING_DEFAULTS = {
 	apiKey: '',
 	model: '',
 	systemPrompt: 'You are a capable, direct assistant. Format answers in Markdown.',
-	temperature: '0.7'
+	temperature: '0.7',
+	// One absolute folder per line. The assistant's file tools cannot leave these.
+	allowedDirs: ''
 };
 
 export function openDb(dataDir) {
@@ -30,7 +32,7 @@ export function openDb(dataDir) {
 		CREATE TABLE IF NOT EXISTS messages (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-			role TEXT NOT NULL,            -- user | assistant | error
+			role TEXT NOT NULL,            -- user | assistant | tool | error
 			content TEXT NOT NULL DEFAULT '',
 			reasoning TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT 'ok',  -- ok | stopped | error
@@ -38,7 +40,19 @@ export function openDb(dataDir) {
 		);
 		CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation_id, id);
 		CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS facts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			text TEXT NOT NULL,
+			created_at INTEGER NOT NULL
+		);
 	`);
+	// Columns added after the first release; older databases are upgraded in place.
+	const have = new Set(db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name));
+	for (const [name, ddl] of [
+		['tool_calls', "TEXT NOT NULL DEFAULT ''"],    // assistant: JSON [{id,name,arguments}]
+		['tool_call_id', "TEXT NOT NULL DEFAULT ''"],  // tool: which call this answers
+		['tool_name', "TEXT NOT NULL DEFAULT ''"]
+	]) if (!have.has(name)) db.exec(`ALTER TABLE messages ADD COLUMN ${name} ${ddl}`);
 
 	const q = {
 		listConversations: db.prepare('SELECT * FROM conversations ORDER BY updated_at DESC'),
@@ -48,7 +62,10 @@ export function openDb(dataDir) {
 		touch: db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?'),
 		deleteConversation: db.prepare('DELETE FROM conversations WHERE id = ?'),
 		listMessages: db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id'),
-		insertMessage: db.prepare('INSERT INTO messages (conversation_id, role, content, reasoning, status, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+		insertMessage: db.prepare('INSERT INTO messages (conversation_id, role, content, reasoning, status, created_at, tool_calls, tool_call_id, tool_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+		insertFact: db.prepare('INSERT INTO facts (text, created_at) VALUES (?, ?)'),
+		searchFacts: db.prepare("SELECT id, text, created_at FROM facts WHERE text LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT 20"),
+		recentFacts: db.prepare('SELECT id, text, created_at FROM facts ORDER BY id DESC LIMIT 20'),
 		allSettings: db.prepare('SELECT key, value FROM settings'),
 		setSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
 	};
@@ -66,11 +83,21 @@ export function openDb(dataDir) {
 		setTitle: (id, title) => { q.setTitle.run(title, id); },
 		deleteConversation: (id) => { q.deleteConversation.run(id); },
 		listMessages: (id) => q.listMessages.all(id),
-		addMessage(conversationId, { role, content = '', reasoning = '', status = 'ok' }) {
+		addMessage(conversationId, { role, content = '', reasoning = '', status = 'ok', toolCalls = null, toolCallId = '', toolName = '' }) {
 			const now = Date.now();
-			const r = q.insertMessage.run(conversationId, role, content, reasoning, status, now);
+			const tool_calls = toolCalls?.length ? JSON.stringify(toolCalls) : '';
+			const r = q.insertMessage.run(conversationId, role, content, reasoning, status, now, tool_calls, toolCallId, toolName);
 			q.touch.run(now, conversationId);
-			return { id: Number(r.lastInsertRowid), conversation_id: conversationId, role, content, reasoning, status, created_at: now };
+			return { id: Number(r.lastInsertRowid), conversation_id: conversationId, role, content, reasoning, status, created_at: now, tool_calls, tool_call_id: toolCallId, tool_name: toolName };
+		},
+		addFact(text) {
+			const r = q.insertFact.run(text, Date.now());
+			return Number(r.lastInsertRowid);
+		},
+		searchFacts(query) {
+			const words = String(query || '').trim();
+			if (!words) return q.recentFacts.all();
+			return q.searchFacts.all(`%${words.replace(/[\\%_]/g, '\\$&')}%`);
 		},
 		getSettings() {
 			const out = { ...SETTING_DEFAULTS };

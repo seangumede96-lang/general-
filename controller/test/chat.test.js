@@ -69,8 +69,8 @@ after(async () => {
 });
 
 beforeEach(async () => {
-	Object.assign(mock.state, { chunks: ['Hello', ' from the', ' mock model.'], delayMs: 0, requireKey: null, requests: [] });
-	await api('PUT', '/api/settings', { baseUrl: mock.baseUrl, model: '', clearApiKey: true });
+	Object.assign(mock.state, { chunks: ['Hello', ' from the', ' mock model.'], delayMs: 0, requireKey: null, requests: [], replies: [] });
+	await api('PUT', '/api/settings', { baseUrl: mock.baseUrl, model: '', clearApiKey: true, allowedDirs: '' });
 });
 
 test('streams a reply, saves it, and titles the conversation', async () => {

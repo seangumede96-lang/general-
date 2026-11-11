@@ -7,13 +7,20 @@ OpenRouter). It has no npm dependencies, so there is nothing to compile on Andro
 
 ## Status
 
-Milestone 1 of 6 (chat foundation). Working: streaming replies, collapsed reasoning
-(`<think>` tags or native reasoning deltas), stop, saved history, conversation list,
-endpoint/key/model settings. A reply keeps generating and is saved if the phone sleeps or the
-page reloads.
+Built and tested against a mock model:
 
-Not built yet: RunPod start/stop, Backblaze B2 model library, tools and approvals, MCP,
-long-term memory, key encryption and login.
+- **Chat:** streaming replies, collapsed reasoning, stop, saved history, conversation list.
+- **Agent:** the model can call tools over several steps. Every call is validated before
+  it runs; a bad call is returned to the model as an error it can correct.
+- **Approvals:** anything that changes your files waits for Allow or Decline in the chat.
+- **Phone files:** list, read and write, limited to folders you list in Settings.
+  Paths and symlinks that lead outside those folders are refused.
+- **Memory:** `remember` and `recall` persist facts across conversations.
+
+Not built yet: RunPod start/stop and spend cap, Backblaze B2, ComfyUI, Character and
+Video studios, MCP extensions, key encryption and login. See `../docs/PLAN.md`.
+
+Not yet tried on a real phone or with a real model.
 
 ## Run it
 
@@ -45,13 +52,14 @@ npm test
 ```
 
 The tests start the server against a scripted mock model and cover streaming, history,
-reasoning separation, stop, reconnecting mid-reply, restart persistence, error reporting and
-API-key handling.
+reasoning separation, stop, reconnecting mid-reply, restart persistence, error reporting,
+API-key handling, multi-step tool use, approvals, folder limits and memory.
 
 ## Layout
 
 - `src/server.js`: HTTP API, per-conversation event stream, turn runner
-- `src/model.js`: OpenAI-compatible streaming client
+- `src/model.js`: OpenAI-compatible streaming client, including tool calls
+- `src/tools.js`: tool registry, argument validation, folder limits
 - `src/db.js`: SQLite storage
 - `public/`: the chat page (plain HTML, CSS and JS, no build step)
 

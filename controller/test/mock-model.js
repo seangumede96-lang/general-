@@ -6,9 +6,11 @@ import { createServer } from 'node:http';
  * @param {string[]} [opts.chunks]  content deltas to stream
  * @param {number} [opts.delayMs]   pause between deltas
  * @param {string} [opts.requireKey] reject requests without this bearer key
+ * @param {Array} [opts.replies]    queue of scripted replies, one per request; each is
+ *   { chunks: [...] } or { toolCalls: [{ name, arguments }] }. When empty, `chunks` is used.
  */
 export async function startMockModel(opts = {}) {
-	const state = { chunks: ['Hello', ' from the', ' mock model.'], delayMs: 0, requireKey: null, requests: [], ...opts };
+	const state = { chunks: ['Hello', ' from the', ' mock model.'], delayMs: 0, requireKey: null, requests: [], replies: [], ...opts };
 	const server = createServer(async (req, res) => {
 		if (state.requireKey && req.headers.authorization !== `Bearer ${state.requireKey}`) {
 			res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -23,7 +25,16 @@ export async function startMockModel(opts = {}) {
 			for await (const c of req) raw += c;
 			state.requests.push(JSON.parse(raw));
 			res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-			for (const content of state.chunks) {
+			const reply = state.replies.shift() || { chunks: state.chunks };
+			for (const [index, call] of (reply.toolCalls || []).entries()) {
+				// Split the arguments in two, as real servers stream them in fragments.
+				const args = typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments);
+				const half = Math.ceil(args.length / 2);
+				const id = call.id || `call_${state.requests.length}_${index}`;
+				res.write(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index, id, type: 'function', function: { name: call.name, arguments: args.slice(0, half) } }] } }] })}\n\n`);
+				res.write(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index, function: { arguments: args.slice(half) } }] } }] })}\n\n`);
+			}
+			for (const content of reply.chunks || []) {
 				if (res.destroyed) return;
 				res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
 				if (state.delayMs) await new Promise((r) => setTimeout(r, state.delayMs));

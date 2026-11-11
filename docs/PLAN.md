@@ -420,6 +420,21 @@ content. Build the production line first with direct controls, add the brain las
 After D, roughly $45 remains and the system can already produce sellable image sets at
 about 5 cents per character sheet.
 
+## 11. Decisions recorded (11 November 2026)
+
+| Question | Answer | Consequence |
+| --- | --- | --- |
+| Product | Short videos and stylised videos | Video benchmark is the stage that decides viability; move it as early as pod control allows |
+| Platforms | Adult subscription sites and social media | Check each platform's AI-disclosure and content rules before the Video Studio |
+| LoRA base | Flux or unknown | Flux.1 dev is unsafe for paid work; inspect each LoRA once storage is connected. Video replacement needs only a reference image, which can come from a commercially safe model |
+| Build order | Agent-first | Agent loop, tools, approvals and memory built before pod control |
+| Phone | OnePlus/Oppo/Realme, Android version unknown | Highest-risk family for background kills; the phone test decides whether the controller can live on the phone |
+| Brain | Both self-hosted and free hosted tier | No extra build; a settings choice |
+| Footage | User's own | Clear for commercial use |
+
+Built since approval: agent loop with validated tool calls, approval gate, phone file
+tools limited to shared folders, and memory tools. See `controller/README.md`.
+
 ## Sources
 
 - RunPod pricing and billing: https://www.runpod.io/pricing · https://docs.runpod.io/pods/pricing · https://docs.runpod.io/accounts-billing/billing

@@ -7,10 +7,12 @@ import { join, normalize, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { streamChat, listModels } from './model.js';
+import { createTools } from './tools.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const MAX_BODY = 1024 * 1024;
+const MAX_STEPS = 12;
 
 class HttpError extends Error {
 	constructor(status, message) { super(message); this.status = status; }
@@ -37,7 +39,8 @@ const titleFrom = (text) => {
 
 export function createApp({ dataDir }) {
 	const db = openDb(dataDir);
-	/** conversationId -> { text, thinking, controller } for a turn in flight */
+	const tools = createTools({ db });
+	/** conversationId -> { text, thinking, controller, awaiting } for a turn in flight */
 	const live = new Map();
 	/** conversationId -> Set<ServerResponse> of attached SSE clients */
 	const subscribers = new Map();
@@ -54,43 +57,121 @@ export function createApp({ dataDir }) {
 		return models[0];
 	}
 
+	/** Stop a turn: abort the model request and answer any open approval prompt with "deny". */
+	function cancelTurn(turn) {
+		turn.controller.abort();
+		for (const resolve of turn.awaiting.values()) resolve('deny');
+	}
+
+	/**
+	 * Rebuild the chat-completions history from saved rows. Every tool call must be followed
+	 * by a result or the endpoint rejects the request, so calls left unanswered by a crash or
+	 * a stop get a synthetic "interrupted" result here.
+	 */
+	function buildHistory(id, settings) {
+		const out = [];
+		const system = [settings.systemPrompt, `Today is ${new Date().toISOString().slice(0, 10)}. You can call tools; use one when it helps and answer directly when it does not. If a tool reports an error, read it and correct the call.`].filter(Boolean).join('\n\n');
+		out.push({ role: 'system', content: system });
+		let open = [];
+		const closeOpen = () => {
+			for (const callId of open) out.push({ role: 'tool', tool_call_id: callId, content: 'No result: the action was interrupted.' });
+			open = [];
+		};
+		for (const m of db.listMessages(id)) {
+			if (m.role === 'tool') {
+				if (!open.includes(m.tool_call_id)) continue;
+				open = open.filter((c) => c !== m.tool_call_id);
+				out.push({ role: 'tool', tool_call_id: m.tool_call_id, content: m.content });
+				continue;
+			}
+			closeOpen();
+			if (m.role === 'user') out.push({ role: 'user', content: m.content });
+			if (m.role !== 'assistant') continue;
+			const calls = m.tool_calls ? JSON.parse(m.tool_calls) : [];
+			if (!m.content && !calls.length) continue;
+			const msg = { role: 'assistant', content: m.content || null };
+			if (calls.length) {
+				msg.tool_calls = calls.map((c) => {
+					let args = c.arguments || '{}';
+					try { JSON.parse(args); } catch { args = '{}'; }
+					return { id: c.id, type: 'function', function: { name: c.name, arguments: args } };
+				});
+				open = calls.map((c) => c.id);
+			}
+			out.push(msg);
+		}
+		closeOpen();
+		return out;
+	}
+
+	/** Validate one proposed tool call, ask for approval if it is risky, then run it. */
+	async function executeCall(id, turn, call) {
+		const cancelled = { status: 'error', output: 'Cancelled by the user.' };
+		const prep = tools.prepare(call.name, call.arguments);
+		if (prep.error) return { status: 'error', output: prep.error };
+		if (turn.controller.signal.aborted) return cancelled;
+		if (prep.tool.risk === 'danger') {
+			const decision = await new Promise((resolve) => {
+				turn.awaiting.set(call.id, resolve);
+				broadcast(id, { t: 'approval', id: call.id, waiting: true });
+			});
+			turn.awaiting.delete(call.id);
+			broadcast(id, { t: 'approval', id: call.id, waiting: false });
+			if (turn.controller.signal.aborted) return cancelled;
+			if (decision !== 'allow') return { status: 'denied', output: 'The user declined this action. Do not try it again unless they ask.' };
+		}
+		const result = await tools.run(prep.tool, prep.args);
+		return { status: result.ok ? 'ok' : 'error', output: result.output };
+	}
+
 	async function runTurn(id) {
-		const turn = { text: '', thinking: '', controller: new AbortController() };
+		const turn = { text: '', thinking: '', controller: new AbortController(), awaiting: new Map() };
+		const { signal } = turn.controller;
 		live.set(id, turn);
 		broadcast(id, { t: 'turn', phase: 'start' });
 		const settings = db.getSettings();
+		// Save a message and show it to attached clients, unless the conversation was deleted.
+		const save = (m) => {
+			if (!db.getConversation(id)) return;
+			turn.text = '';
+			turn.thinking = '';
+			broadcast(id, { t: 'message', message: db.addMessage(id, m) });
+		};
 		let status = 'ok';
 		try {
-			const history = db.listMessages(id)
-				.filter((m) => m.role === 'user' || (m.role === 'assistant' && m.content))
-				.map((m) => ({ role: m.role, content: m.content }));
-			const messages = settings.systemPrompt
-				? [{ role: 'system', content: settings.systemPrompt }, ...history]
-				: history;
-			await streamChat({
-				baseUrl: settings.baseUrl,
-				apiKey: settings.apiKey,
-				model: await resolveModel(settings, turn.controller.signal),
-				messages,
-				temperature: Number.parseFloat(settings.temperature),
-				signal: turn.controller.signal,
-				onText: (s) => { turn.text += s; broadcast(id, { t: 'text', text: s }); },
-				onThinking: (s) => { turn.thinking += s; broadcast(id, { t: 'thinking', text: s }); }
-			});
+			const model = await resolveModel(settings, signal);
+			for (let step = 0; ; step++) {
+				if (step >= MAX_STEPS) throw new Error(`Stopped after ${MAX_STEPS} tool steps without finishing. Ask me to continue if the task needs more.`);
+				const result = await streamChat({
+					baseUrl: settings.baseUrl,
+					apiKey: settings.apiKey,
+					model,
+					messages: buildHistory(id, settings),
+					tools: tools.definitions(),
+					temperature: Number.parseFloat(settings.temperature),
+					signal,
+					onText: (s) => { turn.text += s; broadcast(id, { t: 'text', text: s }); },
+					onThinking: (s) => { turn.thinking += s; broadcast(id, { t: 'thinking', text: s }); }
+				});
+				if (result.content || result.reasoning || result.toolCalls.length) {
+					save({ role: 'assistant', content: result.content, reasoning: result.reasoning, toolCalls: result.toolCalls });
+				}
+				if (!result.toolCalls.length) break;
+				for (const call of result.toolCalls) {
+					const outcome = await executeCall(id, turn, call);
+					save({ role: 'tool', content: outcome.output, status: outcome.status, toolCallId: call.id, toolName: call.name });
+				}
+				signal.throwIfAborted();
+			}
 		} catch (err) {
-			status = turn.controller.signal.aborted ? 'stopped' : 'error';
+			status = signal.aborted ? 'stopped' : 'error';
 			if (status === 'error') turn.error = describeError(err, settings);
 		}
 		// Persist whatever arrived, even on stop/failure, so nothing the user saw is lost.
-		const saved = [];
-		if (db.getConversation(id)) {
-			if (turn.text || turn.thinking) {
-				saved.push(db.addMessage(id, { role: 'assistant', content: turn.text, reasoning: turn.thinking, status }));
-			}
-			if (turn.error) saved.push(db.addMessage(id, { role: 'error', content: turn.error, status: 'error' }));
-		}
+		if (turn.text || turn.thinking) save({ role: 'assistant', content: turn.text, reasoning: turn.thinking, status });
+		if (turn.error) save({ role: 'error', content: turn.error, status: 'error' });
 		live.delete(id);
-		broadcast(id, { t: 'turn', phase: 'end', status, messages: saved });
+		broadcast(id, { t: 'turn', phase: 'end', status });
 	}
 
 	function describeError(err, settings) {
@@ -117,7 +198,7 @@ export function createApp({ dataDir }) {
 		}],
 		['DELETE', /^\/api\/conversations\/([\w-]+)$/, (_req, id) => {
 			mustGet(id);
-			live.get(id)?.controller.abort();
+			if (live.has(id)) cancelTurn(live.get(id));
 			db.deleteConversation(id);
 			return { ok: true };
 		}],
@@ -138,7 +219,16 @@ export function createApp({ dataDir }) {
 		}],
 		['POST', /^\/api\/conversations\/([\w-]+)\/stop$/, (_req, id) => {
 			mustGet(id);
-			live.get(id)?.controller.abort();
+			if (live.has(id)) cancelTurn(live.get(id));
+			return { ok: true };
+		}],
+		['POST', /^\/api\/conversations\/([\w-]+)\/approvals\/([\w.:-]+)$/, async (req, id, callId) => {
+			mustGet(id);
+			const { decision } = await readJson(req);
+			if (decision !== 'allow' && decision !== 'deny') throw new HttpError(400, 'decision must be "allow" or "deny"');
+			const resolve = live.get(id)?.awaiting.get(callId);
+			if (!resolve) throw new HttpError(404, 'That request is no longer waiting for approval');
+			resolve(decision);
 			return { ok: true };
 		}],
 		['GET', /^\/api\/settings$/, () => publicSettings(db.getSettings())],
@@ -167,7 +257,7 @@ export function createApp({ dataDir }) {
 		mustGet(id);
 		res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
 		const turn = live.get(id);
-		res.write(`data: ${JSON.stringify({ t: 'snapshot', working: Boolean(turn), text: turn?.text || '', thinking: turn?.thinking || '', messages: db.listMessages(id) })}\n\n`);
+		res.write(`data: ${JSON.stringify({ t: 'snapshot', working: Boolean(turn), text: turn?.text || '', thinking: turn?.thinking || '', awaiting: [...(turn?.awaiting.keys() || [])], messages: db.listMessages(id) })}\n\n`);
 		if (!subscribers.has(id)) subscribers.set(id, new Set());
 		subscribers.get(id).add(res);
 		const ping = setInterval(() => res.write(': ping\n\n'), 20000);
@@ -228,7 +318,7 @@ export function createApp({ dataDir }) {
 			server.listen(port, host, () => resolve(server.address()));
 		}),
 		async close() {
-			for (const turn of live.values()) turn.controller.abort();
+			for (const turn of live.values()) cancelTurn(turn);
 			for (const set of subscribers.values()) for (const res of set) res.end();
 			server.closeAllConnections?.();
 			await new Promise((r) => server.close(r));

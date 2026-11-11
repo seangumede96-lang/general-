@@ -72,6 +72,10 @@
 		<label>System prompt
 			<textarea name="systemPrompt" rows="4"></textarea>
 		</label>
+		<label>Folders the assistant may use
+			<textarea name="allowedDirs" rows="2" placeholder="/storage/emulated/0/Download" autocapitalize="off" spellcheck="false"></textarea>
+			<small>One folder per line. It can read files there, and must ask before writing. Leave empty to share nothing.</small>
+		</label>
 		<label>Temperature
 			<input name="temperature" type="number" min="0" max="2" step="0.1">
 		</label>
