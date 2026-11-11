@@ -372,6 +372,54 @@ Mistral Small 3.2 licence texts; whether Wan-Animate 2 exists and is better; Run
 serverless pricing (sources conflict, so it is not in this plan); Community Cloud
 download speeds.
 
+## 10. Addendum: commercial use on a one-off $50 (11 November 2026)
+
+You confirmed the $50 is the whole budget and the output must earn money. That changes
+two things: licences now gate model choice, and GPU time should go to sellable output
+before it goes to conversation.
+
+### Licences read first-hand
+
+| Model | Selling outputs | Source |
+| --- | --- | --- |
+| SDXL base (OpenRAIL++-M) | Allowed. "Licensor claims no rights in the Output"; use restrictions cover unlawful uses only | Licence text |
+| Illustrious / NoobAI (FAIPL 1.0-SD) | Allowed. "The output of this software is not covered by this license." Illustrious' card adds: no monetising closed-source fine-tunes; no restriction on spreading generated results | Licence text and model card |
+| Wan 2.2 Animate | Allowed. Apache 2.0; "We claim no rights over the your generated contents" | Model card |
+| Flux.1 dev | **Unclear, avoid.** One clause permits commercial use of outputs; another bans using the model or "any data produced by" it for commercial purposes; running the model for revenue-generating activity is itself excluded | Licence text |
+| Krea 2 | Commercial use allowed "under a revenue threshold" (figure not confirmed). Acceptable Use Policy not read; model card lists only unlawful content, CSAM and non-consensual imagery as out of scope | Model card and docs |
+| Pony V6 XL | **Not confirmed.** Page could not be read | — |
+
+Each CivitAI LoRA also carries its own creator-set permissions, including a
+"Sell generated images" switch (on by default). The asset registry must record it and
+the controller must refuse to use a LoRA with that switch off for commercial jobs.
+
+Safe commercial stack today: SDXL or Illustrious/NoobAI checkpoints, LoRAs whose
+creators allow selling images, Wan 2.2 Animate for video.
+
+### Source footage
+
+For anything sold, the source video must be yours or licensed to you. Replacing a
+character does not remove the original owner's copyright in the footage, and footage of
+real performers needs their consent. The Video Studio will ask you to confirm rights
+per clip and record the answer.
+
+### Revenue-first build order
+
+The agent brain is the most expensive part to run and the least necessary for producing
+content. Build the production line first with direct controls, add the brain last.
+
+| Order | Stage | GPU spend |
+| --- | --- | --- |
+| A | Phone test | $0 |
+| B | Pod lifecycle, ledger, hard cap, self-terminate | ~$1 |
+| C | ComfyUI images with your LoRAs, licence and family checks, results to B2 | ~$1 |
+| D | Character Studio (forms and buttons, no brain) | ~$2 |
+| E | Video benchmark, then Video Studio if affordable | ~$3–6 |
+| F | Brain, agent loop, memory, MCP | ~$3 plus running cost |
+
+After D, roughly $45 remains and the system can already produce sellable image sets at
+about 5 cents per character sheet.
+
 ## Sources
 
 - RunPod pricing and billing: https://www.runpod.io/pricing · https://docs.runpod.io/pods/pricing · https://docs.runpod.io/accounts-billing/billing
