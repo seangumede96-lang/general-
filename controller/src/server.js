@@ -448,7 +448,9 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		}],
 		// Starting a pod spends money, so the caller must echo back the estimate it was shown.
 		['POST', /^\/api\/system\/pods$/, async (req) => {
-			const { minutes, confirmEstimate, kind = 'test' } = await readJson(req);
+			const { minutes, confirmEstimate, kind = 'test', model } = await readJson(req);
+			// A brain is started with the model the caller names, so the pod matches the price that was confirmed.
+			if (kind === 'brain' && typeof model === 'string' && model) db.setSettings({ brainModel: model });
 			if (!(kind in MIN_VRAM)) throw new HttpError(400, 'kind must be "test" or "brain"');
 			const minVram = MIN_VRAM[kind];
 			return gpuCall(async () => {

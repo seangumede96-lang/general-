@@ -121,6 +121,20 @@ test('the model picker data shows what is in use, and choosing "everyday" overri
 	assert.equal((await chat('hi')).at(-1).content, 'from the private brain');
 });
 
+test('a brain starts with the model named in the request, not whatever is selected later', async () => {
+	const presets = (await api('GET', '/api/brains')).body.private.presets;
+	await api('PUT', '/api/settings', { brainModel: presets[1].id });
+	const q = (await api('POST', '/api/system/quote', { minutes: 30, kind: 'brain' })).body;
+	const r = await api('POST', '/api/system/pods', { minutes: 30, confirmEstimate: q.estimate, kind: 'brain', model: presets[3].id });
+	assert.equal(r.status, 200);
+	assert.match(JSON.parse(rp.state.created[0].args).cmd[0], /-hf unsloth\/Mistral-Small-3\.2-24B-Instruct-2506-GGUF:Q4_K_M /);
+	// Tapping another model while it runs changes the selection for next time, not what is running.
+	await api('PUT', '/api/settings', { brainModel: presets[0].id });
+	const b = (await api('GET', '/api/brains')).body;
+	assert.equal(b.private.label, 'Mistral Small 3.2');
+	assert.equal(b.private.model, presets[3].id);
+});
+
 test('uncensored models are flagged, including ones typed in by hand', async () => {
 	await api('PUT', '/api/settings', { brainModel: 'someone/Some-Model-abliterated-GGUF:Q4_K_M' });
 	assert.equal((await api('GET', '/api/brains')).body.private.uncensored, true);

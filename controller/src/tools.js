@@ -113,7 +113,7 @@ export function createTools({ db, gpu, uploadsDir }) {
 				const info = await stat(file);
 				if (info.isDirectory()) throw new ToolError(`"${path}" is a folder. Use list_files.`);
 				const buf = (await readFile(file)).subarray(0, MAX_READ_BYTES);
-				if (buf.includes(0)) throw new ToolError(`"${path}" is not a text file (${info.size} bytes).`);
+				if (buf.includes(0)) throw new ToolError(`"${path}" is not a text file (${info.size} bytes). Pictures, videos and other binary files cannot be opened or viewed with this tool; tell the user you cannot look inside it.`);
 				const more = info.size > MAX_READ_BYTES ? `\n…[file is ${info.size} bytes; only the first ${MAX_READ_BYTES} shown]` : '';
 				return buf.toString('utf8') + more;
 			}

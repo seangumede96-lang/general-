@@ -1028,7 +1028,7 @@ async function refreshChip() {
 		picker.dot.className = `dot${b.everyday.hasKey ? ' free' : ''}`;
 	}
 	// While a brain is waking or awake, keep the chip honest without the user doing anything.
-	if (b.private.state !== 'off') picker.timer = setTimeout(async () => { await refreshChip(); if (picker.dialog.open) renderPicker(); }, b.private.state === 'starting' ? 8000 : 30000);
+	if (b.private.state !== 'off') picker.timer = setTimeout(async () => { await refreshChip(); if (picker.dialog.open && !picker.busy) renderPicker(); }, b.private.state === 'starting' ? 8000 : 30000);
 }
 
 function option({ title, tag, note, side, on, disabled, onClick }) {
@@ -1119,10 +1119,21 @@ async function showWake(preset, box) {
 	go.addEventListener('click', async () => {
 		go.disabled = true;
 		go.textContent = 'Starting…';
+		// Lock the sheet until RunPod answers: changing model now would not change what was just ordered.
+		picker.busy = true;
+		for (const node of picker.body.querySelectorAll('.opt, .switch')) node.disabled = true;
+		const slow = setTimeout(() => { go.textContent = 'Still asking RunPod…'; }, 12000);
 		try {
-			await api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate, kind: 'brain' });
+			// The model named here is the one the price was shown for, whatever is tapped afterwards.
+			await api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate, kind: 'brain', model: preset.id });
+			picker.busy = false;
 			await choose({ chatBrain: 'private' });
-		} catch (err) { fail(err.message); }
+		} catch (err) {
+			picker.busy = false;
+			await refreshChip();
+			await renderPicker();
+			picker.body.querySelector('.switch-row')?.after(el('div', { className: 'wake sys-alert', textContent: err.message }));
+		} finally { clearTimeout(slow); picker.busy = false; }
 	});
 	box.replaceChildren(el('div', { className: 'wake' },
 		`${q.summary} It takes about five minutes to turn on, and turns itself off after 10 quiet minutes.`,
