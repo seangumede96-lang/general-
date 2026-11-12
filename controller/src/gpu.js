@@ -252,6 +252,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		};
 	}
 
+	let brainStage = 'downloading';
 	/** Ask the brain pod whether its model has finished loading; remember the first yes. */
 	async function probeBrain() {
 		const pod = brainPod();
@@ -259,7 +260,10 @@ export function createGpuManager({ db, clock = Date.now }) {
 		try {
 			const res = await fetch(`${proxyUrl(pod.id, BRAIN_PORT)}/health`, { signal: AbortSignal.timeout(8000) });
 			if (res.ok) { db.setPodReady(pod.id, clock()); db.touchPod(pod.id, clock()); }
-		} catch { /* still booting or downloading the model */ }
+			// llama.cpp answers 503 once it is running and reading the model into memory; before
+			// that the machine is still booting or downloading and nothing answers on the port.
+			brainStage = res.ok ? 'ready' : res.status === 503 ? 'loading' : 'downloading';
+		} catch { brainStage = 'downloading'; }
 		return brainPod();
 	}
 
@@ -364,7 +368,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return out;
 	}
 
-	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
+	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, brainStage: () => brainStage, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
 
 /**

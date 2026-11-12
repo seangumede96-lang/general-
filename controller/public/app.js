@@ -40,6 +40,11 @@ async function api(method, path, body) {
 	return data;
 }
 
+// Any element with data-since shows the minutes and seconds since that moment, ticking once a second.
+const sinceText = (ms) => { const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
+setInterval(() => { for (const n of document.querySelectorAll('[data-since]')) n.textContent = sinceText(Number(n.dataset.since)); }, 1000);
+function sinceNode(ms) { const n = document.createElement('span'); n.dataset.since = String(ms); n.textContent = sinceText(ms); return n; }
+
 /* ---------- Sidebar ---------- */
 
 function el(tag, props = {}, ...children) {
@@ -173,10 +178,28 @@ function messageNode(m, results) {
 	return group;
 }
 
+/** In plain words, what the model is doing at this moment. */
+function turnStatus(results) {
+	if (state.awaiting.size) return 'Waiting for you to allow or decline';
+	const last = state.messages.filter((m) => m.role === 'assistant' && m.tool_calls).at(-1);
+	const open = last && JSON.parse(last.tool_calls).find((c) => !results.has(c.id));
+	if (open) {
+		let args = {};
+		try { args = JSON.parse(open.arguments || '{}') ?? {}; } catch { /* label falls back to the tool name */ }
+		return `Doing: ${(TOOL_LABELS[open.name] || (() => open.name))(args)}`;
+	}
+	if (state.live?.text) return 'Writing the answer';
+	if (state.live?.thinking) return 'Thinking it through';
+	return state.messages.at(-1)?.role === 'tool' ? 'Reading the result' : 'Waiting for the model to respond';
+}
+
 function renderThread() {
 	const results = new Map(state.messages.filter((m) => m.role === 'tool').map((m) => [m.tool_call_id, m]));
 	const nodes = state.messages.filter((m) => m.role !== 'tool').map((m) => messageNode(m, results));
-	if (state.working) nodes.push(Object.assign(assistantNode(state.live || {}, true), { id: 'live' }));
+	if (state.working) {
+		nodes.push(Object.assign(assistantNode(state.live || {}, true), { id: 'live' }));
+		nodes.push(el('div', { className: 'turn-status', id: 'turn-status' }, el('span', { className: 'dot' }), el('span', { id: 'turn-status-label', textContent: turnStatus(results) }), '·', sinceNode(state.turnStartedAt || Date.now())));
+	}
 	els.thread.replaceChildren(...nodes);
 	document.body.classList.toggle('is-empty', !nodes.length);
 	document.body.classList.toggle('working', state.working);
@@ -193,6 +216,8 @@ function renderLive() {
 		if (!old || !state.working) return;
 		const stick = nearBottom();
 		const wasOpen = old.querySelector('details')?.open;
+		const label = $('turn-status-label');
+		if (label) label.textContent = state.live.text ? 'Writing the answer' : 'Thinking it through';
 		const next = Object.assign(assistantNode(state.live, true), { id: 'live' });
 		const details = next.querySelector('details');
 		if (details && wasOpen !== undefined && state.live.text) details.open = wasOpen;
@@ -216,6 +241,7 @@ function closeEvents() {
 }
 
 function showBlank() {
+	localStorage.removeItem('lastView');
 	setView('chat');
 	closeEvents();
 	Object.assign(state, { currentId: null, messages: [], working: false, live: null, awaiting: new Map() });
@@ -231,6 +257,7 @@ function openConversation(id) {
 	closeEvents();
 	setDrawer(false);
 	state.currentId = id;
+	localStorage.setItem('lastView', id);
 	history.replaceState(null, '', `#${id}`);
 	els.title.textContent = state.conversations.find((c) => c.id === id)?.title || 'New chat';
 	renderSidebar();
@@ -257,6 +284,7 @@ function handleEvent(ev) {
 			state.messages = ev.messages;
 			state.working = ev.working;
 			state.live = ev.working ? { text: ev.text, thinking: ev.thinking } : null;
+			if (ev.working && !state.working) state.turnStartedAt = Date.now();
 			state.awaiting = new Map((ev.awaiting || []).map((a) => [a.id, a.note]));
 			renderThread();
 			break;
@@ -280,6 +308,7 @@ function handleEvent(ev) {
 		case 'turn':
 			if (ev.phase === 'start') {
 				state.working = true;
+				state.turnStartedAt = Date.now();
 				state.live = { text: '', thinking: '' };
 			} else {
 				state.working = false;
@@ -500,6 +529,7 @@ function setView(view) {
 	const changed = nav.page !== page;
 	nav.page = page;
 	if (page && changed) {
+		localStorage.setItem('lastView', page);
 		closeEvents();
 		els.title.textContent = pages[page].title;
 		renderSidebar();
@@ -890,7 +920,8 @@ const chars = {
 		if (JSON.stringify(names) !== this.loraSig) {
 			this.loraSig = JSON.stringify(names);
 			$('img-loras').replaceChildren(...(names.length ? names.map((name, i) => {
-				const box = el('input', { type: 'checkbox', checked: i === 0 });
+				const preferred = names.findIndex((x) => KNOWN_STRENGTHS.some(([re]) => re.test(x)));
+				const box = el('input', { type: 'checkbox', checked: i === (preferred === -1 ? 0 : preferred) });
 				box.dataset.lora = name;
 				box.addEventListener('change', () => this.loraNote());
 				return el('label', { className: 'lora-row' }, box, el('span', { textContent: loraLabel(name) }), el('input', { type: 'number', min: 0, max: 2, step: 0.05, value: defaultStrength(name), ariaLabel: `Strength of ${loraLabel(name)}` }));
@@ -1021,7 +1052,7 @@ async function refreshChip() {
 		picker.name.textContent = `${b.private.label} · private`;
 		picker.dot.className = 'dot private';
 	} else if (waking) {
-		picker.name.textContent = `Waking ${b.private.label}…`;
+		picker.name.replaceChildren(`Turning on ${b.private.label} · `, sinceNode(b.private.startedAt || Date.now()));
 		picker.dot.className = 'dot waking';
 	} else {
 		picker.name.textContent = b.everyday.model || (b.everyday.hasKey ? 'Everyday model' : 'Choose a model');
@@ -1069,7 +1100,11 @@ async function renderPicker() {
 
 	// Private brain: a model on a rented GPU, with an on/off switch. Costs money while on.
 	const p = b.private;
-	const stateText = { off: 'Off. Nothing is being charged.', starting: 'Turning on: about five minutes.', ready: 'On. Chat is using it.' }[p.state];
+	const stages = { downloading: `Step 1 of 2: starting the machine and downloading the model (${(p.presets.find((x) => x.id === p.model) || {}).sizeGb || '?'} GB). Usually 3 to 6 minutes.`, loading: 'Step 2 of 2: loading the model into memory. About a minute.' };
+	const stateNote = el('div', { className: 'opt-note' });
+	if (p.state === 'off') stateNote.textContent = 'Off. Nothing is being charged.';
+	else if (p.state === 'ready') stateNote.append(`On for `, sinceNode(p.startedAt), ` · ${p.gpu} at ${money(p.rate)}/h. Chat is using it.`);
+	else stateNote.append('Turning on · ', sinceNode(p.startedAt), ` · ${stages[p.stage] || stages.downloading} You can close this; the chip shows progress.`);
 	const wakeBox = el('div');
 	const chosen = p.presets.find((x) => x.id === (p.state === 'off' ? p.selected : p.model)) || p.presets[0];
 	const sw = el('button', { type: 'button', className: `switch${p.state === 'starting' ? ' waking' : ''}`, role: 'switch', ariaLabel: 'Private brain' });
@@ -1084,7 +1119,7 @@ async function renderPicker() {
 	});
 	const head = [
 		el('div', { className: 'sect', textContent: 'Private brain · rented GPU' }),
-		el('div', { className: 'switch-row' }, el('div', { className: 'opt-main' }, el('div', { className: 'opt-title' }, chosen.label, ...(chosen.uncensored ? [el('span', { className: 'tag', textContent: 'Uncensored' })] : [])), el('div', { className: 'opt-note', textContent: stateText })), sw),
+		el('div', { className: 'switch-row' }, el('div', { className: 'opt-main' }, el('div', { className: 'opt-title' }, chosen.label, ...(chosen.uncensored ? [el('span', { className: 'tag', textContent: 'Uncensored' })] : [])), stateNote), sw),
 		wakeBox,
 		el('div', { className: 'sect-note', textContent: p.state === 'off' ? 'Choose which model the switch turns on:' : 'To change model, turn it off first.' })
 	];
@@ -1127,7 +1162,8 @@ async function showWake(preset, box) {
 			// The model named here is the one the price was shown for, whatever is tapped afterwards.
 			await api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate, kind: 'brain', model: preset.id });
 			picker.busy = false;
-			await choose({ chatBrain: 'private' });
+			await choose({ chatBrain: 'private' }, false);
+			picker.body.scrollTop = 0; picker.dialog.scrollTop = 0;
 		} catch (err) {
 			picker.busy = false;
 			await refreshChip();
@@ -1166,7 +1202,8 @@ fitWindow();
 
 refreshChip();
 await refreshConversations();
-const wanted = location.hash.slice(1);
+// Reopen where you left off: the address if it names a place, else the last chat or page used.
+const wanted = location.hash.slice(1) || localStorage.getItem('lastView') || '';
 if (pages[wanted]) { state.currentId = null; setView(wanted); }
 else if (wanted && state.conversations.some((c) => c.id === wanted)) await openConversation(wanted);
 else showBlank();

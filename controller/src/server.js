@@ -433,6 +433,8 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 				everyday: { model: s.model, host, hasKey: Boolean(s.apiKey) },
 				private: {
 					state, podId: pod?.id || null,
+					// For the progress display while it turns on.
+					startedAt: pod?.created_at || null, stage: state === 'starting' ? gpu.brainStage() : state, gpu: pod?.gpu || '', rate: pod?.rate || 0,
 					// While a brain is up, "model" is the one it was started with, whatever is selected now.
 					model: pod?.model || s.brainModel, label: brainLabel(pod?.model || s.brainModel),
 					uncensored: isUncensored(pod?.model || s.brainModel),

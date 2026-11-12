@@ -113,6 +113,11 @@ details.thinking .thought { white-space: pre-wrap; border-left: 2px solid var(--
 @keyframes pulse { 50% { transform: scale(.7); opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } #sidebar { transition: none !important; } }
 
+/* What the model is doing right now */
+.turn-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; margin-top: -8px; }
+.turn-status .dot { background: #8b7cf6; animation: pulse 1s ease-in-out infinite; }
+.turn-status [data-since] { font-variant-numeric: tabular-nums; }
+
 /* Tool activity */
 .msg.assistant > .tool, .msg.assistant > .approval { margin-top: 8px; }
 .tool { border: 1px solid var(--border); border-radius: 12px; font-size: 14.5px; }
@@ -132,7 +137,9 @@ details.thinking .thought { white-space: pre-wrap; border-left: 2px solid var(--
 .approval-actions button:disabled { opacity: .5; cursor: default; }
 
 /* System page */
-#system { flex: 1; overflow-y: auto; }
+/* Every page other than chat fills the space under the header and scrolls on its own. */
+main > section { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+main > section[hidden] { display: none; }
 body.view-system #scroller, body.view-system #composer { display: none; }
 /* On the System page the header shows a back arrow in place of the menu, on every screen size. */
 body.view-system #back { display: block; }
@@ -212,7 +219,7 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 .pick.ref { min-height: 0; }
 .pick.ref .pick-body { height: 96px; }
 .pick.ref .pick-body img { height: 100%; object-fit: cover; }
-.lora-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.lora-row, .card label.lora-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; margin: 0; font-weight: 400; }
 .lora-row input[type=checkbox] { width: 20px; height: 20px; margin: 0; flex: none; accent-color: #8b7cf6; display: inline-block; }
 .lora-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14.5px; }
 .lora-row input[type=number] { width: 76px; margin: 0; padding: 6px 8px; display: inline-block; }
