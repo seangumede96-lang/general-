@@ -218,6 +218,8 @@ await app.close().catch((e) => note('app close failed', e.message));
 await rp.close(); await comfy.close(); await model.close();
 rmSync(root, { recursive: true, force: true });
 
+// How much of the app the run actually exercised: a quiet run that did nothing proves nothing.
+console.log(`coverage: ${stuck.conversations.length} chats, ${model.state.requests.length} model calls, ${rp.state.created.length} pods rented, ${comfy.state.prompts.length} image/video jobs sent, ${comfy.state.uploads.length} files sent to the engine, ${video.jobs.length} video jobs, ${images.generations.length} picture requests, ${log.filter((l) => l.startsWith('chaos:')).length} failures injected`);
 console.log(`seed ${SEED}, ${ACTIONS} actions, ${VIEWPORT}: ${problems.length} problem${problems.length === 1 ? '' : 's'}`);
 for (const p of problems) console.log(` - ${p}`);
 process.exit(problems.length ? 1 : 0);
