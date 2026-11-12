@@ -205,6 +205,9 @@ export function createGpuManager({ db, clock = Date.now }) {
 	}
 
 	const touch = (id) => db.touchPod(id, clock());
+	/** Readiness checks for pods that run a service: kind -> async (pod) that marks it ready when it answers. */
+	const probes = new Map([['brain', () => probeBrain()]]);
+	const registerProbe = (kind, fn) => probes.set(kind, fn);
 
 	const proxyUrl = (podId, port) => db.getSettings().podProxyTemplate.replace('{id}', podId).replace('{port}', port).replace(/\/+$/, '');
 	const brainPod = () => db.listPods().find((p) => !p.ended_at && p.kind === 'brain') || null;
@@ -251,12 +254,15 @@ export function createGpuManager({ db, clock = Date.now }) {
 		for (const pod of db.listPods().filter((p) => !p.ended_at)) {
 			try {
 				if (now >= pod.deadline_at) { await stop(pod.id, 'time limit reached', 'deleted itself at its time limit'); continue; }
-				if (pod.kind === 'brain' && !pod.ready_at) {
-					await probeBrain();
-					if (!db.getPod(pod.id).ready_at) {
+				if (probes.has(pod.kind) && !pod.ready_at) {
+					// Still installing or downloading: that is not idleness, but it is not allowed to last forever.
+					await probes.get(pod.kind)(pod);
+					const fresh = db.getPod(pod.id);
+					if (!fresh.ready_at && !fresh.ended_at) {
 						if (now - pod.created_at >= STARTUP_GRACE_MS) await stop(pod.id, 'never became ready');
 						continue;
 					}
+					if (fresh.ended_at) continue;
 				} else if (now - pod.last_used_at >= idleMinutes * 60000) { await stop(pod.id, 'idle'); continue; }
 				const remote = await call('GET', `/pods/${encodeURIComponent(pod.id)}`);
 				if (remote.status === 'TERMINATED') db.endPod(pod.id, now, 'ended on RunPod');
@@ -322,7 +328,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return out;
 	}
 
-	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
+	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
 
 /**
@@ -341,7 +347,7 @@ export const brainLabel = (id) => BRAIN_PRESETS.find((p) => p.id === id)?.label 
 export const isUncensored = (id) => BRAIN_PRESETS.find((p) => p.id === id)?.uncensored ?? /abliterat|uncensored|heretic|unfiltered/i.test(id);
 
 /** VRAM each kind of pod needs. A test pod runs nothing, so any GPU will do. */
-export const MIN_VRAM = { test: 0, brain: 24, comfy: 24 };
+export const MIN_VRAM = { test: 0, brain: 24, comfy: 24, image: 24 };
 
 /** A do-nothing pod used to prove the lifecycle end to end before real workloads exist. */
 export const TEST_POD = { kind: 'test', name: 'assistant-test', image: 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404', cmd: 'sleep infinity', disk: 20 };

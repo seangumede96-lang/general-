@@ -475,7 +475,8 @@ const clock = (secs) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2
 /* Pages other than chat. Each has a section in the HTML and hooks to start and stop its refresh. */
 const pages = {
 	system: { title: 'System', show: () => { refreshSystem(true); sys.timer = setInterval(() => refreshSystem(false), 5000); }, hide: () => clearInterval(sys.timer) },
-	video: { title: 'Video', show: () => video.show(), hide: () => video.hide() }
+	video: { title: 'Video', show: () => video.show(), hide: () => video.hide() },
+	characters: { title: 'Characters', show: () => chars.show(), hide: () => chars.hide() }
 };
 const nav = { page: null, returnTo: null, pushed: false };
 
@@ -633,6 +634,7 @@ sys.form.addEventListener('submit', async (e) => {
 
 $('open-system').addEventListener('click', () => { setDrawer(false); openPage('system'); });
 $('open-video').addEventListener('click', () => { setDrawer(false); openPage('video'); });
+$('open-characters').addEventListener('click', () => { setDrawer(false); openPage('characters'); });
 
 /* ---------- Video Studio ---------- */
 
@@ -772,6 +774,16 @@ const video = {
 		}
 	},
 
+	/** Take a picture made on the Characters page as the character for the next video. */
+	usePicture(id, src) {
+		this.picture = { id, meta: null };
+		const slot = $('vid-image-slot');
+		slot.replaceChildren(el('img', { src, alt: 'Character picture' }));
+		slot.parentElement.classList.add('filled');
+		slot.parentElement.querySelector('.pick-status')?.remove();
+		slot.parentElement.append(el('span', { className: 'pick-cap pick-status', textContent: 'From Characters' }));
+	},
+
 	request() {
 		return {
 			kind: 'replace', input: this.clip.id, reference: this.picture.id, prompt: $('vid-prompt').value,
@@ -817,6 +829,136 @@ $('vid-pick-image').addEventListener('click', () => $('vid-image-input').click()
 $('vid-video-input').addEventListener('change', (e) => { if (e.target.files[0]) video.choose('clip', e.target.files[0]); e.target.value = ''; });
 $('vid-image-input').addEventListener('change', (e) => { if (e.target.files[0]) video.choose('picture', e.target.files[0]); e.target.value = ''; });
 $('vid-form').addEventListener('submit', (e) => { e.preventDefault(); video.quote(); });
+
+/* ---------- Characters ---------- */
+
+const KNOWN_TRIGGERS = [[/GTA_VI_3D_Style/i, 'gta6game_']];
+const loraLabel = (name) => name.split('/').pop().replace(/\.safetensors$/, '');
+
+const chars = {
+	timer: 0, data: null, face: null, sig: '',
+
+	show() { this.refresh(); this.timer = setInterval(() => this.refresh(), 3000); },
+	hide() { clearInterval(this.timer); },
+
+	async refresh() {
+		let d;
+		try { d = await api('GET', '/api/images'); } catch { return; }
+		if (nav.page !== 'characters') return;
+		this.data = d;
+		this.renderSession();
+		// Rebuild the gallery only when something changed, so pictures do not flicker every poll.
+		const sig = JSON.stringify(d.generations.map((g) => [g.id, g.status]));
+		if (sig !== this.sig) { this.sig = sig; this.renderGallery(); }
+	},
+
+	renderSession() {
+		const { session, loras, b2 } = this.data;
+		const text = { off: 'Off. Nothing is being charged.', starting: `Starting up${session.detail ? `: ${session.detail}` : ''}. About 6 minutes.`, ready: `Ready. ${clock(session.secondsLeft)} left; it also stops after 10 quiet minutes.` };
+		Object.assign($('img-state'), { className: `brain-state ${session.state}`, textContent: text[session.state] });
+		const box = $('img-session');
+		if (session.state === 'off') {
+			if (!box.querySelector('#img-minutes')) {
+				const minutes = el('input', { id: 'img-minutes', type: 'number', min: 5, value: 30, inputMode: 'numeric' });
+				const get = el('button', { type: 'button', className: 'btn-ghost', textContent: 'Get price' });
+				const out = el('div', { className: 'quote-out' });
+				get.addEventListener('click', () => this.quote(Number(minutes.value), out));
+				box.replaceChildren(
+					...(session.lastEnd ? [el('p', { className: 'sys-alert', textContent: `Last time: ${session.lastEnd}` })] : []),
+					el('p', { className: 'muted small', textContent: b2 ? 'Rents a GPU, installs Krea 2 and loads your LoRAs from Backblaze. Then you can make as many pictures as you like until it stops.' : 'Rents a GPU and installs Krea 2. Backblaze is not connected, so no style LoRAs will be loaded.' }),
+					el('div', { className: 'row' }, el('label', { className: 'inline' }, 'Minutes ', minutes), get), out);
+			}
+		} else {
+			const stop = el('button', { type: 'button', className: 'btn-danger', textContent: 'End session' });
+			stop.addEventListener('click', async () => { if (confirm('End the session and shut the GPU down?')) { await api('DELETE', '/api/images/session').catch(() => {}); this.refresh(); } });
+			box.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'spacer' }), stop));
+		}
+		const select = $('img-lora');
+		const want = ['', ...loras.map((l) => l.name)];
+		if (JSON.stringify([...select.options].map((o) => o.value)) !== JSON.stringify(want)) {
+			select.replaceChildren(el('option', { value: '', textContent: 'None' }), ...loras.map((l) => el('option', { value: l.name, textContent: loraLabel(l.name) })));
+			if (loras[0]) select.value = loras[0].name;
+			this.loraNote();
+		}
+		$('img-go').disabled = session.state !== 'ready' || this.data.generations.some((g) => g.status === 'running');
+	},
+
+	loraNote() {
+		const trigger = KNOWN_TRIGGERS.find(([re]) => re.test($('img-lora').value))?.[1];
+		$('img-lora-note').textContent = trigger ? `This LoRA's trigger word "${trigger}" is added to the start of your description for you.` : '';
+	},
+
+	async quote(minutes, out) {
+		const fail = (m) => out.replaceChildren(el('div', { className: 'sys-alert', textContent: m }));
+		out.replaceChildren(el('div', { className: 'muted small', textContent: 'Checking prices…' }));
+		let q;
+		try { q = await api('POST', '/api/images/quote', { minutes }); } catch (err) { return fail(err.message); }
+		if (!q.allowed) return fail(q.reason);
+		const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Start for up to ${money(q.estimate)}` });
+		go.addEventListener('click', async () => {
+			go.disabled = true; go.textContent = 'Starting…';
+			try { await api('POST', '/api/images/session', { minutes, confirmEstimate: q.estimate }); this.refresh(); } catch (err) { fail(err.message); }
+		});
+		out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: q.summary }), el('span', { className: 'spacer' }), go));
+	},
+
+	setFace(id, src) {
+		this.face = id;
+		$('img-face-slot').replaceChildren(...(id ? [el('img', { src, alt: 'Face to keep' })] : ['None']));
+		$('img-pick-face').classList.toggle('filled', Boolean(id));
+		$('img-face-clear').hidden = !id;
+	},
+
+	async generate() {
+		const out = $('img-out');
+		const trigger = KNOWN_TRIGGERS.find(([re]) => re.test($('img-lora').value))?.[1];
+		let prompt = $('img-prompt').value.trim();
+		if (trigger && prompt && !prompt.includes(trigger)) prompt = `${trigger} ${prompt}`;
+		try {
+			await api('POST', '/api/images/generate', { prompt, lora: $('img-lora').value, loraStrength: Number($('img-strength').value), size: $('img-size').value, count: Number($('img-count').value), face: this.face || '' });
+			out.replaceChildren();
+			this.refresh();
+		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
+	},
+
+	renderGallery() {
+		$('img-gallery').replaceChildren(...this.data.generations.map((g) => {
+			const card = el('div', { className: 'card gen' }, el('div', { className: 'gen-prompt', textContent: g.prompt }));
+			if (g.status === 'running') card.append(el('div', { className: 'brain-state starting', textContent: `Making ${g.params.count} picture${g.params.count > 1 ? 's' : ''}… usually under a minute.` }));
+			if (g.status === 'failed') card.append(el('p', { className: 'sys-alert', textContent: g.detail }));
+			if (g.images.length) card.append(el('div', { className: 'shots' }, ...g.images.map((id) => {
+				const src = `/api/uploads/${id}`;
+				const face = el('button', { type: 'button', textContent: 'Use as face' });
+				face.addEventListener('click', () => { this.setFace(id, src); $('img-form').scrollIntoView({ behavior: 'smooth' }); });
+				const toVideo = el('button', { type: 'button', textContent: 'Use in Video' });
+				toVideo.addEventListener('click', () => { openPage('video'); video.usePicture(id, src); });
+				return el('div', { className: 'shot' }, el('a', { href: src, target: '_blank' }, el('img', { src, loading: 'lazy', alt: 'Generated picture' })),
+					el('div', { className: 'shot-actions' }, el('a', { href: src, download: '', textContent: 'Save' }), face, toVideo));
+			})));
+			if (g.status !== 'running') {
+				const del = el('button', { type: 'button', className: 'link', textContent: 'Delete' });
+				del.addEventListener('click', async () => { if (confirm('Delete these pictures from the phone?')) { await api('DELETE', `/api/images/${g.id}`).catch(() => {}); this.sig = ''; this.refresh(); } });
+				const again = el('button', { type: 'button', className: 'link', textContent: 'Reuse description' });
+				again.addEventListener('click', () => { $('img-prompt').value = g.prompt; $('img-form').scrollIntoView({ behavior: 'smooth' }); });
+				card.append(el('div', { className: 'row small', style: 'margin-top:10px' }, again, el('span', { className: 'spacer' }), del));
+			}
+			return card;
+		}));
+	}
+};
+
+$('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.generate(); });
+$('img-lora').addEventListener('change', () => chars.loraNote());
+$('img-pick-face').addEventListener('click', () => $('img-face-input').click());
+$('img-face-clear').addEventListener('click', () => chars.setFace(null));
+$('img-face-input').addEventListener('change', async (e) => {
+	const file = e.target.files[0];
+	e.target.value = '';
+	if (!file) return;
+	$('img-face-slot').textContent = 'Uploading…';
+	try { const up = await uploadWithProgress(file, () => {}); chars.setFace(up.id, URL.createObjectURL(file)); }
+	catch (err) { $('img-face-slot').textContent = err.message; }
+});
 
 /* ---------- Model picker ---------- */
 

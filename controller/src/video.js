@@ -61,7 +61,9 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 		const id = randomUUID();
 		// From here the files belong to this job, so the unsent-upload cleanup leaves them alone.
-		if (!db.claimUpload(video.id, `job:${id}`) || !db.claimUpload(image.id, `job:${id}`)) throw new VideoError('Those files were already used. Choose them again.');
+		if (!db.claimUpload(video.id, `job:${id}`)) throw new VideoError('That clip was already used. Choose it again.');
+		// The character picture may be one made on the Characters page, which already has an owner.
+		db.claimUpload(image.id, `job:${id}`);
 		const size = outputSize(Number(request.width), Number(request.height));
 		const now = clock();
 		db.insertJob({

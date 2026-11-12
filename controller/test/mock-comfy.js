@@ -19,6 +19,7 @@ export async function startMockComfy(opts = {}) {
 		pollsUntilDone: 2,     // how many /history checks return "still running"
 		outcome: 'ok',         // ok | reject (workflow refused) | error (fails while generating) | empty (no output)
 		template: TEMPLATE,
+		images: 0,             // >0: report that many pictures instead of a video
 		uploads: [], prompts: [], historyChecks: 0,
 		...opts
 	};
@@ -46,10 +47,10 @@ export async function startMockComfy(opts = {}) {
 		if (url.pathname === '/history/p1') {
 			if (++state.historyChecks <= state.pollsUntilDone) return json(res, 200, {});
 			if (state.outcome === 'error') return json(res, 200, { p1: { status: { status_str: 'error', completed: false, messages: [['execution_error', { node_type: 'WanVideoSampler', exception_message: 'CUDA out of memory' }]] }, outputs: {} } });
-			const outputs = state.outcome === 'empty' ? {} : { '30': { gifs: [{ filename: 'assistant_00001.mp4', subfolder: '', type: 'output', format: 'video/h264-mp4' }] } };
+			const outputs = state.outcome === 'empty' ? {} : state.images ? { '10': { images: Array.from({ length: state.images }, (_, i) => ({ filename: `gen_0000${i + 1}_.png`, subfolder: '', type: 'output' })) } } : { '30': { gifs: [{ filename: 'assistant_00001.mp4', subfolder: '', type: 'output', format: 'video/h264-mp4' }] } };
 			return json(res, 200, { p1: { status: { status_str: 'success', completed: true }, outputs } });
 		}
-		if (url.pathname === '/view') { res.writeHead(200, { 'Content-Type': 'video/mp4' }); return res.end('RESULT-VIDEO-BYTES'); }
+		if (url.pathname === '/view') { res.writeHead(200, { 'Content-Type': state.images ? 'image/png' : 'video/mp4' }); return res.end(state.images ? `PNG:${url.searchParams.get('filename')}` : 'RESULT-VIDEO-BYTES'); }
 		res.writeHead(404).end();
 	});
 	await new Promise((r) => server.listen(0, '127.0.0.1', r));

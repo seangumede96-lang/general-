@@ -29,11 +29,17 @@ export const SETTING_DEFAULTS = {
 	chatBrain: 'private',
 	// Video Studio: longest clip processed in one go, and an override for the workflow file.
 	maxClipSeconds: '10',
-	videoWorkflowUrl: ''
+	videoWorkflowUrl: '',
+	// Backblaze B2, where your LoRAs live. The pod gets time-limited links, never these keys.
+	b2KeyId: '',
+	b2AppKey: '',
+	b2Bucket: '',
+	b2ApiBase: '',
+	imageLoras: '[]'
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */
-export const SECRET_SETTINGS = ['apiKey', 'runpodApiKey'];
+export const SECRET_SETTINGS = ['apiKey', 'runpodApiKey', 'b2AppKey'];
 
 export function openDb(dataDir) {
 	mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -60,6 +66,16 @@ export function openDb(dataDir) {
 		);
 		CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation_id, id);
 		CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS generations (
+			id TEXT PRIMARY KEY,
+			status TEXT NOT NULL DEFAULT 'running',   -- running | done | failed
+			detail TEXT NOT NULL DEFAULT '',
+			prompt TEXT NOT NULL,
+			params TEXT NOT NULL DEFAULT '{}',
+			images TEXT NOT NULL DEFAULT '[]',        -- upload ids of the pictures made
+			created_at INTEGER NOT NULL,
+			ended_at INTEGER
+		);
 		CREATE TABLE IF NOT EXISTS jobs (
 			id TEXT PRIMARY KEY,
 			kind TEXT NOT NULL,              -- replace | style
@@ -129,6 +145,10 @@ export function openDb(dataDir) {
 		deleteConversation: db.prepare('DELETE FROM conversations WHERE id = ?'),
 		listMessages: db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id'),
 		insertMessage: db.prepare('INSERT INTO messages (conversation_id, role, content, reasoning, status, created_at, tool_calls, tool_call_id, tool_name, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+		insertGeneration: db.prepare('INSERT INTO generations (id, prompt, params, created_at) VALUES (?, ?, ?, ?)'),
+		getGeneration: db.prepare('SELECT * FROM generations WHERE id = ?'),
+		listGenerations: db.prepare('SELECT * FROM generations ORDER BY created_at DESC LIMIT 60'),
+		deleteGeneration: db.prepare('DELETE FROM generations WHERE id = ?'),
 		insertJob: db.prepare('INSERT INTO jobs (id, kind, status, input_upload, ref_upload, prompt, params, rights_confirmed_at, created_at, step_started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
 		getJob: db.prepare('SELECT * FROM jobs WHERE id = ?'),
 		listJobs: db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT 30'),
@@ -173,6 +193,14 @@ export function openDb(dataDir) {
 			const r = q.insertMessage.run(conversationId, role, content, reasoning, status, now, tool_calls, toolCallId, toolName, att);
 			q.touch.run(now, conversationId);
 			return { id: Number(r.lastInsertRowid), conversation_id: conversationId, role, content, reasoning, status, created_at: now, tool_calls, tool_call_id: toolCallId, tool_name: toolName, attachments: att };
+		},
+		insertGeneration: (g) => { q.insertGeneration.run(g.id, g.prompt, JSON.stringify(g.params), g.created_at); },
+		getGeneration: (id) => q.getGeneration.get(id),
+		listGenerations: () => q.listGenerations.all(),
+		deleteGeneration: (id) => { q.deleteGeneration.run(id); },
+		updateGeneration(id, patch) {
+			const cols = Object.keys(patch);
+			db.prepare(`UPDATE generations SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...cols.map((c) => patch[c]), id);
 		},
 		insertJob: (j) => { q.insertJob.run(j.id, j.kind, j.status, j.input_upload, j.ref_upload, j.prompt, JSON.stringify(j.params || {}), j.rights_confirmed_at, j.created_at, j.created_at); },
 		getJob: (id) => q.getJob.get(id),

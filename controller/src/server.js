@@ -12,6 +12,8 @@ import { openDb, SECRET_SETTINGS } from './db.js';
 import { streamChat, listModels } from './model.js';
 import { createTools } from './tools.js';
 import { createVideoStudio, VideoError } from './video.js';
+import { createImageStudio, ImageError } from './images.js';
+import { B2Error } from './b2.js';
 import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel, isUncensored } from './gpu.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -54,17 +56,20 @@ const titleFrom = (text) => {
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000 }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000 }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
 	const gpu = createGpuManager({ db, clock });
 	const tools = createTools({ db, gpu, uploadsDir });
 	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs });
 	studio.recover().catch((err) => console.error('[video]', err.message));
+	const images = createImageStudio({ db, gpu, uploadsDir, clock, pollMs: imagePollMs });
+	images.recover();
 	const studioCall = async (fn) => {
 		try { return await fn(); }
 		catch (err) {
-			if (err instanceof VideoError) throw new HttpError(409, err.message);
+			if (err instanceof VideoError || err instanceof ImageError) throw new HttpError(409, err.message);
+			if (err instanceof B2Error) throw new HttpError(502, err.message);
 			if (err instanceof GpuError) throw new HttpError(err.code === 'not_configured' ? 400 : 502, err.message);
 			throw err;
 		}
@@ -372,6 +377,15 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			db.setSettings(patch);
 			return publicSettings(db.getSettings());
 		}],
+		['GET', /^\/api\/images$/, () => images.status()],
+		['POST', /^\/api\/images\/quote$/, async (req) => studioCall(async () => images.quote((await readJson(req)).minutes))],
+		['POST', /^\/api\/images\/session$/, async (req) => studioCall(async () => ({ podId: await images.start(await readJson(req)) }))],
+		['DELETE', /^\/api\/images\/session$/, async () => { await gpuCall(() => images.stop()); return { ok: true }; }],
+		['POST', /^\/api\/images\/generate$/, async (req) => studioCall(async () => images.generate(await readJson(req)))],
+		['DELETE', /^\/api\/images\/([\w-]+)$/, async (_req, genId) => {
+			if (!await images.remove(genId)) throw new HttpError(404, 'Not found, or still being made');
+			return { ok: true };
+		}],
 		['GET', /^\/api\/video$/, () => ({ jobs: studio.list(), limits: studio.limits() })],
 		['POST', /^\/api\/video\/quote$/, async (req) => studioCall(async () => studio.quote(await readJson(req)))],
 		['POST', /^\/api\/video\/jobs$/, async (req) => studioCall(async () => studio.create(await readJson(req)))],
@@ -510,7 +524,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			server.once('error', reject);
 			server.listen(port, host, () => resolve(server.address()));
 		}),
-		gpu, studio,
+		gpu, studio, images,
 		async close() {
 			clearInterval(watchdog);
 			for (const turn of live.values()) cancelTurn(turn);

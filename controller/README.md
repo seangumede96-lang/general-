@@ -20,6 +20,14 @@ Built and tested against a mock model:
   10 per message, 2 GB each), with upload progress and previews. The model is told each
   file's name, type and saved location and can read attached text files; it does not yet
   look inside images or videos.
+- **Characters page:** image sessions with Krea 2 Turbo, a style LoRA and the same-face
+  method, following the recipe worked out by hand on 11 November 2026 (8 steps, cfg 1,
+  euler/simple; face reference shrunk to 0.14 megapixels through the ostris edit nodes
+  with the krea2-reid LoRA). A session rents one GPU, loads LoRAs from the `loras/` folder
+  of your Backblaze bucket through one-hour links (keys never leave the phone), and stays
+  up for picture after picture until idle. Results are saved on the phone and can be used
+  as the face to keep or as the character in the Video Studio. **Tested against mocks
+  only so far.**
 - **Video Studio (Video page):** character replacement. Pick a clip and a picture of the
   character, confirm you may use the footage, see the worst-case price, and the app rents
   a GPU, installs the video engine (ComfyUI with Wan 2.2 Animate), runs the job, saves the
@@ -96,6 +104,8 @@ mock RunPod API.
 - `src/model.js`: OpenAI-compatible streaming client, including tool calls
 - `src/tools.js`: tool registry, argument validation, folder limits
 - `src/gpu.js`: RunPod pod lifecycle, budget checks, cost ledger (REST API v2)
+- `src/images.js`, `src/image-recipe.js`, `src/b2.js`: Characters page engine, its pod setup
+  and ComfyUI graph, and Backblaze links
 - `src/video.js`, `src/video-recipe.js`, `src/comfy.js`: Video Studio job runner, the pod
   setup and workflow it uses, and the client for the video engine's API
 - `src/db.js`: SQLite storage

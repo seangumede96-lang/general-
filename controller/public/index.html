@@ -22,6 +22,10 @@
 	</div>
 	<nav id="conversations"></nav>
 	<div class="side-bottom">
+		<button id="open-characters" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+			Characters
+		</button>
 		<button id="open-video" class="side-btn">
 			<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>
 			Video
@@ -119,6 +123,42 @@
 				<div class="card-cap">History</div>
 				<div id="sys-history"></div>
 			</div>
+		</div>
+	</section>
+
+	<section id="characters" hidden>
+		<div class="sys-wrap">
+			<div class="card">
+				<div class="card-cap">Image session</div>
+				<div id="img-state" class="brain-state"></div>
+				<div id="img-session"></div>
+			</div>
+
+			<form class="card" id="img-form">
+				<div class="card-cap">New picture</div>
+				<label>Describe it
+					<textarea id="img-prompt" rows="5" placeholder="Full-body picture of a tall woman with short silver hair, athletic build, fully dressed in a black leather jacket and jeans, standing, plain white background"></textarea>
+					<small>Long, natural sentences work best. Put framing and body type first, and say what they are wearing.</small>
+				</label>
+				<div class="grid3">
+					<label>Style LoRA <select id="img-lora"></select></label>
+					<label>Strength <input id="img-strength" type="number" min="0" max="2" step="0.05" value="0.9"></label>
+					<label>Shape <select id="img-size"><option value="portrait">Portrait</option><option value="square">Square</option><option value="landscape">Landscape</option></select></label>
+				</div>
+				<small id="img-lora-note"></small>
+				<div class="row" style="margin:12px 0">
+					<button type="button" class="pick small-pick" id="img-pick-face"><span class="pick-cap">Keep this face (optional)</span><span class="pick-body" id="img-face-slot">None</span></button>
+					<input id="img-face-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+					<div class="muted small" style="flex:1;min-width:160px">Pick a picture cropped to the face only, or tap "Use as face" on one you made. A made-up character or a real adult who agreed.<br><button type="button" class="link" id="img-face-clear" hidden>Remove face</button></div>
+				</div>
+				<div class="row">
+					<label class="inline">Pictures <input id="img-count" type="number" min="1" max="4" value="2" inputmode="numeric"></label>
+					<span class="spacer"></span><button type="submit" id="img-go" class="btn-primary">Generate</button>
+				</div>
+				<div id="img-out" class="quote-out"></div>
+			</form>
+
+			<div id="img-gallery"></div>
 		</div>
 	</section>
 
