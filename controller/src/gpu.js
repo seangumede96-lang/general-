@@ -10,6 +10,9 @@ import { randomBytes } from 'node:crypto';
 const REAL_API = 'https://api.runpod.io/v2';
 const REAL_GRAPHQL = 'https://api.runpod.io/graphql';
 const BALANCE_MAX_AGE_MS = 60000;
+const CATALOG_MAX_AGE_MS = 60000;
+// How long a page may wait for RunPod before it is shown what is already known.
+const STATUS_WAIT_MS = 4000;
 const DEADMAN_GRACE_S = 120;
 const HOUR_MS = 3600 * 1000;
 const BRAIN_PORT = 8080;
@@ -131,17 +134,28 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return candidatesIn(cfg().clouds, minVram);
 	}
 
+	/** RunPod's price list per cloud, kept for a minute: it is slow to fetch (seconds from a phone) and a quote is followed at once by a start. */
+	const catalog = new Map();
+	async function catalogFor(cloud) {
+		const { key, base } = cfg();
+		const hit = catalog.get(cloud);
+		if (hit && hit.key === key + base && clock() - hit.at < CATALOG_MAX_AGE_MS) return hit.gpus;
+		const { gpus = [] } = await call('GET', `/catalog/gpus?include=AVAILABILITY&product=POD&cloud=${cloud}`);
+		catalog.set(cloud, { gpus, at: clock(), key: key + base });
+		return gpus;
+	}
+
 	async function candidatesIn(clouds, minVram) {
 		const found = [];
-		for (const cloud of clouds) {
+		const lists = await Promise.all(clouds.map((cloud) => catalogFor(cloud)));
+		clouds.forEach((cloud, i) => {
 			const side = cloud.toLowerCase();
-			const { gpus = [] } = await call('GET', `/catalog/gpus?include=AVAILABILITY&product=POD&cloud=${cloud}`);
-			for (const g of gpus) {
+			for (const g of lists[i]) {
 				if (g[side] && g.memory >= minVram && g.availability !== 'NONE' && g.price?.[side] > 0) {
 					found.push({ id: g.id, name: g.name || g.id, memory: g.memory, rate: g.price[side], cloud, availability: g.availability });
 				}
 			}
-		}
+		});
 		found.sort((a, b) => a.rate - b.rate);
 		return found.filter((o) => o.rate <= found[0].rate * 2).slice(0, 3);
 	}
@@ -192,6 +206,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 				});
 			} catch (err) {
 				lastError = err;
+				catalog.clear(); // the list said this was in stock and it was not
 				if (err.code === 'unavailable') continue; // no capacity for this type: try the next
 				throw err;
 			}
@@ -315,13 +330,24 @@ export function createGpuManager({ db, clock = Date.now }) {
 		}
 	}
 
+	const remote = { pending: null, unknown: [], error: null };
+
 	async function status() {
 		const c = cfg();
 		const now = clock();
 		const out = { configured: Boolean(c.key), limits: { maxPodMinutes: c.maxPodMinutes, idleMinutes: c.idleMinutes, clouds: c.clouds }, unknown: [], error: null };
 		if (c.key) {
-			try { await refreshBalance(); await reconcile(); out.unknown = await unknownPods(); }
-			catch (err) { out.error = err.message; }
+			// RunPod can take many seconds to answer from a phone. Ask in the background and wait
+			// only briefly, then show the last known answer, so the page never hangs on it.
+			if (!remote.pending) {
+				remote.pending = (async () => {
+					try { await refreshBalance(); await reconcile(); remote.unknown = await unknownPods(); remote.error = null; }
+					catch (err) { remote.error = err.message; }
+				})().finally(() => { remote.pending = null; });
+			}
+			await Promise.race([remote.pending, new Promise((r) => { const t = setTimeout(r, STATUS_WAIT_MS); t.unref?.(); })]);
+			out.unknown = remote.unknown;
+			out.error = remote.error;
 		}
 		if (c.key) await probeBrain();
 		const view = ({ secret, ...p }) => ({ ...p, cost: ceilCents(p.actual_cost ?? accrued(p, now)), final: p.actual_cost != null });
