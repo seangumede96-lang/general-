@@ -24,7 +24,9 @@ export const SETTING_DEFAULTS = {
 	// The private brain: a GGUF model on Hugging Face, served by llama.cpp on a rented pod.
 	brainModel: 'unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M',
 	brainContext: '16384',
-	podProxyTemplate: 'https://{id}-{port}.proxy.runpod.net'
+	podProxyTemplate: 'https://{id}-{port}.proxy.runpod.net',
+	// Which brain chat should use: 'private' (the rented GPU, whenever it is awake) or 'everyday'.
+	chatBrain: 'private'
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */
@@ -85,7 +87,8 @@ export function openDb(dataDir) {
 	for (const [name, ddl] of [
 		['kind', "TEXT NOT NULL DEFAULT 'test'"],  // test | brain
 		['secret', "TEXT NOT NULL DEFAULT ''"],    // key protecting the service on the pod; never sent to the browser
-		['ready_at', 'INTEGER']                    // when the service on the pod first answered
+		['ready_at', 'INTEGER'],                   // when the service on the pod first answered
+		['model', "TEXT NOT NULL DEFAULT ''"]      // brain pods: the model this pod was started with
 	]) if (!podCols.has(name)) db.exec(`ALTER TABLE pods ADD COLUMN ${name} ${ddl}`);
 
 	const q = {
@@ -98,11 +101,10 @@ export function openDb(dataDir) {
 		listMessages: db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id'),
 		insertMessage: db.prepare('INSERT INTO messages (conversation_id, role, content, reasoning, status, created_at, tool_calls, tool_call_id, tool_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
 		insertFact: db.prepare('INSERT INTO facts (text, created_at) VALUES (?, ?)'),
-		searchFacts: db.prepare("SELECT id, text, created_at FROM facts WHERE text LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT 20"),
-		recentFacts: db.prepare('SELECT id, text, created_at FROM facts ORDER BY id DESC LIMIT 20'),
+		allFacts: db.prepare('SELECT id, text, created_at FROM facts ORDER BY id DESC LIMIT 2000'),
 		listPods: db.prepare('SELECT * FROM pods ORDER BY created_at DESC'),
 		getPod: db.prepare('SELECT * FROM pods WHERE id = ?'),
-		insertPod: db.prepare('INSERT INTO pods (id, name, gpu, rate, purpose, created_at, last_used_at, deadline_at, kind, secret) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+		insertPod: db.prepare('INSERT INTO pods (id, name, gpu, rate, purpose, created_at, last_used_at, deadline_at, kind, secret, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
 		setPodReady: db.prepare('UPDATE pods SET ready_at = ? WHERE id = ? AND ready_at IS NULL'),
 		endPod: db.prepare('UPDATE pods SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL'),
 		touchPod: db.prepare('UPDATE pods SET last_used_at = ? WHERE id = ?'),
@@ -135,14 +137,30 @@ export function openDb(dataDir) {
 			const r = q.insertFact.run(text, Date.now());
 			return Number(r.lastInsertRowid);
 		},
+		/**
+		 * Memories that share words with the query, best match first. Matching is per word, so
+		 * "video format" finds "my videos are 9:16 vertical". With no query, the most recent.
+		 */
 		searchFacts(query) {
-			const words = String(query || '').trim();
-			if (!words) return q.recentFacts.all();
-			return q.searchFacts.all(`%${words.replace(/[\\%_]/g, '\\$&')}%`);
+			const words = [...new Set(String(query || '').toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [])];
+			const all = q.allFacts.all();
+			if (!words.length) return all.slice(0, 20);
+			// Compare on a crude stem (drop a trailing "s") so plural and singular meet.
+			const stem = (w) => w.replace(/s$/, '');
+			return all
+				.map((f) => {
+					const text = f.text.toLowerCase();
+					return { ...f, score: words.filter((w) => text.includes(stem(w))).length };
+				})
+				.filter((f) => f.score > 0)
+				.sort((x, y) => y.score - x.score || y.id - x.id)
+				.slice(0, 20)
+				.map(({ score, ...f }) => f);
 		},
+		recentFacts: () => q.allFacts.all().slice(0, 20),
 		listPods: () => q.listPods.all(),
 		getPod: (id) => q.getPod.get(id),
-		insertPod: (p) => { q.insertPod.run(p.id, p.name, p.gpu, p.rate, p.purpose, p.created_at, p.last_used_at, p.deadline_at, p.kind || 'test', p.secret || ''); },
+		insertPod: (p) => { q.insertPod.run(p.id, p.name, p.gpu, p.rate, p.purpose, p.created_at, p.last_used_at, p.deadline_at, p.kind || 'test', p.secret || '', p.model || ''); },
 		setPodReady: (id, at) => { q.setPodReady.run(at, id); },
 		endPod: (id, at, reason) => { q.endPod.run(at, reason, id); },
 		touchPod: (id, at) => { q.touchPod.run(at, id); },

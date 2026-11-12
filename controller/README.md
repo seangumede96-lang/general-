@@ -16,8 +16,11 @@ Built and tested against a mock model:
 - **Phone files:** list, read and write, limited to folders you list in Settings.
   Paths and symlinks that lead outside those folders are refused.
 - **Memory:** `remember` and `recall` persist facts across conversations.
+- **Model picker:** a chip in the message box shows which model will answer. Tapping it
+  lists the free everyday models from the Settings endpoint and four private models; a
+  private model shows its worst-case price and wakes only on a second tap.
 - **GPU control (System page):** rents a RunPod pod only after showing the worst-case
-  price, refuses anything over the remaining budget or the per-pod time limit, allows one
+  price, refuses anything over the real RunPod balance (or your optional cap) or the per-pod time limit, allows one
   pod at a time, and deletes it when idle, when its time is up, or on request. Each pod
   also carries its own timer to delete itself if the phone goes offline. Every pod is
   recorded in a cost ledger; RunPod's actual bill replaces the estimate when available.
@@ -30,11 +33,17 @@ Built and tested against a mock model:
 Not built yet: ComfyUI on the pod, Backblaze B2, Character
 and Video studios, MCP extensions, key encryption and login. See `../docs/PLAN.md`.
 
-Tried on a real phone (realme RMX3834, Android 15, Ubuntu proot inside Termux): all tests
-pass and the page loads in Chrome. Not yet tried with a real model or the real RunPod
-API. To confirm with real pods: that the pod's own self-delete timer works with the key
-RunPod injects, that the ledger matches RunPod's billing, and that the llama.cpp image
-starts with the command used here and the default model name resolves.
+Proven for real on 12 November 2026 (realme RMX3834, Android 15, Ubuntu proot in Termux):
+
+- All tests pass on the phone and the page loads in Chrome.
+- A real pod started through the app deleted itself 7 minutes after creation with the app
+  switched off, so the self-delete timer works with the key RunPod injects.
+- The private brain (Qwen 3.6 35B on llama.cpp) became ready 5 minutes after creation and
+  answered four chats in 4 to 12 seconds each, using file and memory tools correctly.
+- The balance read matches RunPod's own figure exactly.
+
+Still unproven: whether Android leaves the app running for hours in the background, how the
+ledger compares with RunPod's final bill, and the other three private models.
 
 ## Run it
 

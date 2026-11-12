@@ -12,6 +12,7 @@ const MAX_READ_BYTES = 64 * 1024;
 const MAX_OUTPUT_CHARS = 16 * 1024;
 
 export class ToolError extends Error {}
+const FILE_TOOLS = new Set(['list_files', 'read_file', 'write_file']);
 
 const clip = (s) => (s.length > MAX_OUTPUT_CHARS ? `${s.slice(0, MAX_OUTPUT_CHARS)}\n…[truncated ${s.length - MAX_OUTPUT_CHARS} characters]` : s);
 
@@ -133,11 +134,15 @@ export function createTools({ db, gpu }) {
 		{
 			name: 'recall',
 			risk: 'read',
-			description: 'Search long-term memory. Call with no query to see the most recent memories.',
+			description: 'Search long-term memory by keywords. Call with no query to see the most recent memories.',
 			parameters: { type: 'object', properties: { query: { type: 'string', description: 'A word or phrase to look for.' } } },
 			async run({ query }) {
+				const line = (r) => `#${r.id} (${new Date(r.created_at).toISOString().slice(0, 10)}): ${r.text}`;
 				const rows = db.searchFacts(query);
-				return rows.length ? rows.map((r) => `#${r.id} (${new Date(r.created_at).toISOString().slice(0, 10)}): ${r.text}`).join('\n') : 'No matching memories.';
+				if (rows.length) return rows.map(line).join('\n');
+				// A miss on the wording should not hide what is stored: show the latest instead.
+				const recent = db.recentFacts();
+				return recent.length ? `Nothing matched "${query}". Most recent memories:\n${recent.map(line).join('\n')}` : 'Memory is empty.';
 			}
 		},
 		{
@@ -187,7 +192,12 @@ export function createTools({ db, gpu }) {
 
 	return {
 		/** Definitions in the shape the chat-completions API expects. */
-		definitions: () => tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })),
+		definitions() {
+			// Tell the model the real shared paths up front, so its first call does not guess one.
+			const shared = dirs();
+			const where = shared.length ? ` Shared folders: ${shared.join(', ')}. Use these full paths.` : ' No folders are shared yet.';
+			return tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description + (FILE_TOOLS.has(t.name) ? where : ''), parameters: t.parameters } }));
+		},
 		get: (name) => byName.get(name),
 		/**
 		 * Check a proposed call without running it. Returns { tool, args } or { error } where

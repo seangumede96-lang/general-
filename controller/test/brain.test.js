@@ -91,6 +91,34 @@ test('chat uses the everyday endpoint until the brain is ready, then switches to
 	assert.equal(pod.state.lastAuth, `Bearer ${rp.state.created[0].env.LLAMA_API_KEY}`);
 });
 
+test('the model picker data shows what is in use, and choosing "everyday" overrides an awake brain', async () => {
+	let b = (await api('GET', '/api/brains')).body;
+	assert.equal(b.using, 'everyday');
+	assert.equal(b.private.state, 'off');
+	assert.ok(b.private.presets.length >= 3);
+	assert.equal(b.everyday.model, 'everyday-model');
+
+	await api('PUT', '/api/settings', { brainModel: b.private.presets[2].id });
+	await startBrain(30);
+	b = (await api('GET', '/api/brains')).body;
+	assert.equal(b.using, 'private');
+	assert.equal(b.private.label, 'Gemma 4 26B');
+	assert.equal(b.private.podId, 'pod1');
+	assert.match(rp.state.created[0].args, /-hf unsloth\/gemma-4-26B-A4B-it-GGUF:Q4_K_M /);
+
+	// Selecting another preset while this one is awake does not change what is running.
+	await api('PUT', '/api/settings', { brainModel: b.private.presets[0].id });
+	b = (await api('GET', '/api/brains')).body;
+	assert.equal(b.private.label, 'Gemma 4 26B');
+	assert.equal(b.private.selected, b.private.presets[0].id);
+
+	await api('PUT', '/api/settings', { chatBrain: 'everyday' });
+	assert.equal((await api('GET', '/api/brains')).body.using, 'everyday');
+	assert.equal((await chat('hi')).at(-1).content, 'from the everyday endpoint');
+	await api('PUT', '/api/settings', { chatBrain: 'private' });
+	assert.equal((await chat('hi')).at(-1).content, 'from the private brain');
+});
+
 test('chatting keeps the brain awake; silence lets it be shut down; chat then falls back', async () => {
 	await startBrain(60);
 	await api('GET', '/api/system');

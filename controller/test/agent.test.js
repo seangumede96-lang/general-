@@ -200,6 +200,28 @@ test('memory persists across conversations', async () => {
 	assert.match(toolResults(await saved(id))[0].content, /Prefers 9:16 vertical video\./);
 });
 
+test('recall matches by word, not exact phrase, and never hides what is stored', async () => {
+	// Found on the first real brain test: saved "videos are 9:16 vertical", asked about "video format".
+	mock.state.replies = [{ toolCalls: [{ name: 'remember', arguments: { text: 'My videos are 9:16 vertical.' } }] }, { chunks: ['Noted.'] }];
+	await runTurn(await newConversation(), 'remember');
+	const ask = async (query) => {
+		mock.state.replies = [{ toolCalls: [{ name: 'recall', arguments: { query } }] }, { chunks: ['ok'] }];
+		const id = await newConversation();
+		await runTurn(id, 'recall');
+		return toolResults(await saved(id))[0].content;
+	};
+	assert.match(await ask('video format'), /^#\d+ .*My videos are 9:16 vertical\./m);
+	assert.match(await ask('aspect ratio'), /^Nothing matched "aspect ratio"\. Most recent memories:\n.*9:16 vertical/s);
+});
+
+test('file tools tell the model the shared folder paths up front', async () => {
+	mock.state.replies = [{ chunks: ['hi'] }];
+	await runTurn(await newConversation(), 'hello');
+	const defs = mock.state.requests[0].tools;
+	assert.ok(defs.find((t) => t.function.name === 'list_files').function.description.includes(shared));
+	assert.ok(!defs.find((t) => t.function.name === 'recall').function.description.includes(shared));
+});
+
 test('a model that never stops calling tools is cut off', async () => {
 	mock.state.replies = Array.from({ length: 30 }, () => ({ toolCalls: [{ name: 'recall', arguments: {} }] }));
 	const id = await newConversation();

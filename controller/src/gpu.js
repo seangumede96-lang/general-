@@ -154,7 +154,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 		else if (estimate > remaining) reason = `This could cost up to ${usd(estimate)} but only ${usd(remaining)} is left.`;
 		return {
 			allowed: !reason, reason, options, minutes, estimate, remaining,
-			summary: `${options[0].name} from ${usd(options[0].rate)}/h for up to ${minutes} min: at most ${usd(estimate)}. ${usd(remaining)} is left.`
+			// Stock moves between the quote and the start, so name the range, not just the cheapest.
+			summary: `${options[0].name} at ${usd(options[0].rate)}/h${worstRate > options[0].rate ? `, or the next cheapest up to ${usd(worstRate)}/h,` : ''} for up to ${minutes} min: at most ${usd(estimate)}. ${usd(remaining)} is left.`
 		};
 	}
 
@@ -187,17 +188,19 @@ export function createGpuManager({ db, clock = Date.now }) {
 			const now = clock();
 			// Trust the rate RunPod reports for the pod it actually placed.
 			const rate = Number(pod.cost) > 0 ? Number(pod.cost) : gpu.rate;
-			db.insertPod({ id: pod.id, name: spec.name, gpu: gpu.name, rate, purpose, created_at: now, last_used_at: now, deadline_at: now + minutes * 60000, kind: spec.kind, secret: spec.secret });
+			db.insertPod({ id: pod.id, name: spec.name, gpu: gpu.name, rate, purpose, created_at: now, last_used_at: now, deadline_at: now + minutes * 60000, kind: spec.kind, secret: spec.secret, model: spec.model });
 			return db.getPod(pod.id);
 		}
 		throw new GpuError(`None of the available GPUs could be started. ${lastError?.message || ''}`.trim(), 'unavailable');
 	}
 
-	async function stop(id, reason) {
+	/** Delete a pod. `reasonIfGone` is recorded instead when RunPod says it no longer exists. */
+	async function stop(id, reason, reasonIfGone = reason) {
 		const pod = db.getPod(id);
+		let gone = false;
 		try { await call('DELETE', `/pods/${encodeURIComponent(id)}`); }
-		catch (err) { if (err.code !== 'not_found') throw err; }
-		if (pod && !pod.ended_at) db.endPod(id, clock(), reason);
+		catch (err) { if (err.code !== 'not_found') throw err; gone = true; }
+		if (pod && !pod.ended_at) db.endPod(id, clock(), gone ? reasonIfGone : reason);
 		return db.getPod(id);
 	}
 
@@ -214,7 +217,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		const ctx = Math.max(2048, Number.parseInt(s.brainContext, 10) || 16384);
 		const secret = randomBytes(24).toString('hex');
 		return {
-			kind: 'brain', secret, name: 'assistant-brain', image: 'ghcr.io/ggml-org/llama.cpp:server-cuda', disk: 40, ports: [`${BRAIN_PORT}/http`],
+			kind: 'brain', secret, model, name: 'assistant-brain', image: 'ghcr.io/ggml-org/llama.cpp:server-cuda', disk: 40, ports: [`${BRAIN_PORT}/http`],
 			// The pod's address is public, so the server only answers requests carrying this key.
 			env: { LLAMA_API_KEY: secret },
 			cmd: `/app/llama-server -hf ${model} --host 0.0.0.0 --port ${BRAIN_PORT} -ngl all -c ${ctx} -a brain`
@@ -247,7 +250,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		if (db.listPods().some((p) => !p.ended_at)) await refreshBalance();
 		for (const pod of db.listPods().filter((p) => !p.ended_at)) {
 			try {
-				if (now >= pod.deadline_at) { await stop(pod.id, 'time limit reached'); continue; }
+				if (now >= pod.deadline_at) { await stop(pod.id, 'time limit reached', 'deleted itself at its time limit'); continue; }
 				if (pod.kind === 'brain' && !pod.ready_at) {
 					await probeBrain();
 					if (!db.getPod(pod.id).ready_at) {
@@ -319,8 +322,20 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return out;
 	}
 
-	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
+	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
+
+/**
+ * Models offered in the chat's model picker for the private brain. Each id is a GGUF
+ * repository on Hugging Face (checked to exist, with a Q4_K_M file of the size shown).
+ */
+export const BRAIN_PRESETS = [
+	{ id: 'unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M', label: 'Qwen 3.6 35B', note: 'Strongest all-round for planning and tools', sizeGb: 22 },
+	{ id: 'mradermacher/Huihui-Qwen3.6-35B-A3B-abliterated-GGUF:Q4_K_M', label: 'Qwen 3.6 35B uncensored', note: 'Fewer refusals; may be less reliable with tools', sizeGb: 21 },
+	{ id: 'unsloth/gemma-4-26B-A4B-it-GGUF:Q4_K_M', label: 'Gemma 4 26B', note: 'Lighter; leaves GPU memory free', sizeGb: 17 },
+	{ id: 'unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF:Q4_K_M', label: 'Mistral Small 3.2', note: 'Smallest and quickest to wake', sizeGb: 14 }
+];
+export const brainLabel = (id) => BRAIN_PRESETS.find((p) => p.id === id)?.label || id.split('/').pop().replace(/-GGUF(:.*)?$/i, '');
 
 /** VRAM each kind of pod needs. A test pod runs nothing, so any GPU will do. */
 export const MIN_VRAM = { test: 0, brain: 24 };

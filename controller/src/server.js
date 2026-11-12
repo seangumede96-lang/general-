@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb, SECRET_SETTINGS } from './db.js';
 import { streamChat, listModels } from './model.js';
 import { createTools } from './tools.js';
-import { createGpuManager, GpuError, TEST_POD, MIN_VRAM } from './gpu.js';
+import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel } from './gpu.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
@@ -171,7 +171,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 			for (let step = 0; ; step++) {
 				// While the private brain is up, chat goes there (and counts as activity, so
 				// it is not shut down for idling mid-conversation). Otherwise use Settings.
-				const brain = gpu.brainEndpoint();
+				const brain = db.getSettings().chatBrain === 'everyday' ? null : gpu.brainEndpoint();
 				if (brain) gpu.touch(brain.podId);
 				const target = brain || { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: await resolveModel(settings, signal) };
 				if (step >= MAX_STEPS) throw new Error(`Stopped after ${MAX_STEPS} tool steps without finishing. Ask me to continue if the task needs more.`);
@@ -275,6 +275,26 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 			db.setSettings(patch);
 			return publicSettings(db.getSettings());
 		}],
+		// Everything the chat's model picker needs: what is in use, and what can be chosen.
+		['GET', /^\/api\/brains$/, async () => {
+			await gpu.probeBrain().catch(() => {});
+			const s = db.getSettings();
+			const pod = gpu.brainPod();
+			const state = !pod ? 'off' : pod.ready_at ? 'ready' : 'starting';
+			let host = '';
+			try { host = new URL(s.baseUrl).hostname; } catch { /* not a URL yet */ }
+			return {
+				chatBrain: s.chatBrain === 'everyday' ? 'everyday' : 'private',
+				using: s.chatBrain !== 'everyday' && state === 'ready' ? 'private' : 'everyday',
+				everyday: { model: s.model, host, hasKey: Boolean(s.apiKey) },
+				private: {
+					state, podId: pod?.id || null,
+					// While a brain is up, "model" is the one it was started with, whatever is selected now.
+					model: pod?.model || s.brainModel, label: brainLabel(pod?.model || s.brainModel),
+					selected: s.brainModel, presets: BRAIN_PRESETS
+				}
+			};
+		}],
 		['GET', /^\/api\/system$/, () => gpu.status()],
 		['POST', /^\/api\/system\/quote$/, async (req) => {
 			const { minutes, kind = 'test' } = await readJson(req);
@@ -291,7 +311,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 				const q = await gpu.quote({ minutes, minVram });
 				if (!q.allowed) throw new GpuError(q.reason, 'refused');
 				if (confirmEstimate !== q.estimate) throw new GpuError(`The price changed to ${q.estimate.toFixed(2)} USD. Review the new quote and confirm again.`, 'refused');
-				const { secret, ...pod } = await gpu.start({ minutes, minVram, purpose: kind === 'brain' ? 'Private brain' : 'Test pod', spec });
+				const { secret, ...pod } = await gpu.start({ minutes, minVram, purpose: kind === 'brain' ? `Private brain · ${brainLabel(spec.model)}` : 'Test pod', spec });
 				return pod;
 			});
 		}],

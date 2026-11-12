@@ -254,6 +254,7 @@ function handleEvent(ev) {
 				state.working = false;
 				state.live = null;
 				state.awaiting.clear();
+				refreshChip();
 				refreshConversations();
 			}
 			renderThread();
@@ -364,6 +365,7 @@ els.settingsForm.addEventListener('submit', async (e) => {
 	try {
 		await api('PUT', '/api/settings', formValues());
 		els.settings.close();
+		refreshChip();
 	} catch (err) {
 		setStatus(err.message, 'bad');
 	}
@@ -527,6 +529,131 @@ sys.form.addEventListener('submit', async (e) => {
 
 $('open-system').addEventListener('click', () => { setDrawer(false); openSystem(); });
 
+/* ---------- Model picker ---------- */
+
+const picker = { dialog: $('models'), body: $('models-body'), name: $('model-name'), dot: $('model-dot'), data: null, timer: 0 };
+const NOT_CHAT_MODELS = /whisper|tts|guard|embed|rerank|moderation|orpheus|playai/i;
+
+/** Refresh the chip in the message box: which model answers the next message. */
+async function refreshChip() {
+	let b;
+	try { b = picker.data = await api('GET', '/api/brains'); } catch { return; }
+	clearTimeout(picker.timer);
+	const waking = b.chatBrain === 'private' && b.private.state === 'starting';
+	if (b.using === 'private') {
+		picker.name.textContent = `${b.private.label} · private`;
+		picker.dot.className = 'dot private';
+	} else if (waking) {
+		picker.name.textContent = `Waking ${b.private.label}…`;
+		picker.dot.className = 'dot waking';
+	} else {
+		picker.name.textContent = b.everyday.model || (b.everyday.hasKey ? 'Everyday model' : 'Choose a model');
+		picker.dot.className = `dot${b.everyday.hasKey ? ' free' : ''}`;
+	}
+	// While a brain is waking or awake, keep the chip honest without the user doing anything.
+	if (b.private.state !== 'off') picker.timer = setTimeout(async () => { await refreshChip(); if (picker.dialog.open) renderPicker(); }, b.private.state === 'starting' ? 8000 : 30000);
+}
+
+function option({ title, note, side, on, disabled, onClick }) {
+	const btn = el('button', { type: 'button', className: `opt${on ? ' on' : ''}`, disabled: Boolean(disabled) },
+		el('div', { className: 'opt-main' }, el('div', { className: 'opt-title', textContent: title }), ...(note ? [el('div', { className: 'opt-note', textContent: note })] : [])),
+		el('div', { className: 'opt-side', textContent: side || '' }));
+	if (onClick) btn.addEventListener('click', onClick);
+	return btn;
+}
+
+const choose = async (patch, close = true) => {
+	await api('PUT', '/api/settings', patch);
+	await refreshChip();
+	if (close) picker.dialog.close(); else renderPicker();
+};
+
+async function renderPicker() {
+	const b = picker.data;
+	if (!b) return;
+	const nodes = [];
+
+	// Everyday models: free, always available, served by the endpoint in Settings.
+	nodes.push(el('div', { className: 'sect', textContent: `Everyday · free${b.everyday.host ? ` · ${b.everyday.host}` : ''}` }));
+	if (!b.everyday.hasKey) {
+		nodes.push(option({ title: 'Add an API key', note: 'Paste your key in Settings to use everyday models.', side: 'Settings', onClick: () => { picker.dialog.close(); $('open-settings').click(); } }));
+	} else {
+		const list = el('div', {}, el('div', { className: 'sect-note', textContent: 'Loading models…' }));
+		nodes.push(list);
+		api('GET', '/api/models').then(({ models }) => {
+			const usable = models.filter((m) => !NOT_CHAT_MODELS.test(m)).sort();
+			if (b.everyday.model && !usable.includes(b.everyday.model)) usable.unshift(b.everyday.model);
+			list.replaceChildren(...usable.map((m) => {
+				const on = b.using === 'everyday' && m === b.everyday.model;
+				return option({ title: m, side: on ? 'In use' : '', on, onClick: () => choose({ model: m, chatBrain: 'everyday' }) });
+			}));
+		}).catch((err) => list.replaceChildren(el('div', { className: 'sect-note', textContent: err.message })));
+	}
+
+	// Private brain: a model on a rented GPU. Costs money while awake.
+	const p = b.private;
+	const stateText = { off: 'asleep, nothing is being charged', starting: 'waking up, this takes several minutes', ready: 'awake' }[p.state];
+	nodes.push(el('div', { className: 'sect', textContent: `Private · rented GPU · ${stateText}` }));
+	const wakeBox = el('div');
+	for (const preset of p.presets) {
+		const running = p.state !== 'off' && preset.id === p.model;
+		const on = running && b.using === 'private';
+		const side = running ? (p.state === 'ready' ? (on ? 'In use' : 'Awake') : 'Waking…') : `${preset.sizeGb} GB`;
+		nodes.push(option({
+			title: preset.label, note: preset.note, side, on,
+			// One brain at a time: while one is up, the others wait until it is put to sleep.
+			disabled: p.state !== 'off' && !running,
+			onClick: running
+				? () => choose({ chatBrain: 'private' })
+				: async () => { await api('PUT', '/api/settings', { brainModel: preset.id }); showWake(preset, wakeBox); }
+		}));
+	}
+	nodes.push(wakeBox);
+	if (p.state !== 'off') {
+		const sleep = el('button', { type: 'button', className: 'btn-ghost', textContent: 'Put the brain to sleep' });
+		sleep.addEventListener('click', async () => {
+			sleep.disabled = true;
+			try { await api('DELETE', `/api/system/pods/${p.podId}`); } catch (err) { alert(err.message); }
+			await refreshChip();
+			renderPicker();
+		});
+		nodes.push(el('div', { className: 'wake' }, 'To switch to a different private model, put this one to sleep first. Charges stop immediately.', el('div', { className: 'row' }, el('span', { className: 'spacer' }), sleep)));
+	}
+	picker.body.replaceChildren(...nodes);
+}
+
+/** Waking a brain costs money, so show the worst-case price and wait for a second tap. */
+async function showWake(preset, box) {
+	const minutes = 30;
+	box.replaceChildren(el('div', { className: 'wake', textContent: 'Checking prices…' }));
+	const fail = (message) => box.replaceChildren(el('div', { className: 'wake sys-alert', textContent: message }));
+	let q;
+	try { q = await api('POST', '/api/system/quote', { minutes, kind: 'brain' }); } catch (err) { return fail(err.message); }
+	if (!q.allowed) return fail(q.reason);
+	const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Wake for up to ${money(q.estimate)}` });
+	go.addEventListener('click', async () => {
+		go.disabled = true;
+		go.textContent = 'Starting…';
+		try {
+			await api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate, kind: 'brain' });
+			await choose({ chatBrain: 'private' });
+		} catch (err) { fail(err.message); }
+	});
+	box.replaceChildren(el('div', { className: 'wake' },
+		el('div', { className: 'opt-title', textContent: `Wake ${preset.label}` }),
+		`${q.summary} It takes about five minutes to wake, and goes back to sleep by itself after 10 quiet minutes.`,
+		el('div', { className: 'row' }, el('span', { className: 'spacer' }), go)));
+	box.scrollIntoView({ block: 'nearest' });
+}
+
+$('model-chip').addEventListener('click', async () => {
+	await refreshChip();
+	renderPicker();
+	picker.dialog.showModal();
+});
+$('models-close').addEventListener('click', () => picker.dialog.close());
+picker.dialog.addEventListener('click', (e) => { if (e.target === picker.dialog) picker.dialog.close(); });
+
 /* ---------- Window height ---------- */
 
 // Pin the layout to the area that is actually visible. Normally this equals the CSS height
@@ -542,6 +669,7 @@ fitWindow();
 
 /* ---------- Start ---------- */
 
+refreshChip();
 await refreshConversations();
 const wanted = location.hash.slice(1);
 if (wanted === 'system') { state.currentId = null; setView('system'); }

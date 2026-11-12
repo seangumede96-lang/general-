@@ -170,6 +170,15 @@ test('the watchdog deletes a busy pod at its deadline', async () => {
 	assert.equal((await api('GET', '/api/system')).body.history[0].end_reason, 'time limit reached');
 });
 
+test('a pod found already gone at its deadline is recorded as having deleted itself', async () => {
+	// What the first real test showed: the app was off, the pod's own timer removed it.
+	await startPod(5);
+	rp.state.pods.get('pod1').status = 'TERMINATED';
+	now += 8 * MIN;
+	await app.gpu.tick();
+	assert.equal((await api('GET', '/api/system')).body.history[0].end_reason, 'deleted itself at its time limit');
+});
+
 test('a pod that vanished on RunPod is closed in the ledger', async () => {
 	await startPod(30);
 	rp.state.pods.get('pod1').status = 'TERMINATED';
@@ -227,7 +236,7 @@ test('with no cap, the budget is the real RunPod balance', async () => {
 	assert.equal(s.budget.balance, 61.38);
 	assert.equal(s.budget.cap, null);
 	const q = (await api('POST', '/api/system/quote', { minutes: 30 })).body;
-	assert.match(q.summary, /\$61\.38 is left/);
+	assert.match(q.summary, /RTX A4000 at \$0\.17\/h, or the next cheapest up to \$0\.34\/h, for up to 30 min: at most \$0\.17\. \$61\.38 is left\./);
 });
 
 test('a balance lower than the cap wins, and an empty balance refuses pods', async () => {
