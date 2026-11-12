@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 // RunPod pod lifecycle with a spend ledger. Rules enforced here, in code:
+//   - the cheapest GPU that fits the job, in whichever cloud has it
 //   - one pod at a time, and only if its worst-case cost fits the remaining budget
 //   - every pod has a fixed maximum lifetime, decided before it starts
 //   - pods are terminated (never just stopped) when idle, when their time is up, or on request
@@ -41,7 +42,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return {
 			key: s.runpodApiKey,
 			base: (s.runpodBaseUrl || REAL_API).replace(/\/+$/, ''),
-			cloud: s.podCloud === 'SECURE' ? 'SECURE' : 'COMMUNITY',
+			clouds: s.podCloud === 'SECURE' ? ['SECURE'] : s.podCloud === 'COMMUNITY' ? ['COMMUNITY'] : ['COMMUNITY', 'SECURE'],
 			budgetTotal: Math.max(0, Number.parseFloat(s.budgetTotal) || 0),
 			maxPodMinutes: Math.max(1, Number.parseInt(s.maxPodMinutes, 10) || 60),
 			idleMinutes: Math.max(1, Number.parseInt(s.idleMinutes, 10) || 10)
@@ -81,25 +82,33 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return { total, spent, remaining: Math.max(0, total - spent) };
 	}
 
-	/** Cheapest GPU types that meet the VRAM floor and currently have capacity. */
+	/**
+	 * Cheapest GPUs that meet the VRAM floor and have capacity now, across the allowed clouds.
+	 * Stock changes by the minute, so up to three are returned as fallbacks, but only ones
+	 * priced within twice the cheapest: a fallback must never be a much dearer card.
+	 */
 	async function candidates(minVram) {
-		const { cloud } = cfg();
-		const side = cloud.toLowerCase();
-		const { gpus = [] } = await call('GET', `/catalog/gpus?include=AVAILABILITY&product=POD&cloud=${cloud}`);
-		return gpus
-			.filter((g) => g[side] && g.memory >= minVram && g.availability !== 'NONE' && g.price?.[side] > 0)
-			.map((g) => ({ id: g.id, name: g.name || g.id, memory: g.memory, rate: g.price[side], availability: g.availability }))
-			.sort((a, b) => a.rate - b.rate)
-			.slice(0, 3);
+		const found = [];
+		for (const cloud of cfg().clouds) {
+			const side = cloud.toLowerCase();
+			const { gpus = [] } = await call('GET', `/catalog/gpus?include=AVAILABILITY&product=POD&cloud=${cloud}`);
+			for (const g of gpus) {
+				if (g[side] && g.memory >= minVram && g.availability !== 'NONE' && g.price?.[side] > 0) {
+					found.push({ id: g.id, name: g.name || g.id, memory: g.memory, rate: g.price[side], cloud, availability: g.availability });
+				}
+			}
+		}
+		found.sort((a, b) => a.rate - b.rate);
+		return found.filter((o) => o.rate <= found[0].rate * 2).slice(0, 3);
 	}
 
-	async function quote({ minutes, minVram = 24 }) {
+	async function quote({ minutes, minVram = 0 }) {
 		const c = cfg();
 		minutes = Number(minutes);
 		if (!Number.isFinite(minutes) || minutes < 1) throw new GpuError('Minutes must be at least 1.', 'invalid');
 		const options = await candidates(minVram);
 		const { remaining } = budget();
-		if (!options.length) return { allowed: false, reason: `No GPU with ${minVram} GB or more is available right now.`, options, remaining };
+		if (!options.length) return { allowed: false, reason: minVram ? `No GPU with ${minVram} GB or more is available right now.` : 'No GPU is available right now.', options, remaining };
 		// Any of the options may be the one that has capacity, so budget for the dearest.
 		const worstRate = Math.max(...options.map((o) => o.rate));
 		const estimate = ceilCents(worstRate * minutes / 60);
@@ -117,10 +126,9 @@ export function createGpuManager({ db, clock = Date.now }) {
 	 * Start a pod. `spec` is { name, image, cmd, ports, env, disk }. The pod's lifetime is
 	 * fixed at `minutes`; the worst case is checked against the budget before anything starts.
 	 */
-	async function start({ minutes, purpose = '', minVram = 24, spec }) {
+	async function start({ minutes, purpose = '', minVram = 0, spec }) {
 		const q = await quote({ minutes, minVram });
 		if (!q.allowed) throw new GpuError(q.reason, 'refused');
-		const { cloud } = cfg();
 		let lastError;
 		for (const gpu of q.options) {
 			let pod;
@@ -132,7 +140,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 					disk: spec.disk || 20,
 					ports: spec.ports || [],
 					env: spec.env || {},
-					cloud,
+					cloud: gpu.cloud,
 					gpu: { id: gpu.id, count: 1 }
 				});
 			} catch (err) {
@@ -254,7 +262,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 	async function status() {
 		const c = cfg();
 		const now = clock();
-		const out = { configured: Boolean(c.key), limits: { maxPodMinutes: c.maxPodMinutes, idleMinutes: c.idleMinutes, cloud: c.cloud }, unknown: [], error: null };
+		const out = { configured: Boolean(c.key), limits: { maxPodMinutes: c.maxPodMinutes, idleMinutes: c.idleMinutes, clouds: c.clouds }, unknown: [], error: null };
 		if (c.key) {
 			try { await reconcile(); out.unknown = await unknownPods(); }
 			catch (err) { out.error = err.message; }
@@ -276,6 +284,9 @@ export function createGpuManager({ db, clock = Date.now }) {
 
 	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
+
+/** VRAM each kind of pod needs. A test pod runs nothing, so any GPU will do. */
+export const MIN_VRAM = { test: 0, brain: 24 };
 
 /** A do-nothing pod used to prove the lifecycle end to end before real workloads exist. */
 export const TEST_POD = { kind: 'test', name: 'assistant-test', image: 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404', cmd: 'sleep infinity', disk: 20 };

@@ -15,7 +15,7 @@ export const SETTING_DEFAULTS = {
 	allowedDirs: '',
 	runpodApiKey: '',
 	runpodBaseUrl: '',
-	podCloud: 'COMMUNITY',
+	podCloud: 'ANY',   // ANY = cheapest of Community and Secure; or COMMUNITY / SECURE
 	// Total you are willing to spend on GPUs. Pods are refused once this is used up.
 	budgetTotal: '50',
 	maxPodMinutes: '60',

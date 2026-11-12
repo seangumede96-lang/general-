@@ -158,12 +158,12 @@ export function createTools({ db, gpu }) {
 			description: 'Rent a GPU pod for a fixed number of minutes. Costs money: the user sees the price and must approve. The pod is deleted automatically when the time is up or it sits idle.',
 			parameters: { type: 'object', properties: { minutes: { type: 'integer', description: 'Maximum lifetime in minutes.' }, purpose: { type: 'string', description: 'What the pod is for.' } }, required: ['minutes', 'purpose'] },
 			async preview({ minutes }) {
-				const q = await gpu.quote({ minutes });
+				const q = await gpu.quote({ minutes, minVram: 24 });
 				return q.allowed ? { note: q.summary } : { refuse: `Cannot start a GPU: ${q.reason}` };
 			},
 			async run({ minutes, purpose }) {
 				try {
-					const pod = await gpu.start({ minutes, purpose, spec: TEST_POD });
+					const pod = await gpu.start({ minutes, minVram: 24, purpose, spec: TEST_POD });
 					return `Started pod ${pod.id}: ${pod.gpu} at $${pod.rate}/h, deleted automatically within ${minutes} minutes.`;
 				} catch (err) { throw new ToolError(err.message); }
 			}

@@ -464,7 +464,7 @@ async function quoteAndStart(kind, minutes, out) {
 	out.replaceChildren(el('div', { className: 'muted small', textContent: 'Checking prices…' }));
 	const fail = (message) => out.replaceChildren(el('div', { className: 'sys-alert', textContent: message }));
 	let q;
-	try { q = await api('POST', '/api/system/quote', { minutes }); } catch (err) { return fail(err.message); }
+	try { q = await api('POST', '/api/system/quote', { minutes, kind }); } catch (err) { return fail(err.message); }
 	if (!q.allowed) return fail(q.reason);
 	const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Start for up to ${money(q.estimate)}` });
 	go.addEventListener('click', async () => {

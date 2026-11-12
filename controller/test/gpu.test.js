@@ -14,6 +14,8 @@ const api = async (method, path, body) => {
 	const res = await fetch(base + path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
 	return { status: res.status, body: await res.json() };
 };
+// These tests pin Community Cloud so the expected prices are easy to follow; the cross-cloud
+// choice has its own tests below.
 const startPod = async (minutes) => {
 	const q = (await api('POST', '/api/system/quote', { minutes })).body;
 	return api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate });
@@ -29,7 +31,7 @@ beforeEach(async () => {
 	Object.assign(rp.state, { noCapacity: new Set(), insufficientBalance: false, pods: new Map(), billing: new Map(), created: [], deleted: [], seq: 0 });
 	app = createApp({ dataDir: join(root, `d${++n}`), clock: () => now, watchdogMs: 0 });
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
-	await api('PUT', '/api/settings', { runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, budgetTotal: '50', maxPodMinutes: '60', idleMinutes: '10' });
+	await api('PUT', '/api/settings', { runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, budgetTotal: '50', maxPodMinutes: '60', idleMinutes: '10', podCloud: 'COMMUNITY' });
 });
 
 test('without a key nothing is attempted and the page says so', async () => {
@@ -45,11 +47,43 @@ test('the RunPod key is never returned', async () => {
 	assert.ok(!JSON.stringify(s).includes(rp.state.key));
 });
 
-test('quote picks the cheapest 24 GB GPUs with capacity and budgets for the dearest of them', async () => {
+test('a test pod takes the cheapest GPU of any size; the estimate covers the dearest fallback', async () => {
 	const q = (await api('POST', '/api/system/quote', { minutes: 30 })).body;
-	assert.deepEqual(q.options.map((o) => o.name), ['RTX 3090', 'RTX 4090'], '16 GB card and the unavailable card are excluded');
+	assert.deepEqual(q.options.map((o) => o.name), ['RTX A4000', 'RTX 3090', 'RTX 4090'], 'the card with no stock is excluded');
 	assert.equal(q.estimate, 0.17, '30 min at $0.34/h');
 	assert.equal(q.allowed, true);
+});
+
+test('a brain pod only considers GPUs with 24 GB or more', async () => {
+	const q = (await api('POST', '/api/system/quote', { minutes: 30, kind: 'brain' })).body;
+	assert.deepEqual(q.options.map((o) => o.name), ['RTX 3090', 'RTX 4090']);
+});
+
+test('with both clouds allowed, the cheapest wins wherever it is', async () => {
+	await api('PUT', '/api/settings', { podCloud: 'ANY' });
+	rp.state.gpus.find((g) => g.name === 'RTX A4000').price.secure = 0.12;
+	try {
+		const q = (await api('POST', '/api/system/quote', { minutes: 30 })).body;
+		assert.deepEqual(q.options.map((o) => [o.name, o.cloud]), [['RTX A4000', 'SECURE'], ['RTX A4000', 'COMMUNITY'], ['RTX 3090', 'COMMUNITY']]);
+		const r = await api('POST', '/api/system/pods', { minutes: 30, confirmEstimate: q.estimate });
+		assert.equal(r.status, 200);
+		assert.equal(rp.state.created[0].cloud, 'SECURE');
+		assert.equal(r.body.rate, 0.12);
+	} finally { rp.state.gpus.find((g) => g.name === 'RTX A4000').price.secure = 0.25; }
+});
+
+test('a much dearer card is never offered as a fallback', async () => {
+	const saved = rp.state.gpus;
+	rp.state.gpus = [
+		{ id: 'small', name: 'RTX 2000 Ada', memory: 16, secure: true, community: true, price: { secure: 0.24, community: 0.2 }, availability: 'LOW' },
+		{ id: 'big', name: 'RTX PRO 5000', memory: 48, secure: true, community: true, price: { secure: 0.9, community: 0.82 }, availability: 'LOW' },
+		{ id: 'huge', name: 'H200 SXM', memory: 141, secure: true, community: true, price: { secure: 3.99, community: 3.59 }, availability: 'LOW' }
+	];
+	try {
+		const q = (await api('POST', '/api/system/quote', { minutes: 5 })).body;
+		assert.deepEqual(q.options.map((o) => o.name), ['RTX 2000 Ada']);
+		assert.equal(q.estimate, 0.02);
+	} finally { rp.state.gpus = saved; }
 });
 
 test('starting needs the quoted price echoed back', async () => {
@@ -62,24 +96,24 @@ test('a started pod is on the cheapest GPU, in Community Cloud, with its own sel
 	const r = await startPod(30);
 	assert.equal(r.status, 200);
 	const sent = rp.state.created[0];
-	assert.equal(sent.gpu.id, 'NVIDIA GeForce RTX 3090');
+	assert.equal(sent.gpu.id, 'NVIDIA RTX A4000');
 	assert.equal(sent.cloud, 'COMMUNITY');
 	const args = JSON.parse(sent.args);
 	assert.deepEqual(args.entrypoint, ['bash', '-c']);
 	assert.match(args.cmd[0], /^\(sleep 1920; curl -s -X DELETE https:\/\/api\.runpod\.io\/v2\/pods\/\$RUNPOD_POD_ID .*\) & sleep infinity$/);
 	const s = (await api('GET', '/api/system')).body;
 	assert.equal(s.active.length, 1);
-	assert.equal(s.active[0].rate, 0.22);
+	assert.equal(s.active[0].rate, 0.17);
 	assert.equal(s.active[0].secondsLeft, 1800);
 	assert.deepEqual(s.unknown, []);
 });
 
 test('falls back to the next GPU when the first has no capacity', async () => {
-	rp.state.noCapacity.add('NVIDIA GeForce RTX 3090');
+	rp.state.noCapacity.add('NVIDIA RTX A4000');
 	const r = await startPod(30);
 	assert.equal(r.status, 200);
-	assert.equal(r.body.gpu, 'RTX 4090');
-	assert.equal(r.body.rate, 0.34);
+	assert.equal(r.body.gpu, 'RTX 3090');
+	assert.equal(r.body.rate, 0.22);
 });
 
 test('only one pod at a time', async () => {
@@ -109,9 +143,9 @@ test('cost accrues with time and counts against the budget', async () => {
 	now += 30 * MIN;
 	app.gpu.touch('pod1');
 	const s = (await api('GET', '/api/system')).body;
-	assert.equal(s.active[0].cost, 0.11);
-	assert.equal(s.budget.spent, 0.11);
-	assert.ok(Math.abs(s.budget.remaining - 49.89) < 1e-9);
+	assert.equal(s.active[0].cost, 0.09, '30 min at $0.17/h, rounded up');
+	assert.equal(s.budget.spent, 0.09);
+	assert.ok(Math.abs(s.budget.remaining - 49.91) < 1e-9);
 });
 
 test('the watchdog deletes an idle pod', async () => {
@@ -163,8 +197,8 @@ test('manual stop deletes the pod; the ledger survives a restart', async () => {
 	app = createApp({ dataDir: join(root, `d${n}`), clock: () => now, watchdogMs: 0 });
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
 	const s = (await api('GET', '/api/system')).body;
-	assert.equal(s.history[0].cost, 0.03, '6 min at $0.22/h, rounded up');
-	assert.equal(s.budget.spent, 0.03);
+	assert.equal(s.history[0].cost, 0.02, '6 min at $0.17/h, rounded up');
+	assert.equal(s.budget.spent, 0.02);
 });
 
 test('the actual bill replaces the estimate once RunPod reports it', async () => {

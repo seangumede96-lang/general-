@@ -16,7 +16,7 @@ const api = async (method, path, body) => {
 	return { status: res.status, body: await res.json() };
 };
 const startBrain = async (minutes = 30) => {
-	const q = (await api('POST', '/api/system/quote', { minutes })).body;
+	const q = (await api('POST', '/api/system/quote', { minutes, kind: 'brain' })).body;
 	return api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate, kind: 'brain' });
 };
 async function chat(text) {
@@ -49,6 +49,7 @@ beforeEach(async () => {
 	await api('PUT', '/api/settings', {
 		baseUrl: everyday.baseUrl, model: 'everyday-model',
 		runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl,
+		podCloud: 'COMMUNITY',
 		podProxyTemplate: pod.baseUrl.replace(/\/v1$/, '')  // every pod's address resolves to the mock
 	});
 });

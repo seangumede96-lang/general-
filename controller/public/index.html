@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#212121">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Assistant</title>
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -81,7 +85,7 @@
 
 			<div class="card" id="sys-start-card">
 				<div class="card-cap">Test pod</div>
-				<p class="muted small">Rents the cheapest 24 GB GPU and does nothing with it. Use it once to prove start, cost tracking and automatic shutdown.</p>
+				<p class="muted small">Rents the cheapest GPU available and does nothing with it. Use it once to prove start, cost tracking and automatic shutdown.</p>
 				<div class="row">
 					<label class="inline">Minutes <input id="sys-minutes" type="number" min="1" value="5" inputmode="numeric"></label>
 					<button id="sys-quote" type="button" class="btn-ghost">Get price</button>

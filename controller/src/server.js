@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { openDb, SECRET_SETTINGS } from './db.js';
 import { streamChat, listModels } from './model.js';
 import { createTools } from './tools.js';
-import { createGpuManager, GpuError, TEST_POD } from './gpu.js';
+import { createGpuManager, GpuError, TEST_POD, MIN_VRAM } from './gpu.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const MAX_BODY = 1024 * 1024;
 const MAX_STEPS = 12;
 
@@ -277,19 +277,21 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 		}],
 		['GET', /^\/api\/system$/, () => gpu.status()],
 		['POST', /^\/api\/system\/quote$/, async (req) => {
-			const { minutes } = await readJson(req);
-			return gpuCall(() => gpu.quote({ minutes }));
+			const { minutes, kind = 'test' } = await readJson(req);
+			if (!(kind in MIN_VRAM)) throw new HttpError(400, 'kind must be "test" or "brain"');
+			return gpuCall(() => gpu.quote({ minutes, minVram: MIN_VRAM[kind] }));
 		}],
 		// Starting a pod spends money, so the caller must echo back the estimate it was shown.
 		['POST', /^\/api\/system\/pods$/, async (req) => {
 			const { minutes, confirmEstimate, kind = 'test' } = await readJson(req);
-			if (kind !== 'test' && kind !== 'brain') throw new HttpError(400, 'kind must be "test" or "brain"');
+			if (!(kind in MIN_VRAM)) throw new HttpError(400, 'kind must be "test" or "brain"');
+			const minVram = MIN_VRAM[kind];
 			return gpuCall(async () => {
 				const spec = kind === 'brain' ? gpu.brainSpec() : TEST_POD;
-				const q = await gpu.quote({ minutes });
+				const q = await gpu.quote({ minutes, minVram });
 				if (!q.allowed) throw new GpuError(q.reason, 'refused');
 				if (confirmEstimate !== q.estimate) throw new GpuError(`The price changed to ${q.estimate.toFixed(2)} USD. Review the new quote and confirm again.`, 'refused');
-				const { secret, ...pod } = await gpu.start({ minutes, purpose: kind === 'brain' ? 'Private brain' : 'Test pod', spec });
+				const { secret, ...pod } = await gpu.start({ minutes, minVram, purpose: kind === 'brain' ? 'Private brain' : 'Test pod', spec });
 				return pod;
 			});
 		}],
