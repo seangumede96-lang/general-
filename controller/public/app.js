@@ -522,6 +522,19 @@ sys.form.addEventListener('submit', async (e) => {
 
 $('open-system').addEventListener('click', () => { setDrawer(false); openSystem(); });
 
+/* ---------- Window height ---------- */
+
+// Pin the layout to the area that is actually visible. Normally this equals the CSS height
+// already; it corrects phones where the installed app reports a taller page than it shows.
+function fitWindow() {
+	const vv = window.visualViewport;
+	if (!vv || vv.scale !== 1) return;
+	document.documentElement.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
+}
+window.visualViewport?.addEventListener('resize', fitWindow);
+window.addEventListener('orientationchange', fitWindow);
+fitWindow();
+
 /* ---------- Start ---------- */
 
 await refreshConversations();

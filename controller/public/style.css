@@ -15,7 +15,10 @@
 html, body { height: 100%; margin: 0; }
 body {
 	display: flex;
-	height: 100dvh;
+	/* Height comes from the window itself (100%), not from viewport units: installed as a
+	   home-screen app on Android 15, 100dvh measured the whole screen and pushed the
+	   composer off the bottom. --app-h is a measured fallback set in app.js. */
+	height: var(--app-h, 100%);
 	background: var(--bg);
 	color: var(--text);
 	font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -188,7 +191,7 @@ body.working #send .i-stop { display: block; }
 /* Settings dialog */
 dialog {
 	border: 1px solid var(--border); border-radius: 16px; background: var(--surface); color: var(--text);
-	width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 20px;
+	width: min(520px, calc(100vw - 24px)); max-height: calc(100% - 24px); padding: 20px;
 }
 dialog::backdrop { background: rgba(0, 0, 0, .6); }
 dialog h2 { margin: 0 0 12px; font-size: 20px; }
