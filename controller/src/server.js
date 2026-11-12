@@ -63,7 +63,9 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 	const tools = createTools({ db, gpu, uploadsDir });
 	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs });
 	studio.recover().catch((err) => console.error('[video]', err.message));
-	const images = createImageStudio({ db, gpu, uploadsDir, clock, pollMs: imagePollMs });
+	// A plain question-and-answer call to the brain in use, for helpers such as the prompt writer.
+	const llm = async (messages) => (await complete({ messages, temperature: 0.7, signal: AbortSignal.timeout(60000) })).content.trim();
+	const images = createImageStudio({ db, gpu, uploadsDir, clock, pollMs: imagePollMs, llm });
 	images.recover();
 	const studioCall = async (fn) => {
 		try { return await fn(); }
@@ -156,11 +158,43 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		for (const res of subscribers.get(id) || []) res.write(frame);
 	}
 
+	const NOT_CHAT = /whisper|tts|guard|embed|rerank|moderation|orpheus|playai|safeguard|compound/i;
+	/** From an endpoint's model list, the one most likely to be a capable chat model. */
+	function pickChatModel(models) {
+		const usable = models.filter((m) => !NOT_CHAT.test(m));
+		const prefer = [/70b|120b/i, /qwen|kimi|gpt-oss|llama-4|maverick/i, /llama/i];
+		for (const re of prefer) { const hit = usable.find((m) => re.test(m)); if (hit) return hit; }
+		return usable[0] || null;
+	}
+
 	async function resolveModel(settings, signal) {
 		if (settings.model) return settings.model;
-		const models = await listModels({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, signal });
-		if (!models.length) throw new Error('The model endpoint lists no models. Set a model name in Settings.');
-		return models[0];
+		const model = pickChatModel(await listModels({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, signal }));
+		if (!model) throw new Error('The model endpoint lists no chat models. Set a model name in Settings.');
+		return model;
+	}
+
+	/**
+	 * One model call, sent to whichever brain is in use. While the private brain is up, chat
+	 * goes there (and counts as activity, so it is not shut down for idling). Otherwise the
+	 * everyday endpoint is used; if its saved model name no longer exists, a working one is
+	 * chosen from the endpoint's list, saved, and the call is retried once.
+	 */
+	async function complete(request) {
+		const settings = db.getSettings();
+		const brain = settings.chatBrain === 'everyday' ? null : gpu.brainEndpoint();
+		if (brain) gpu.touch(brain.podId);
+		const call = (target) => streamChat({ ...request, baseUrl: target.baseUrl, apiKey: target.apiKey, model: target.model, temperature: request.temperature ?? Number.parseFloat(settings.temperature) });
+		if (brain) return call(brain);
+		const everyday = { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: await resolveModel(settings, request.signal) };
+		try { return await call(everyday); }
+		catch (err) {
+			if (!settings.model || !/HTTP 404|model_not_found|does not exist|decommissioned/i.test(err.message)) throw err;
+			const replacement = pickChatModel(await listModels({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, signal: request.signal }).catch(() => []));
+			if (!replacement || replacement === settings.model) throw err;
+			db.setSettings({ model: replacement });
+			return call({ ...everyday, model: replacement });
+		}
 	}
 
 	/** Stop a turn: abort the model request and answer any open approval prompt with "deny". */
@@ -262,19 +296,10 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		let status = 'ok';
 		try {
 			for (let step = 0; ; step++) {
-				// While the private brain is up, chat goes there (and counts as activity, so
-				// it is not shut down for idling mid-conversation). Otherwise use Settings.
-				const brain = db.getSettings().chatBrain === 'everyday' ? null : gpu.brainEndpoint();
-				if (brain) gpu.touch(brain.podId);
-				const target = brain || { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: await resolveModel(settings, signal) };
 				if (step >= MAX_STEPS) throw new Error(`Stopped after ${MAX_STEPS} tool steps without finishing. Ask me to continue if the task needs more.`);
-				const result = await streamChat({
-					baseUrl: target.baseUrl,
-					apiKey: target.apiKey,
-					model: target.model,
+				const result = await complete({
 					messages: buildHistory(id, settings),
 					tools: tools.definitions(),
-					temperature: Number.parseFloat(settings.temperature),
 					signal,
 					onText: (s) => { turn.text += s; broadcast(id, { t: 'text', text: s }); },
 					onThinking: (s) => { turn.thinking += s; broadcast(id, { t: 'thinking', text: s }); }

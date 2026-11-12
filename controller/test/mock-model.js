@@ -21,12 +21,17 @@ export async function startMockModel(opts = {}) {
 		}
 		if (req.url === '/v1/models') {
 			res.writeHead(200, { 'Content-Type': 'application/json' });
-			return res.end(JSON.stringify({ data: [{ id: 'mock-model' }] }));
+			return res.end(JSON.stringify({ data: (state.models || ['mock-model']).map((id) => ({ id })) }));
 		}
 		if (req.url === '/v1/chat/completions' && req.method === 'POST') {
 			let raw = '';
 			for await (const c of req) raw += c;
 			state.requests.push(JSON.parse(raw));
+			// Like a real provider: a model name it does not offer is a 404.
+			if (state.models && !state.models.includes(state.requests.at(-1).model)) {
+				res.writeHead(404, { 'Content-Type': 'application/json' });
+				return res.end(JSON.stringify({ error: { message: `The model \`${state.requests.at(-1).model}\` does not exist or you do not have access to it.`, code: 'model_not_found' } }));
+			}
 			res.writeHead(200, { 'Content-Type': 'text/event-stream' });
 			const reply = state.replies.shift() || { chunks: state.chunks };
 			for (const [index, call] of (reply.toolCalls || []).entries()) {

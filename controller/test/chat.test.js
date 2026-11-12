@@ -69,7 +69,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
-	Object.assign(mock.state, { chunks: ['Hello', ' from the', ' mock model.'], delayMs: 0, requireKey: null, requests: [], replies: [] });
+	Object.assign(mock.state, { chunks: ['Hello', ' from the', ' mock model.'], delayMs: 0, requireKey: null, requests: [], replies: [], models: null });
 	await api('PUT', '/api/settings', { baseUrl: mock.baseUrl, model: '', clearApiKey: true, allowedDirs: '' });
 });
 
@@ -180,6 +180,17 @@ test('the API key is used for requests but never returned', async () => {
 	const conv = (await api('POST', '/api/conversations')).body;
 	const events = await sendAndWait(conv.id, 'hi');
 	assert.equal(events.at(-1).status, 'ok');
+});
+
+test('a saved model name the provider no longer offers is replaced automatically', async () => {
+	// What happened on the phone: Settings held a model name Groq did not have.
+	mock.state.models = ['whisper-large-v3', 'meta-llama/llama-guard-4-12b', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'];
+	await api('PUT', '/api/settings', { model: 'llama-3.3-70b-versatile' });
+	const conv = (await api('POST', '/api/conversations')).body;
+	const events = await sendAndWait(conv.id, 'Hello');
+	assert.equal(events.at(-1).status, 'ok');
+	assert.deepEqual(mock.state.requests.map((r) => r.model), ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b'], 'skips speech and safety models, prefers the large one');
+	assert.equal((await api('GET', '/api/settings')).body.model, 'openai/gpt-oss-120b');
 });
 
 test('history survives a restart', async () => {

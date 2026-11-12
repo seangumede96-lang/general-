@@ -833,6 +833,10 @@ $('vid-form').addEventListener('submit', (e) => { e.preventDefault(); video.quot
 /* ---------- Characters ---------- */
 
 const KNOWN_TRIGGERS = [[/GTA_VI_3D_Style/i, 'gta6game_']];
+// Strengths that worked when these LoRAs were tuned by hand; anything else starts at 0.9.
+const KNOWN_STRENGTHS = [[/GTA_VI_3D_Style/i, 0.9]];
+const savedStrengths = () => { try { return JSON.parse(localStorage.getItem('loraStrengths') || '{}'); } catch { return {}; } };
+const defaultStrength = (name) => savedStrengths()[name] ?? KNOWN_STRENGTHS.find(([re]) => re.test(name))?.[1] ?? 0.9;
 const loraLabel = (name) => name.split('/').pop().replace(/\.safetensors$/, '');
 
 const chars = {
@@ -881,7 +885,7 @@ const chars = {
 				const box = el('input', { type: 'checkbox', checked: i === 0 });
 				box.dataset.lora = name;
 				box.addEventListener('change', () => this.loraNote());
-				return el('label', { className: 'lora-row' }, box, el('span', { textContent: loraLabel(name) }), el('input', { type: 'number', min: 0, max: 2, step: 0.05, value: 0.9, ariaLabel: `Strength of ${loraLabel(name)}` }));
+				return el('label', { className: 'lora-row' }, box, el('span', { textContent: loraLabel(name) }), el('input', { type: 'number', min: 0, max: 2, step: 0.05, value: defaultStrength(name), ariaLabel: `Strength of ${loraLabel(name)}` }));
 			}) : [el('div', { className: 'muted small', textContent: session.state === 'off' ? 'Your LoRAs are listed here once a session starts.' : 'No LoRAs were found in the loras/ folder of your Backblaze bucket.' })]));
 			this.loraNote();
 		}
@@ -900,7 +904,7 @@ const chars = {
 	loraNote() {
 		const t = this.triggers();
 		const many = [...$('img-loras').querySelectorAll('input[type=checkbox]:checked')].length > 3;
-		$('img-lora-note').textContent = [many ? 'Only the first three ticked LoRAs are used.' : '', t.length ? `Trigger word "${t.join('", "')}" is added to the start of your description for you. For other LoRAs, type their trigger word yourself.` : ''].filter(Boolean).join(' ');
+		$('img-lora-note').textContent = [many ? 'Only the first three ticked LoRAs are used.' : '', t.length ? `Trigger word "${t.join('", "')}" is added for you. For other LoRAs, type their trigger word yourself.` : ''].filter(Boolean).join(' ');
 	},
 
 	async quote(minutes, out) {
@@ -927,10 +931,11 @@ const chars = {
 
 	async generate() {
 		const out = $('img-out');
-		let prompt = $('img-prompt').value.trim();
-		for (const t of this.triggers()) if (prompt && !prompt.includes(t)) prompt = `${t} ${prompt}`;
+		const loras = this.chosenLoras();
+		// Remember the strengths used, so next time each LoRA starts where you left it.
+		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
 		try {
-			await api('POST', '/api/images/generate', { prompt, loras: this.chosenLoras(), size: $('img-size').value, count: Number($('img-count').value), refs: this.refs });
+			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs: this.refs });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -938,7 +943,10 @@ const chars = {
 
 	renderGallery() {
 		$('img-gallery').replaceChildren(...this.data.generations.map((g) => {
-			const card = el('div', { className: 'card gen' }, el('div', { className: 'gen-prompt', textContent: g.prompt }));
+			const card = el('div', { className: 'card gen' });
+			if (g.params.asked && g.params.asked !== g.prompt) card.append(el('div', { className: 'small', style: 'margin-bottom:4px', textContent: `You asked: ${g.params.asked}` }));
+			card.append(el('div', { className: 'gen-prompt', textContent: g.prompt }));
+			if (g.params.note) card.append(el('div', { className: 'approval-note', style: 'padding:0 0 8px', textContent: g.params.note }));
 			if (g.status === 'running') card.append(el('div', { className: 'brain-state starting', textContent: `Making ${g.params.count} picture${g.params.count > 1 ? 's' : ''}… usually under a minute.` }));
 			if (g.status === 'failed') card.append(el('p', { className: 'sys-alert', textContent: g.detail }));
 			if (g.images.length) card.append(el('div', { className: 'shots' }, ...g.images.map((id) => {
@@ -957,7 +965,7 @@ const chars = {
 				const del = el('button', { type: 'button', className: 'link', textContent: 'Delete' });
 				del.addEventListener('click', async () => { if (confirm('Delete these pictures from the phone?')) { await api('DELETE', `/api/images/${g.id}`).catch(() => {}); this.sig = ''; this.refresh(); } });
 				const again = el('button', { type: 'button', className: 'link', textContent: 'Reuse description' });
-				again.addEventListener('click', () => { $('img-prompt').value = g.prompt; $('img-form').scrollIntoView({ behavior: 'smooth' }); });
+				again.addEventListener('click', () => { $('img-prompt').value = g.params.asked || g.prompt; $('img-form').scrollIntoView({ behavior: 'smooth' }); });
 				card.append(el('div', { className: 'row small', style: 'margin-top:10px' }, again, el('span', { className: 'spacer' }), del));
 			}
 			return card;
@@ -1047,36 +1055,44 @@ async function renderPicker() {
 		}).catch((err) => list.replaceChildren(el('div', { className: 'sect-note', textContent: err.message })));
 	}
 
-	// Private brain: a model on a rented GPU. Costs money while awake.
+	// Private brain: a model on a rented GPU, with an on/off switch. Costs money while on.
 	const p = b.private;
-	const stateText = { off: 'asleep, nothing is being charged', starting: 'waking up, this takes several minutes', ready: 'awake' }[p.state];
-	nodes.push(el('div', { className: 'sect', textContent: `Private · rented GPU · ${stateText}` }));
+	const stateText = { off: 'Off. Nothing is being charged.', starting: 'Turning on: about five minutes.', ready: 'On. Chat is using it.' }[p.state];
 	const wakeBox = el('div');
+	const chosen = p.presets.find((x) => x.id === (p.state === 'off' ? p.selected : p.model)) || p.presets[0];
+	const sw = el('button', { type: 'button', className: `switch${p.state === 'starting' ? ' waking' : ''}`, role: 'switch', ariaLabel: 'Private brain' });
+	sw.setAttribute('aria-checked', String(p.state !== 'off'));
+	sw.addEventListener('click', async () => {
+		if (p.state === 'off') return showWake(chosen, wakeBox);
+		if (!confirm('Turn the private brain off? Charges stop immediately.')) return;
+		sw.disabled = true;
+		try { await api('DELETE', `/api/system/pods/${p.podId}`); } catch (err) { alert(err.message); }
+		await refreshChip();
+		renderPicker();
+	});
+	const head = [
+		el('div', { className: 'sect', textContent: 'Private brain · rented GPU' }),
+		el('div', { className: 'switch-row' }, el('div', { className: 'opt-main' }, el('div', { className: 'opt-title' }, chosen.label, ...(chosen.uncensored ? [el('span', { className: 'tag', textContent: 'Uncensored' })] : [])), el('div', { className: 'opt-note', textContent: stateText })), sw),
+		wakeBox,
+		el('div', { className: 'sect-note', textContent: p.state === 'off' ? 'Choose which model the switch turns on:' : 'To change model, turn it off first.' })
+	];
 	for (const preset of p.presets) {
 		const running = p.state !== 'off' && preset.id === p.model;
 		const on = running && b.using === 'private';
-		const side = running ? (p.state === 'ready' ? (on ? 'In use' : 'Awake') : 'Waking…') : `${preset.sizeGb} GB`;
-		nodes.push(option({
-			title: preset.label, tag: preset.uncensored ? 'Uncensored' : '', note: preset.note, side, on,
-			// One brain at a time: while one is up, the others wait until it is put to sleep.
+		const picked = p.state === 'off' && preset.id === chosen.id;
+		head.push(option({
+			title: preset.label, tag: preset.uncensored ? 'Uncensored' : '', note: preset.note,
+			side: running ? (p.state === 'ready' ? (on ? 'In use' : 'On') : 'Turning on…') : picked ? 'Selected' : `${preset.sizeGb} GB`, on,
+			// One brain at a time: while one is on, the others wait until it is turned off.
 			disabled: p.state !== 'off' && !running,
 			onClick: running
 				? () => choose({ chatBrain: 'private' })
-				: async () => { await api('PUT', '/api/settings', { brainModel: preset.id }); showWake(preset, wakeBox); }
+				: async () => { await api('PUT', '/api/settings', { brainModel: preset.id }); await refreshChip(); await renderPicker(); picker.body.scrollTop = 0; picker.dialog.scrollTop = 0; }
 		}));
+		if (picked) head.at(-1).classList.add('picked');
 	}
-	nodes.push(wakeBox);
-	if (p.state !== 'off') {
-		const sleep = el('button', { type: 'button', className: 'btn-ghost', textContent: 'Put the brain to sleep' });
-		sleep.addEventListener('click', async () => {
-			sleep.disabled = true;
-			try { await api('DELETE', `/api/system/pods/${p.podId}`); } catch (err) { alert(err.message); }
-			await refreshChip();
-			renderPicker();
-		});
-		nodes.push(el('div', { className: 'wake' }, 'To switch to a different private model, put this one to sleep first. Charges stop immediately.', el('div', { className: 'row' }, el('span', { className: 'spacer' }), sleep)));
-	}
-	picker.body.replaceChildren(...nodes);
+	// The private brain comes first: it is the one with a switch.
+	picker.body.replaceChildren(...head, ...nodes);
 }
 
 /** Waking a brain costs money, so show the worst-case price and wait for a second tap. */
@@ -1087,7 +1103,7 @@ async function showWake(preset, box) {
 	let q;
 	try { q = await api('POST', '/api/system/quote', { minutes, kind: 'brain' }); } catch (err) { return fail(err.message); }
 	if (!q.allowed) return fail(q.reason);
-	const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Wake for up to ${money(q.estimate)}` });
+	const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Turn on for up to ${money(q.estimate)}` });
 	go.addEventListener('click', async () => {
 		go.disabled = true;
 		go.textContent = 'Starting…';
@@ -1097,8 +1113,7 @@ async function showWake(preset, box) {
 		} catch (err) { fail(err.message); }
 	});
 	box.replaceChildren(el('div', { className: 'wake' },
-		el('div', { className: 'opt-title' }, `Wake ${preset.label}`, ...(preset.uncensored ? [el('span', { className: 'tag', textContent: 'Uncensored' })] : [])),
-		`${q.summary} It takes about five minutes to wake, and goes back to sleep by itself after 10 quiet minutes.`,
+		`${q.summary} It takes about five minutes to turn on, and turns itself off after 10 quiet minutes.`,
 		el('div', { className: 'row' }, el('span', { className: 'spacer' }), go)));
 	box.scrollIntoView({ block: 'nearest' });
 }

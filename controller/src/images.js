@@ -13,7 +13,20 @@ import { MIN_VRAM } from './gpu.js';
 export class ImageError extends Error {}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000 }) {
+/**
+ * How to turn a casual request into a prompt Krea 2 follows well. These are the prompting
+ * rules found by trial on 11 November 2026 (see the pipeline notes).
+ */
+const PROMPT_WRITER = `You write prompts for the Krea 2 image model. The user gives a short or vague idea; you reply with ONE detailed prompt and nothing else: no preamble, no quotes, no lists, no notes.
+Rules:
+- One paragraph of long, natural sentences, 80 to 160 words.
+- Start with the framing (for example "Full-body picture of", "Close-up portrait of") and the body type and build, then face, hair, skin, then clothing, pose, expression, lighting.
+- Always state the clothing explicitly, item by item. Follow the user's wishes about clothing and nudity exactly; if they say nothing about clothing, give a complete outfit.
+- Unless the user names a setting, the background is a plain pure white void.
+- Characters are fictional adults. Keep every detail the user gave; invent sensible specifics for what they left out. Do not add text, logos or watermarks.
+- If reference pictures are mentioned, do not describe the face or body they will supply; describe everything else.`;
+
+export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000, llm = null }) {
 	const progress = new Map(); // podId -> latest setup step
 	const pod = () => db.listPods().find((p) => !p.ended_at && p.kind === 'image') || null;
 	const comfyFor = (p) => createComfyClient(gpu.proxyUrl(p.id, COMFY_PORT));
@@ -56,6 +69,22 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			loras: savedLoras(), b2: b2Ready(), sizes: Object.keys(SIZES),
 			generations: db.listGenerations().map(view)
 		};
+	}
+
+	/**
+	 * Expand a casual request into a detailed prompt using the chat brain. If no brain
+	 * answers, or it declines, the user's own words are used unchanged.
+	 */
+	async function enhance(text, refs = []) {
+		if (!llm) return { prompt: text, enhanced: false, why: 'No chat model is set up.' };
+		const refNote = refs.length ? `\n(Reference pictures will supply: ${refs.map((r) => r.role === 'look' ? 'outfit and makeup' : r.role).join(', ')}.)` : '';
+		try {
+			const out = (await llm([{ role: 'system', content: PROMPT_WRITER }, { role: 'user', content: text + refNote }])).replace(/^["'\s]+|["'\s]+$/g, '');
+			const declined = /^(i('m| am)? (sorry|unable|not able)|i can('|no)t|sorry|as an ai|i won't)/i.test(out);
+			if (declined) return { prompt: text, enhanced: false, why: 'The chat model declined to write this prompt, so your own words were used. An uncensored private brain would write it.' };
+			if (out.length < text.length) return { prompt: text, enhanced: false, why: '' };
+			return { prompt: out.slice(0, 4000), enhanced: true, why: '' };
+		} catch (err) { return { prompt: text, enhanced: false, why: `The prompt could not be written automatically (${err.message.slice(0, 120)}), so your own words were used.` }; }
 	}
 
 	const quote = (minutes) => gpu.quote({ minutes, minVram: MIN_VRAM.image });
@@ -103,7 +132,9 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (!p?.ready_at) throw new ImageError(p ? 'The image engine is still starting.' : 'Start a session first.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
-		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(v.refs.map((r) => [r.role, r.upload.id])) };
+		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(v.refs.map((r) => [r.role, r.upload.id])), asked: v.prompt, note: '' };
+		v.enhance = req.enhance === true;
+		v.prefix = String(req.prefix || '').trim().slice(0, 100);
 		db.insertGeneration({ id, prompt: v.prompt, params, created_at: clock() });
 		run(id, p, v).catch((err) => console.error('[images]', err));
 		return view(db.getGeneration(id));
@@ -114,6 +145,14 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		try {
 			const comfy = comfyFor(p);
 			gpu.touch(p.id);
+			if (v.enhance) {
+				const e = await enhance(v.prompt, v.refs);
+				v.prompt = e.prompt;
+				const params = { ...JSON.parse(db.getGeneration(id).params), note: e.why };
+				db.updateGeneration(id, { prompt: v.prompt, params: JSON.stringify(params) });
+			}
+			// LoRA trigger words go first, outside the written prompt, so they are never reworded.
+			if (v.prefix && !v.prompt.includes(v.prefix)) v.prompt = `${v.prefix} ${v.prompt}`;
 			const refs = [];
 			for (const r of v.refs) refs.push({ role: r.role, file: await comfy.upload(r.upload.path, `${r.role}-${r.upload.id}-${r.upload.name}`, r.upload.type) });
 			const graph = buildImageGraph({ ...v, refs, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
@@ -161,5 +200,5 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		for (const g of db.listGenerations().filter((x) => x.status === 'running')) db.updateGeneration(g.id, { status: 'failed', detail: 'The app was restarted while this was being made.', ended_at: clock() });
 	}
 
-	return { status, quote, start, generate, remove, recover, stop: async () => { const p = pod(); if (p) await gpu.stop(p.id, 'stopped by you'); } };
+	return { status, quote, start, generate, remove, recover, enhance, stop: async () => { const p = pod(); if (p) await gpu.stop(p.id, 'stopped by you'); } };
 }

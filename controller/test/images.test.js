@@ -8,6 +8,7 @@ import { createApp } from '../src/server.js';
 import { buildImageGraph, imagePodSpec } from '../src/image-recipe.js';
 import { startMockRunpod } from './mock-runpod.js';
 import { startMockComfy } from './mock-comfy.js';
+import { startMockModel } from './mock-model.js';
 
 let app, base, rp, comfy, b2, b2Url, root, now, n = 0;
 const MIN = 60000;
@@ -193,6 +194,30 @@ test('a failed generation says why; pictures can be deleted; a wrong Backblaze k
 	assert.equal(r.status, 502);
 	assert.match(r.body.error, /Backblaze: bad key/);
 	assert.equal(rp.state.created.length, 1, 'no pod is rented when the LoRAs cannot be fetched');
+});
+
+test('a casual request is written up into a detailed prompt; a refusal falls back to the user\'s words', async () => {
+	const writer = await startMockModel({ chunks: ['Full-body picture of a tall athletic woman with short silver hair, fully dressed in a black leather jacket and jeans, standing against a plain pure white void.'] });
+	try {
+		await api('PUT', '/api/settings', { baseUrl: writer.baseUrl, model: 'mock-model' });
+		await startSession();
+		await api('GET', '/api/images');
+		const g = await generate({ prompt: 'cool silver haired girl', enhance: true, prefix: 'gta6game_' });
+		assert.equal(g.status, 'done');
+		assert.match(g.prompt, /^Full-body picture of a tall athletic woman/);
+		assert.equal(g.params.asked, 'cool silver haired girl');
+		assert.match(comfy.state.prompts[0].prompt['5'].inputs.text, /^gta6game_ Full-body picture/, 'the trigger word is added after writing, never reworded');
+		const asked = writer.state.requests[0].messages;
+		assert.match(asked[0].content, /framing[\s\S]*clothing explicitly[\s\S]*white void/);
+		assert.equal(asked[1].content, 'cool silver haired girl');
+
+		writer.state.chunks = ["I'm sorry, but I can't help with that."];
+		comfy.state.historyChecks = 0;
+		const refused = await generate({ prompt: 'something the writer refuses', enhance: true });
+		assert.equal(refused.prompt, 'something the writer refuses');
+		assert.match(refused.params.note, /declined/);
+		assert.equal(comfy.state.prompts[1].prompt['5'].inputs.text, 'something the writer refuses');
+	} finally { await writer.close(); }
 });
 
 test('without Backblaze the session still starts, with no LoRAs', async () => {
