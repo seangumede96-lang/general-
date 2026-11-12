@@ -383,16 +383,40 @@ function setView(view) {
 	const system = view === 'system';
 	document.body.classList.toggle('view-system', system);
 	sys.view.hidden = !system;
+	$('back').hidden = !system;
 	clearInterval(sys.timer);
 	if (system) {
 		closeEvents();
-		state.currentId = null;
 		els.title.textContent = 'System';
 		renderSidebar();
 		refreshSystem(true);
 		sys.timer = setInterval(() => refreshSystem(false), 5000);
 	}
 }
+
+/** Open the System page, remembering which chat was open so Back returns to it. */
+function openSystem() {
+	if (document.body.classList.contains('view-system')) return;
+	sys.returnTo = state.currentId;
+	state.currentId = null;
+	// A history entry of its own, so the phone's back button or gesture leaves the page too.
+	history.pushState({ system: true }, '', '#system');
+	sys.pushed = true;
+	setView('system');
+}
+
+/** Leave the System page for the chat that was open before, or a blank chat. */
+function leaveSystem() {
+	if (!document.body.classList.contains('view-system')) return;
+	const id = sys.returnTo;
+	sys.returnTo = null;
+	sys.pushed = false;
+	if (id && state.conversations.some((c) => c.id === id)) openConversation(id);
+	else showBlank();
+}
+
+$('back').addEventListener('click', () => { if (sys.pushed) history.back(); else leaveSystem(); });
+window.addEventListener('popstate', leaveSystem);
 
 function kv(pairs) {
 	return el('div', { className: 'kv' }, ...pairs.map(([k, v]) => el('span', {}, `${k} `, el('b', { textContent: v }))));
@@ -496,12 +520,12 @@ sys.form.addEventListener('submit', async (e) => {
 	} catch (err) { sys.formStatus.textContent = err.message; }
 });
 
-$('open-system').addEventListener('click', () => { setDrawer(false); history.replaceState(null, '', '#system'); setView('system'); });
+$('open-system').addEventListener('click', () => { setDrawer(false); openSystem(); });
 
 /* ---------- Start ---------- */
 
 await refreshConversations();
 const wanted = location.hash.slice(1);
-if (wanted === 'system') setView('system');
+if (wanted === 'system') { state.currentId = null; setView('system'); }
 else if (wanted && state.conversations.some((c) => c.id === wanted)) await openConversation(wanted);
 else showBlank();

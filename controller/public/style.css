@@ -125,6 +125,10 @@ details.thinking .thought { white-space: pre-wrap; border-left: 2px solid var(--
 /* System page */
 #system { flex: 1; overflow-y: auto; }
 body.view-system #scroller, body.view-system #composer { display: none; }
+/* On the System page the header shows a back arrow in place of the menu, on every screen size. */
+body.view-system #back { display: block; }
+body.view-system #menu { display: none; }
+#back[hidden] { display: none; }
 .sys-wrap { max-width: 768px; margin: 0 auto; padding: 8px 16px 32px; display: flex; flex-direction: column; gap: 12px; }
 .card { background: #282828; border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
 .card-cap { font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
