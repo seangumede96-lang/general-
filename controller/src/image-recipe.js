@@ -42,10 +42,22 @@ export const SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: 
 /** What each kind of reference picture is for, and how large the model gets to see it. */
 export const REFERENCE_ROLES = {
 	// The face is shown very small: enough for identity, too small to copy clothes or background.
-	face: { megapixels: 0.140625, hint: (n) => `Keep the face of the person in image ${n}.` },
-	body: { megapixels: 0.5, hint: (n) => `Use the body shape and proportions of the person in image ${n}.` },
-	look: { megapixels: 0.5, hint: (n) => `Use the outfit, makeup and styling shown in image ${n}.` }
+	face: { megapixels: 0.140625, hint: (which) => `Keep the face of the person in ${which}.` },
+	body: { megapixels: 0.5, hint: (which) => `Use the body shape and proportions of the person in ${which}.` },
+	look: { megapixels: 0.5, hint: (which) => `Use the outfit, makeup and styling shown in ${which}.` }
 };
+/** The edit nodes take at most three pictures per generation, across all roles. */
+export const MAX_REFERENCES = 3;
+
+/** One sentence per role saying which numbered pictures it covers, e.g. "images 1 and 2". */
+function referenceHints(refs) {
+	return Object.keys(REFERENCE_ROLES).map((role) => {
+		const n = refs.map((r, i) => (r.role === role ? i + 1 : 0)).filter(Boolean);
+		if (!n.length) return '';
+		const which = n.length === 1 ? `image ${n[0]}` : `images ${n.slice(0, -1).join(', ')} and ${n.at(-1)}`;
+		return REFERENCE_ROLES[role].hint(which);
+	}).filter(Boolean).join(' ');
+}
 
 /**
  * The ComfyUI graph for one request. `refs` is up to three reference pictures already in
@@ -55,7 +67,7 @@ export const REFERENCE_ROLES = {
  */
 export function buildImageGraph({ prompt, negative = '', width, height, count, seed, loras = [], refs = [], prefix }) {
 	const useRefs = refs.length > 0;
-	const text = useRefs ? `${prompt} ${refs.map((r, i) => REFERENCE_ROLES[r.role].hint(i + 1)).join(' ')}` : prompt;
+	const text = useRefs ? `${prompt} ${referenceHints(refs)}` : prompt;
 	const g = {
 		1: { class_type: 'UNETLoader', inputs: { unet_name: useRefs ? 'krea2_turbo_int8_convrot.safetensors' : 'krea2_turbo_fp8_scaled.safetensors', weight_dtype: 'default' } },
 		2: { class_type: 'CLIPLoader', inputs: { clip_name: 'qwen3vl_4b_bf16.safetensors', type: 'krea2', device: 'default' } },

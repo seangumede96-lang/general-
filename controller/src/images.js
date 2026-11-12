@@ -6,7 +6,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createComfyClient, ComfyError } from './comfy.js';
 import { openB2 } from './b2.js';
-import { imagePodSpec, buildImageGraph, SIZES, REFERENCE_ROLES } from './image-recipe.js';
+import { imagePodSpec, buildImageGraph, SIZES, REFERENCE_ROLES, MAX_REFERENCES } from './image-recipe.js';
 import { COMFY_PORT, LOG_PORT } from './video-recipe.js';
 import { MIN_VRAM } from './gpu.js';
 
@@ -126,15 +126,17 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		const known = new Set(savedLoras().map((l) => l.name));
 		const loras = (Array.isArray(req.loras) ? req.loras : []).slice(0, 3).map((l) => ({ name: String(l?.name || ''), strength: Math.min(2, Math.max(0, Number(l?.strength) || 0.9)) }));
 		if (loras.some((l) => !known.has(l.name))) throw new ImageError('One of those LoRAs was not loaded in this session.');
-		// Reference pictures by role. Order matters: it is how the description refers to them.
+		// Reference pictures by role, several per role allowed. Order matters: it is how the description refers to them.
 		const refs = [];
 		for (const role of Object.keys(REFERENCE_ROLES)) {
-			const uploadId = req.refs?.[role];
-			if (!uploadId) continue;
-			const upload = db.getUpload(String(uploadId));
-			if (!upload || !upload.type.startsWith('image/')) throw new ImageError(`The ${role} picture is missing.`);
-			refs.push({ role, upload });
+			const given = req.refs?.[role];
+			for (const uploadId of (Array.isArray(given) ? given : given ? [given] : [])) {
+				const upload = db.getUpload(String(uploadId));
+				if (!upload || !upload.type.startsWith('image/')) throw new ImageError(`One of the ${role === 'look' ? 'outfit' : role} pictures is missing.`);
+				refs.push({ role, upload });
+			}
 		}
+		if (refs.length > MAX_REFERENCES) throw new ImageError(`At most ${MAX_REFERENCES} reference pictures in total can be used at once.`);
 		return { prompt: prompt.slice(0, 4000), width, height, count, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
 	}
 
@@ -144,7 +146,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (!p?.ready_at) throw new ImageError(p ? 'The image engine is still starting.' : 'Start a session first.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
-		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(v.refs.map((r) => [r.role, r.upload.id])), asked: v.prompt, note: '' };
+		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), asked: v.prompt, note: '' };
 		v.enhance = req.enhance === true;
 		v.prefix = String(req.prefix || '').trim().slice(0, 100);
 		db.insertGeneration({ id, prompt: v.prompt, params, created_at: clock() });

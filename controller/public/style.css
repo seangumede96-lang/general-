@@ -218,7 +218,13 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 .pick-row.three { grid-template-columns: repeat(3, 1fr); margin-bottom: 8px; }
 .pick.ref { min-height: 0; }
 .pick.ref .pick-body { height: 96px; }
-.pick.ref .pick-body img { height: 100%; object-fit: cover; }
+.pick.ref .pick-body { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; place-items: initial; }
+.pick.ref .pick-body:not(:has(.ref-thumb)) { display: grid; place-items: center; }
+.ref-thumb { position: relative; width: calc(50% - 2px); aspect-ratio: 3 / 4; border-radius: 8px; overflow: hidden; background: #000; }
+.ref-thumb:only-child { width: 100%; }
+.ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; max-height: none; }
+.ref-thumb .pend-x { top: 2px; right: 2px; width: 20px; height: 20px; }
+.pick.ref.full { opacity: .55; }
 .lora-row, .card label.lora-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; margin: 0; font-weight: 400; }
 .lora-row input[type=checkbox] { width: 20px; height: 20px; margin: 0; flex: none; accent-color: #8b7cf6; display: inline-block; }
 .lora-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14.5px; }

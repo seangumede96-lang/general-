@@ -878,7 +878,7 @@ const defaultStrength = (name) => savedStrengths()[name] ?? KNOWN_STRENGTHS.find
 const loraLabel = (name) => name.split('/').pop().replace(/\.safetensors$/, '');
 
 const chars = {
-	timer: 0, data: null, refs: {}, sig: '', loraSig: null,
+	timer: 0, data: null, refs: { face: [], body: [], look: [] }, sig: '', loraSig: null,
 
 	show() { this.refresh(); this.timer = setInterval(() => this.refresh(), 3000); },
 	hide() { clearInterval(this.timer); },
@@ -963,12 +963,33 @@ const chars = {
 		out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: q.summary }), el('span', { className: 'spacer' }), go));
 	},
 
-	/** Fill or clear one reference slot (face, body or look). */
-	setRef(role, id, src) {
-		if (id) this.refs[role] = id; else delete this.refs[role];
-		const button = document.querySelector(`.pick.ref[data-role="${role}"]`);
-		button.querySelector('.pick-body').replaceChildren(...(id ? [el('img', { src, alt: `${role} reference` })] : ['Add']));
-		button.classList.toggle('filled', Boolean(id));
+	/** Reference pictures per role: { face: [{ id, src }], body: [...], look: [...] }, at most 3 in total. */
+	refCount() { return Object.values(this.refs).reduce((n, list) => n + list.length, 0); },
+
+	addRef(role, id, src) {
+		if (this.refCount() >= 3) return false;
+		(this.refs[role] ||= []).push({ id, src });
+		this.renderRefs();
+		return true;
+	},
+
+	renderRefs() {
+		const full = this.refCount() >= 3;
+		for (const box of document.querySelectorAll('.pick.ref')) {
+			const { role } = box.dataset;
+			const list = this.refs[role] || [];
+			box.querySelector('.pick-body').replaceChildren(...(list.length ? list.map((r, i) => {
+				const x = el('button', { type: 'button', className: 'pend-x', ariaLabel: 'Remove this picture' });
+				x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+				x.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); list.splice(i, 1); this.renderRefs(); });
+				return el('div', { className: 'ref-thumb' }, el('img', { src: r.src, alt: `${role} reference` }), x);
+			}) : ['Add']));
+			box.classList.toggle('filled', list.length > 0);
+			box.classList.toggle('full', full);
+		}
+		$('img-ref-note').firstChild.textContent = full
+			? 'That is 3 pictures, the most the image engine can use at once. Tap × on one to make room. '
+			: 'Tap a box to add pictures, up to 3 in total across all three. Tap × on a picture to remove it. Crop face pictures to the face only, or their clothes leak in. Use made-up characters, or real adults who agreed.';
 	},
 
 	async generate() {
@@ -987,7 +1008,7 @@ const chars = {
 		// Remember the strengths used, so next time each LoRA starts where you left it.
 		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
 		try {
-			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs: this.refs });
+			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs: Object.fromEntries(Object.entries(this.refs).map(([role, list]) => [role, list.map((r) => r.id)])) });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -1005,7 +1026,10 @@ const chars = {
 				const src = `/api/uploads/${id}`;
 				const useAs = (role, label) => {
 					const btn = el('button', { type: 'button', textContent: label });
-					btn.addEventListener('click', () => { this.setRef(role, id, src); $('img-form').scrollIntoView({ behavior: 'smooth' }); });
+					btn.addEventListener('click', () => {
+						if (!this.addRef(role, id, src)) return alert('There are already 3 reference pictures. Remove one first.');
+						$('img-form').scrollIntoView({ behavior: 'smooth' });
+					});
 					return btn;
 				};
 				const toVideo = el('button', { type: 'button', textContent: 'Use in Video' });
@@ -1026,22 +1050,24 @@ const chars = {
 };
 
 $('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.generate(); });
-// Each reference box is a label for its own file input. Tapping a filled box clears it instead.
+// Each reference box is a label for its own file input; more pictures can be added until 3 in total.
 for (const box of document.querySelectorAll('.pick.ref')) {
 	box.addEventListener('click', (e) => {
-		if (chars.refs[box.dataset.role]) { e.preventDefault(); chars.setRef(box.dataset.role, null); }
+		if (chars.refCount() >= 3) { e.preventDefault(); alert('There are already 3 reference pictures, the most the image engine can use at once. Tap × on one to make room.'); }
 	});
 }
 for (const input of document.querySelectorAll('.ref-input')) {
 	input.addEventListener('change', async (e) => {
-		const file = e.target.files[0];
+		const files = [...e.target.files].slice(0, 3 - chars.refCount());
 		const { role } = input.dataset;
 		e.target.value = '';
-		if (!file) return;
-		const body = document.querySelector(`.pick.ref[data-role="${role}"] .pick-body`);
-		body.textContent = 'Uploading…';
-		try { const up = await uploadWithProgress(file, (pct) => { body.textContent = `${pct}%`; }); chars.setRef(role, up.id, URL.createObjectURL(file)); }
-		catch (err) { body.textContent = err.message; }
+		const note = $('img-out');
+		for (const file of files) {
+			note.replaceChildren(el('div', { className: 'muted small', textContent: `Uploading ${file.name}…` }));
+			try { const up = await uploadWithProgress(file, () => {}); chars.addRef(role, up.id, URL.createObjectURL(file)); }
+			catch (err) { note.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); return; }
+		}
+		note.replaceChildren();
 	});
 }
 // Labels acting as buttons should also answer the keyboard.

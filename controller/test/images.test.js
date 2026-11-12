@@ -129,6 +129,9 @@ test('face, body and look references can be combined, with several LoRAs stacked
 	assert.deepEqual([g['21'].inputs.megapixels, g['23'].inputs.megapixels, g['25'].inputs.megapixels], [0.140625, 0.5, 0.5]);
 	assert.deepEqual([g['5'].inputs.image1, g['5'].inputs.image2, g['5'].inputs.image3], [['21', 0], ['23', 0], ['25', 0]]);
 	assert.equal(g['5'].inputs.prompt, 'A woman on a beach. Keep the face of the person in image 1. Use the body shape and proportions of the person in image 2. Use the outfit, makeup and styling shown in image 3.');
+	const twoFaces = buildImageGraph({ prompt: 'A woman.', width: 1024, height: 1024, count: 1, seed: 1, prefix: 'p', refs: [{ role: 'face', file: 'a.png' }, { role: 'face', file: 'b.png' }, { role: 'look', file: 'c.png' }] });
+	assert.equal(twoFaces['5'].inputs.prompt, 'A woman. Keep the face of the person in images 1 and 2. Use the outfit, makeup and styling shown in image 3.');
+	assert.deepEqual([twoFaces['21'].inputs.megapixels, twoFaces['23'].inputs.megapixels], [0.140625, 0.140625]);
 	assert.deepEqual([g['4'].inputs.model, g['4a'].inputs.model, g['31'].inputs.model], [['30', 0], ['4', 0], ['4a', 0]]);
 	assert.equal(g['4a'].inputs.strength_model, 0.6);
 
@@ -152,7 +155,9 @@ test('requests are checked, and nothing is generated without a ready session', a
 	await api('GET', '/api/images');
 	assert.match((await generate({ prompt: '  ' })).error, /Describe the picture/);
 	assert.match((await generate({ prompt: 'x', loras: [{ name: 'loras/other.safetensors', strength: 1 }] })).error, /not loaded/);
-	assert.match((await generate({ prompt: 'x', refs: { body: 'missing' } })).error, /body picture is missing/);
+	assert.match((await generate({ prompt: 'x', refs: { body: 'missing' } })).error, /body pictures is missing/);
+	const pic = await upload('p.png', 'image/png');
+	assert.match((await generate({ prompt: 'x', refs: { face: [pic, pic], body: [pic, pic] } })).error, /At most 3 reference pictures/);
 	assert.equal(comfy.state.prompts.length, 0);
 });
 
