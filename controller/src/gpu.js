@@ -331,11 +331,14 @@ export function createGpuManager({ db, clock = Date.now }) {
  */
 export const BRAIN_PRESETS = [
 	{ id: 'unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M', label: 'Qwen 3.6 35B', note: 'Strongest all-round for planning and tools', sizeGb: 22 },
-	{ id: 'mradermacher/Huihui-Qwen3.6-35B-A3B-abliterated-GGUF:Q4_K_M', label: 'Qwen 3.6 35B uncensored', note: 'Fewer refusals; may be less reliable with tools', sizeGb: 21 },
+	{ id: 'mradermacher/Huihui-Qwen3.6-35B-A3B-abliterated-GGUF:Q4_K_M', label: 'Qwen 3.6 35B', uncensored: true, note: 'Fewer refusals; may be less reliable with tools', sizeGb: 21 },
 	{ id: 'unsloth/gemma-4-26B-A4B-it-GGUF:Q4_K_M', label: 'Gemma 4 26B', note: 'Lighter; leaves GPU memory free', sizeGb: 17 },
 	{ id: 'unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF:Q4_K_M', label: 'Mistral Small 3.2', note: 'Smallest and quickest to wake', sizeGb: 14 }
 ];
 export const brainLabel = (id) => BRAIN_PRESETS.find((p) => p.id === id)?.label || id.split('/').pop().replace(/-GGUF(:.*)?$/i, '');
+
+/** True for a preset marked uncensored, or any other model whose name says so. */
+export const isUncensored = (id) => BRAIN_PRESETS.find((p) => p.id === id)?.uncensored ?? /abliterat|uncensored|heretic|unfiltered/i.test(id);
 
 /** VRAM each kind of pod needs. A test pod runs nothing, so any GPU will do. */
 export const MIN_VRAM = { test: 0, brain: 24 };

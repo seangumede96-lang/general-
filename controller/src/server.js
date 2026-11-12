@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb, SECRET_SETTINGS } from './db.js';
 import { streamChat, listModels } from './model.js';
 import { createTools } from './tools.js';
-import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel } from './gpu.js';
+import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel, isUncensored } from './gpu.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
@@ -291,6 +291,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 					state, podId: pod?.id || null,
 					// While a brain is up, "model" is the one it was started with, whatever is selected now.
 					model: pod?.model || s.brainModel, label: brainLabel(pod?.model || s.brainModel),
+					uncensored: isUncensored(pod?.model || s.brainModel),
 					selected: s.brainModel, presets: BRAIN_PRESETS
 				}
 			};
@@ -311,7 +312,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 				const q = await gpu.quote({ minutes, minVram });
 				if (!q.allowed) throw new GpuError(q.reason, 'refused');
 				if (confirmEstimate !== q.estimate) throw new GpuError(`The price changed to ${q.estimate.toFixed(2)} USD. Review the new quote and confirm again.`, 'refused');
-				const { secret, ...pod } = await gpu.start({ minutes, minVram, purpose: kind === 'brain' ? `Private brain · ${brainLabel(spec.model)}` : 'Test pod', spec });
+				const { secret, ...pod } = await gpu.start({ minutes, minVram, purpose: kind === 'brain' ? `Private brain · ${brainLabel(spec.model)}${isUncensored(spec.model) ? ' (uncensored)' : ''}` : 'Test pod', spec });
 				return pod;
 			});
 		}],

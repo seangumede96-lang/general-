@@ -97,6 +97,8 @@ test('the model picker data shows what is in use, and choosing "everyday" overri
 	assert.equal(b.private.state, 'off');
 	assert.ok(b.private.presets.length >= 3);
 	assert.equal(b.everyday.model, 'everyday-model');
+	assert.deepEqual(b.private.presets.map((p) => Boolean(p.uncensored)), [false, true, false, false]);
+	assert.equal(b.private.uncensored, false);
 
 	await api('PUT', '/api/settings', { brainModel: b.private.presets[2].id });
 	await startBrain(30);
@@ -117,6 +119,16 @@ test('the model picker data shows what is in use, and choosing "everyday" overri
 	assert.equal((await chat('hi')).at(-1).content, 'from the everyday endpoint');
 	await api('PUT', '/api/settings', { chatBrain: 'private' });
 	assert.equal((await chat('hi')).at(-1).content, 'from the private brain');
+});
+
+test('uncensored models are flagged, including ones typed in by hand', async () => {
+	await api('PUT', '/api/settings', { brainModel: 'someone/Some-Model-abliterated-GGUF:Q4_K_M' });
+	assert.equal((await api('GET', '/api/brains')).body.private.uncensored, true);
+	const presets = (await api('GET', '/api/brains')).body.private.presets;
+	await api('PUT', '/api/settings', { brainModel: presets[1].id });
+	const r = await startBrain(30);
+	assert.equal(r.body.purpose, 'Private brain · Qwen 3.6 35B (uncensored)');
+	assert.equal((await api('GET', '/api/brains')).body.private.uncensored, true);
 });
 
 test('chatting keeps the brain awake; silence lets it be shut down; chat then falls back', async () => {

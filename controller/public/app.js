@@ -540,6 +540,7 @@ async function refreshChip() {
 	try { b = picker.data = await api('GET', '/api/brains'); } catch { return; }
 	clearTimeout(picker.timer);
 	const waking = b.chatBrain === 'private' && b.private.state === 'starting';
+	$('model-tag').hidden = !((b.using === 'private' || waking) && b.private.uncensored);
 	if (b.using === 'private') {
 		picker.name.textContent = `${b.private.label} · private`;
 		picker.dot.className = 'dot private';
@@ -554,9 +555,9 @@ async function refreshChip() {
 	if (b.private.state !== 'off') picker.timer = setTimeout(async () => { await refreshChip(); if (picker.dialog.open) renderPicker(); }, b.private.state === 'starting' ? 8000 : 30000);
 }
 
-function option({ title, note, side, on, disabled, onClick }) {
+function option({ title, tag, note, side, on, disabled, onClick }) {
 	const btn = el('button', { type: 'button', className: `opt${on ? ' on' : ''}`, disabled: Boolean(disabled) },
-		el('div', { className: 'opt-main' }, el('div', { className: 'opt-title', textContent: title }), ...(note ? [el('div', { className: 'opt-note', textContent: note })] : [])),
+		el('div', { className: 'opt-main' }, el('div', { className: 'opt-title' }, title, ...(tag ? [el('span', { className: 'tag', textContent: tag })] : [])), ...(note ? [el('div', { className: 'opt-note', textContent: note })] : [])),
 		el('div', { className: 'opt-side', textContent: side || '' }));
 	if (onClick) btn.addEventListener('click', onClick);
 	return btn;
@@ -600,7 +601,7 @@ async function renderPicker() {
 		const on = running && b.using === 'private';
 		const side = running ? (p.state === 'ready' ? (on ? 'In use' : 'Awake') : 'Waking…') : `${preset.sizeGb} GB`;
 		nodes.push(option({
-			title: preset.label, note: preset.note, side, on,
+			title: preset.label, tag: preset.uncensored ? 'Uncensored' : '', note: preset.note, side, on,
 			// One brain at a time: while one is up, the others wait until it is put to sleep.
 			disabled: p.state !== 'off' && !running,
 			onClick: running
@@ -640,7 +641,7 @@ async function showWake(preset, box) {
 		} catch (err) { fail(err.message); }
 	});
 	box.replaceChildren(el('div', { className: 'wake' },
-		el('div', { className: 'opt-title', textContent: `Wake ${preset.label}` }),
+		el('div', { className: 'opt-title' }, `Wake ${preset.label}`, ...(preset.uncensored ? [el('span', { className: 'tag', textContent: 'Uncensored' })] : [])),
 		`${q.summary} It takes about five minutes to wake, and goes back to sleep by itself after 10 quiet minutes.`,
 		el('div', { className: 'row' }, el('span', { className: 'spacer' }), go)));
 	box.scrollIntoView({ block: 'nearest' });
