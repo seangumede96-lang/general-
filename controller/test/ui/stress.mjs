@@ -165,7 +165,10 @@ async function checkInvariants(step, name) {
 			junk: junk ? `${junk[0]} in "${text.slice(Math.max(0, junk.index - 60), junk.index + 40).replace(/\s+/g, ' ')}"` : '',
 			dialogs: document.querySelectorAll('dialog[open]').length,
 			injected: document.querySelectorAll('.msg script, .msg img[onerror], .msg a[href^="javascript:"]').length,
-			backShown: shown(document.getElementById('back'))
+			backShown: shown(document.getElementById('back')),
+			// The app must fill the window: a gap at the bottom means the layout height is stale.
+			gap: Math.round(window.innerHeight - document.querySelector('main').getBoundingClientRect().bottom),
+			deadButtons: [...document.querySelectorAll('button:disabled')].filter((b) => b.offsetParent && getComputedStyle(b).opacity === '1' && b.id !== 'send').map((b) => b.id || b.textContent.trim().slice(0, 20))
 		};
 	}).catch(() => null);
 	if (!r) return;
@@ -179,6 +182,8 @@ async function checkInvariants(step, name) {
 	if (!r.title) note('empty title', where);
 	if (r.junk) note('raw value on screen', `${r.junk} ${where}`);
 	if (r.dialogs > 1) note('two dialogs open', where);
+	if (Math.abs(r.gap) > 2) note('app does not fill the window', `${r.gap}px gap ${where}`);
+	if (r.deadButtons.length) note('disabled button looks enabled', `${r.deadButtons.join(', ')} ${where}`);
 	if (r.injected) note('unsafe content rendered from a message', where);
 }
 

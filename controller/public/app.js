@@ -928,7 +928,10 @@ const chars = {
 			}) : [el('div', { className: 'muted small', textContent: session.state === 'off' ? 'Your LoRAs are listed here once a session starts.' : 'No LoRAs were found in the loras/ folder of your Backblaze bucket.' })]));
 			this.loraNote();
 		}
-		$('img-go').disabled = session.state !== 'ready' || this.data.generations.some((g) => g.status === 'running');
+		// The button always answers a tap; what it can do right now is written on it.
+		const making = this.data.generations.some((g) => g.status === 'running');
+		$('img-go').disabled = making;
+		$('img-go').textContent = making ? 'Making…' : session.state === 'ready' ? 'Generate' : session.state === 'starting' ? 'Generate (starting up…)' : 'Generate';
 	},
 
 	chosenLoras() {
@@ -970,6 +973,16 @@ const chars = {
 
 	async generate() {
 		const out = $('img-out');
+		const say = (m) => out.replaceChildren(el('div', { className: 'sys-alert', textContent: m }));
+		const state = this.data?.session.state;
+		if (state === 'off') {
+			say('Start an image session first: scroll to the top of this page, tap Get price, then Start. Your description and pictures here are kept.');
+			$('img-state').scrollIntoView({ behavior: 'smooth', block: 'center' });
+			return;
+		}
+		if (state === 'starting') return say('The image engine is still starting up. The top of this page shows which step it is on; Generate works as soon as it says Ready.');
+		if (!$('img-prompt').value.trim()) return say('Type what you want a picture of first.');
+		out.replaceChildren(el('div', { className: 'muted small', textContent: 'Sending…' }));
 		const loras = this.chosenLoras();
 		// Remember the strengths used, so next time each LoRA starts where you left it.
 		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
@@ -1192,10 +1205,18 @@ picker.dialog.addEventListener('click', (e) => { if (e.target === picker.dialog)
 function fitWindow() {
 	const vv = window.visualViewport;
 	if (!vv || vv.scale !== 1) return;
-	document.documentElement.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
+	const h = `${Math.round(vv.height)}px`;
+	if (document.documentElement.style.getPropertyValue('--app-h') !== h) document.documentElement.style.setProperty('--app-h', h);
 }
 window.visualViewport?.addEventListener('resize', fitWindow);
+window.addEventListener('resize', fitWindow);
 window.addEventListener('orientationchange', fitWindow);
+// Closing the on-screen keyboard does not always announce itself: on one phone the page stayed
+// at keyboard height, leaving the bottom half blank. Re-measure after focus changes, and keep
+// checking once a second so it can never stay wrong.
+document.addEventListener('focusout', () => { for (const ms of [50, 300, 800]) setTimeout(fitWindow, ms); });
+document.addEventListener('focusin', () => { for (const ms of [300, 800]) setTimeout(fitWindow, ms); });
+setInterval(fitWindow, 1000);
 fitWindow();
 
 /* ---------- Start ---------- */

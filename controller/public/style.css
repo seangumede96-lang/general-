@@ -337,6 +337,8 @@ dialog small { display: block; color: var(--muted); font-weight: 400; margin-top
 .spacer { flex: 1; }
 .btn-primary, .btn-ghost { padding: 9px 16px; border-radius: 999px; font-weight: 600; font-size: 14.5px; }
 .btn-primary { background: var(--accent); color: #000; }
+/* A button that cannot act must look it. */
+.btn-primary:disabled, .btn-ghost:disabled, .btn-danger:disabled { opacity: .45; cursor: default; }
 .btn-ghost { border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--surface-2); }
 
