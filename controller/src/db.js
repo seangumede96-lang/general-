@@ -16,8 +16,9 @@ export const SETTING_DEFAULTS = {
 	runpodApiKey: '',
 	runpodBaseUrl: '',
 	podCloud: 'ANY',   // ANY = cheapest of Community and Secure; or COMMUNITY / SECURE
-	// Total you are willing to spend on GPUs. Pods are refused once this is used up.
-	budgetTotal: '50',
+	runpodGraphqlUrl: '',
+	// Optional cap on what this app may spend in total. Empty = limited only by the real RunPod balance.
+	budgetTotal: '',
 	maxPodMinutes: '60',
 	idleMinutes: '10',
 	// The private brain: a GGUF model on Hugging Face, served by llama.cpp on a rented pod.

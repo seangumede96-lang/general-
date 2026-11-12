@@ -148,7 +148,9 @@ export function createTools({ db, gpu }) {
 			async run() {
 				const b = gpu.budget();
 				const pod = gpu.activePod();
-				const line = `Budget: $${b.spent.toFixed(2)} spent, $${b.remaining.toFixed(2)} left of $${b.total.toFixed(2)}.`;
+				const line = b.known
+					? `GPU money: $${b.remaining.toFixed(2)} left${b.balance !== null ? ` (RunPod balance $${b.balance.toFixed(2)})` : ''}; $${b.spent.toFixed(2)} spent through this app.`
+					: 'GPU money: the RunPod balance has not been read yet.';
 				return pod ? `${line}\nRunning: ${pod.gpu} at $${pod.rate}/h (${pod.purpose || 'no purpose given'}), pod ${pod.id}.` : `${line}\nNo pod is running.`;
 			}
 		},

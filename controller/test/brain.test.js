@@ -48,7 +48,7 @@ beforeEach(async () => {
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
 	await api('PUT', '/api/settings', {
 		baseUrl: everyday.baseUrl, model: 'everyday-model',
-		runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl,
+		runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl,
 		podCloud: 'COMMUNITY',
 		podProxyTemplate: pod.baseUrl.replace(/\/v1$/, '')  // every pod's address resolves to the mock
 	});

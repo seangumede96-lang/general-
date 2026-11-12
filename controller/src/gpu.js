@@ -8,6 +8,8 @@ import { randomBytes } from 'node:crypto';
 // Built against RunPod REST API v2 (https://api.runpod.io/v2); v1 retires 15 Nov 2026.
 
 const REAL_API = 'https://api.runpod.io/v2';
+const REAL_GRAPHQL = 'https://api.runpod.io/graphql';
+const BALANCE_MAX_AGE_MS = 60000;
 const DEADMAN_GRACE_S = 120;
 const HOUR_MS = 3600 * 1000;
 const BRAIN_PORT = 8080;
@@ -43,7 +45,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 			key: s.runpodApiKey,
 			base: (s.runpodBaseUrl || REAL_API).replace(/\/+$/, ''),
 			clouds: s.podCloud === 'SECURE' ? ['SECURE'] : s.podCloud === 'COMMUNITY' ? ['COMMUNITY'] : ['COMMUNITY', 'SECURE'],
-			budgetTotal: Math.max(0, Number.parseFloat(s.budgetTotal) || 0),
+			graphql: s.runpodGraphqlUrl || REAL_GRAPHQL,
+			cap: Math.max(0, Number.parseFloat(s.budgetTotal) || 0) || null,
 			maxPodMinutes: Math.max(1, Number.parseInt(s.maxPodMinutes, 10) || 60),
 			idleMinutes: Math.max(1, Number.parseInt(s.idleMinutes, 10) || 10)
 		};
@@ -75,11 +78,42 @@ export function createGpuManager({ db, clock = Date.now }) {
 
 	const accrued = (pod, until = clock()) => pod.rate * Math.max(0, (pod.ended_at || until) - pod.created_at) / HOUR_MS;
 
+	/** Last balance read from RunPod: { value, at, key } or null if it has never been read. */
+	let balance = null;
+
+	/**
+	 * Read the account's real credit balance. RunPod's REST API has no balance route; this is
+	 * the GraphQL query its own CLI uses. A failed read keeps the last known value.
+	 */
+	async function refreshBalance(force = false) {
+		const { key, graphql } = cfg();
+		if (!key) { balance = null; return; }
+		if (balance && balance.key !== key) balance = null;
+		if (!force && balance && clock() - balance.at < BALANCE_MAX_AGE_MS) return;
+		try {
+			const res = await fetch(graphql, {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ query: 'query { myself { clientBalance currentSpendPerHr } }' }),
+				signal: AbortSignal.timeout(15000)
+			});
+			const value = (await res.json())?.data?.myself?.clientBalance;
+			if (typeof value === 'number') balance = { value, at: clock(), key };
+		} catch { /* offline or changed API: fall back to the cap, or refuse if there is none */ }
+	}
+
+	/**
+	 * What may still be spent: the real RunPod balance, further limited by the optional cap.
+	 * With neither a readable balance nor a cap, nothing may be spent.
+	 */
 	function budget() {
-		const total = cfg().budgetTotal;
-		// Rounded up once, so "spent" and "remaining" always add up to the total on screen.
+		const { cap } = cfg();
+		// Rounded up once, so "spent" and "remaining" stay consistent on screen.
 		const spent = ceilCents(db.listPods().reduce((sum, p) => sum + (p.actual_cost ?? accrued(p)), 0));
-		return { total, spent, remaining: Math.max(0, total - spent) };
+		const real = balance ? balance.value : null;
+		const limits = [real, cap === null ? null : cap - spent].filter((n) => n !== null);
+		const remaining = limits.length ? Math.max(0, Math.min(...limits)) : 0;
+		return { total: remaining + spent, spent, remaining, balance: real, cap, known: limits.length > 0 };
 	}
 
 	/**
@@ -107,7 +141,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 		minutes = Number(minutes);
 		if (!Number.isFinite(minutes) || minutes < 1) throw new GpuError('Minutes must be at least 1.', 'invalid');
 		const options = await candidates(minVram);
-		const { remaining } = budget();
+		await refreshBalance();
+		const { remaining, known } = budget();
 		if (!options.length) return { allowed: false, reason: minVram ? `No GPU with ${minVram} GB or more is available right now.` : 'No GPU is available right now.', options, remaining };
 		// Any of the options may be the one that has capacity, so budget for the dearest.
 		const worstRate = Math.max(...options.map((o) => o.rate));
@@ -115,10 +150,11 @@ export function createGpuManager({ db, clock = Date.now }) {
 		let reason = null;
 		if (minutes > c.maxPodMinutes) reason = `${minutes} minutes is over the ${c.maxPodMinutes}-minute limit per pod.`;
 		else if (db.listPods().some((p) => !p.ended_at)) reason = 'A pod is already running. Stop it first.';
-		else if (estimate > remaining) reason = `This could cost up to ${usd(estimate)} but only ${usd(remaining)} of the budget is left.`;
+		else if (!known) reason = 'Could not read your RunPod balance, and no spending cap is set. Try again, or set a cap on the System page.';
+		else if (estimate > remaining) reason = `This could cost up to ${usd(estimate)} but only ${usd(remaining)} is left.`;
 		return {
 			allowed: !reason, reason, options, minutes, estimate, remaining,
-			summary: `${options[0].name} from ${usd(options[0].rate)}/h for up to ${minutes} min: at most ${usd(estimate)}. ${usd(remaining)} of the budget is left.`
+			summary: `${options[0].name} from ${usd(options[0].rate)}/h for up to ${minutes} min: at most ${usd(estimate)}. ${usd(remaining)} is left.`
 		};
 	}
 
@@ -208,6 +244,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		const { idleMinutes, key } = cfg();
 		if (!key) return;
 		const now = clock();
+		if (db.listPods().some((p) => !p.ended_at)) await refreshBalance();
 		for (const pod of db.listPods().filter((p) => !p.ended_at)) {
 			try {
 				if (now >= pod.deadline_at) { await stop(pod.id, 'time limit reached'); continue; }
@@ -264,7 +301,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		const now = clock();
 		const out = { configured: Boolean(c.key), limits: { maxPodMinutes: c.maxPodMinutes, idleMinutes: c.idleMinutes, clouds: c.clouds }, unknown: [], error: null };
 		if (c.key) {
-			try { await reconcile(); out.unknown = await unknownPods(); }
+			try { await refreshBalance(); await reconcile(); out.unknown = await unknownPods(); }
 			catch (err) { out.error = err.message; }
 		}
 		if (c.key) await probeBrain();

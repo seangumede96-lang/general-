@@ -435,11 +435,16 @@ async function refreshSystem(fillForm) {
 	sys.error.hidden = !s.error;
 	sys.error.textContent = s.error || '';
 
-	const { total, spent, remaining } = s.budget;
-	sys.remaining.textContent = money(remaining);
-	sys.meter.style.width = `${total > 0 ? Math.min(100, spent / total * 100) : 100}%`;
-	sys.meter.parentElement.classList.toggle('low', total > 0 && remaining / total < 0.15);
-	sys.spent.textContent = `${money(spent)} spent of ${money(total)}`;
+	const { total, spent, remaining, balance, cap, known } = s.budget;
+	sys.remaining.textContent = known ? money(remaining) : '–';
+	sys.meter.style.width = `${total > 0 ? Math.min(100, spent / total * 100) : 0}%`;
+	sys.meter.parentElement.classList.toggle('low', known && remaining < 1);
+	const parts = [];
+	if (balance !== null) parts.push(`RunPod balance ${money(balance)}`);
+	else if (s.configured) parts.push('RunPod balance could not be read');
+	if (cap !== null) parts.push(`capped by you at ${money(cap)} in total`);
+	parts.push(`${money(spent)} spent through this app`);
+	sys.spent.textContent = parts.join(' · ');
 
 	sys.unknown.replaceChildren(...s.unknown.map((p) => {
 		const del = el('button', { type: 'button', className: 'btn-danger', textContent: 'Delete' });

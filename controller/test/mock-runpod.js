@@ -17,6 +17,7 @@ export async function startMockRunpod(opts = {}) {
 		billing: new Map(),      // podId -> totalAmount
 		created: [],             // request bodies, in order
 		deleted: [],
+		balance: 61.38,          // account credit; null makes the balance query fail
 		seq: 0,                  // pod ids are pod1, pod2, ...
 		...opts
 	};
@@ -29,6 +30,11 @@ export async function startMockRunpod(opts = {}) {
 	const server = createServer(async (req, res) => {
 		const url = new URL(req.url, 'http://x');
 		if (req.headers.authorization !== `Bearer ${state.key}`) return problem(res, 401, 'missing bearer token');
+		if (url.pathname === '/graphql') {
+			for await (const _ of req) { /* drain */ }
+			if (state.balance === null) return problem(res, 500, 'unavailable');
+			return json(res, 200, { data: { myself: { clientBalance: state.balance, currentSpendPerHr: 0 } } });
+		}
 		const path = url.pathname.replace(/^\/v2/, '');
 		let raw = '';
 		for await (const c of req) raw += c;
@@ -62,6 +68,7 @@ export async function startMockRunpod(opts = {}) {
 	return {
 		state,
 		baseUrl: `http://127.0.0.1:${server.address().port}/v2`,
+		graphqlUrl: `http://127.0.0.1:${server.address().port}/graphql`,
 		close: () => new Promise((r) => { server.closeAllConnections(); server.close(r); })
 	};
 }

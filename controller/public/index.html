@@ -59,7 +59,7 @@
 			<p id="sys-error" class="sys-alert" role="alert" hidden></p>
 
 			<div class="card">
-				<div class="card-cap">GPU budget</div>
+				<div class="card-cap">GPU money</div>
 				<div class="budget-row"><span id="sys-remaining" class="big">–</span><span class="muted">left</span></div>
 				<div class="meter" role="img" aria-label="Budget used"><div id="sys-meter"></div></div>
 				<div id="sys-spent" class="muted small"></div>
@@ -103,10 +103,11 @@
 					<small>Stored on this device only. Leave blank to keep the saved key.</small>
 				</label>
 				<div class="grid3">
-					<label>Budget (USD) <input name="budgetTotal" type="number" min="0" step="0.01"></label>
+					<label>Spending cap (USD) <input name="budgetTotal" type="number" min="0" step="0.01" placeholder="None"></label>
 					<label>Max minutes per pod <input name="maxPodMinutes" type="number" min="1"></label>
 					<label>Stop when idle (min) <input name="idleMinutes" type="number" min="1"></label>
 				</div>
+				<small>Leave the cap empty to be limited only by your real RunPod balance.</small>
 				<div class="row"><span id="sys-form-status" class="muted small" role="status"></span><span class="spacer"></span><button type="submit" class="btn-primary">Save</button></div>
 			</form>
 

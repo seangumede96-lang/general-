@@ -28,10 +28,10 @@ after(async () => { await app?.close(); await rp.close(); rmSync(root, { recursi
 beforeEach(async () => {
 	await app?.close();
 	now = Date.UTC(2026, 10, 12, 9, 0, 0);
-	Object.assign(rp.state, { noCapacity: new Set(), insufficientBalance: false, pods: new Map(), billing: new Map(), created: [], deleted: [], seq: 0 });
+	Object.assign(rp.state, { noCapacity: new Set(), insufficientBalance: false, pods: new Map(), billing: new Map(), created: [], deleted: [], seq: 0, balance: 61.38 });
 	app = createApp({ dataDir: join(root, `d${++n}`), clock: () => now, watchdogMs: 0 });
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
-	await api('PUT', '/api/settings', { runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, budgetTotal: '50', maxPodMinutes: '60', idleMinutes: '10', podCloud: 'COMMUNITY' });
+	await api('PUT', '/api/settings', { runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, budgetTotal: '50', maxPodMinutes: '60', idleMinutes: '10', podCloud: 'COMMUNITY' });
 });
 
 test('without a key nothing is attempted and the page says so', async () => {
@@ -133,7 +133,7 @@ test('refuses a pod whose worst case exceeds the remaining budget', async () => 
 	await api('PUT', '/api/settings', { budgetTotal: '0.10' });
 	const q = (await api('POST', '/api/system/quote', { minutes: 30 })).body;
 	assert.equal(q.allowed, false);
-	assert.match(q.reason, /only \$0\.10 of the budget is left/);
+	assert.match(q.reason, /only \$0\.10 is left/);
 	assert.equal((await api('POST', '/api/system/pods', { minutes: 30, confirmEstimate: q.estimate })).status, 409);
 	assert.equal(rp.state.created.length, 0);
 });
@@ -218,6 +218,41 @@ test('pods the controller did not start are reported, not touched', async () => 
 	const s = (await api('GET', '/api/system')).body;
 	assert.deepEqual(s.unknown.map((p) => p.id), ['stray']);
 	assert.deepEqual(rp.state.deleted, []);
+});
+
+test('with no cap, the budget is the real RunPod balance', async () => {
+	await api('PUT', '/api/settings', { budgetTotal: '' });
+	const s = (await api('GET', '/api/system')).body;
+	assert.equal(s.budget.remaining, 61.38);
+	assert.equal(s.budget.balance, 61.38);
+	assert.equal(s.budget.cap, null);
+	const q = (await api('POST', '/api/system/quote', { minutes: 30 })).body;
+	assert.match(q.summary, /\$61\.38 is left/);
+});
+
+test('a balance lower than the cap wins, and an empty balance refuses pods', async () => {
+	rp.state.balance = 0.05;
+	const q = (await api('POST', '/api/system/quote', { minutes: 30 })).body;
+	assert.equal(q.remaining, 0.05);
+	assert.equal(q.allowed, false);
+	assert.match(q.reason, /only \$0\.05 is left/);
+});
+
+test('the cap still limits spending when the balance is larger', async () => {
+	await api('PUT', '/api/settings', { budgetTotal: '0.10' });
+	const s = (await api('GET', '/api/system')).body;
+	assert.equal(s.budget.remaining, 0.1);
+	assert.equal(s.budget.balance, 61.38);
+});
+
+test('if the balance cannot be read: the cap is used if set, otherwise pods are refused', async () => {
+	rp.state.balance = null;
+	assert.equal((await api('POST', '/api/system/quote', { minutes: 5 })).body.allowed, true, 'cap of $50 still applies');
+	await api('PUT', '/api/settings', { budgetTotal: '' });
+	const q = (await api('POST', '/api/system/quote', { minutes: 5 })).body;
+	assert.equal(q.allowed, false);
+	assert.match(q.reason, /Could not read your RunPod balance/);
+	assert.equal(rp.state.created.length, 0);
 });
 
 test('RunPod errors are passed on in plain words', async () => {
