@@ -192,8 +192,14 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 
 /* Characters */
 .card textarea, .card select { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: inherit; font-weight: 400; }
-.small-pick { min-height: 0; width: 120px; flex: none; }
-.small-pick .pick-body { height: 84px; }
+.pick-row.three { grid-template-columns: repeat(3, 1fr); margin-bottom: 8px; }
+.pick.ref { min-height: 0; }
+.pick.ref .pick-body { height: 96px; }
+.pick.ref .pick-body img { height: 100%; object-fit: cover; }
+.lora-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.lora-row input[type=checkbox] { width: 20px; height: 20px; margin: 0; flex: none; accent-color: #8b7cf6; display: inline-block; }
+.lora-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14.5px; }
+.lora-row input[type=number] { width: 76px; margin: 0; padding: 6px 8px; display: inline-block; }
 .link { color: #8ab4f8; text-decoration: underline; padding: 0; font-size: inherit; }
 .gen { margin-bottom: 12px; }
 .gen-prompt { color: var(--muted); font-size: 13.5px; margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

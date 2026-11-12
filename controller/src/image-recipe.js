@@ -43,16 +43,28 @@ export function imagePodSpec(loras = []) {
 
 export const SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] };
 
+/** What each kind of reference picture is for, and how large the model gets to see it. */
+export const REFERENCE_ROLES = {
+	// The face is shown very small: enough for identity, too small to copy clothes or background.
+	face: { megapixels: 0.140625, hint: (n) => `Keep the face of the person in image ${n}.` },
+	body: { megapixels: 0.5, hint: (n) => `Use the body shape and proportions of the person in image ${n}.` },
+	look: { megapixels: 0.5, hint: (n) => `Use the outfit, makeup and styling shown in image ${n}.` }
+};
+
 /**
- * The ComfyUI graph for one request. With `face` (an uploaded face-only picture already in
- * ComfyUI's input folder) the same-face method is used; without it, plain text-to-image.
+ * The ComfyUI graph for one request. `refs` is up to three reference pictures already in
+ * ComfyUI's input folder, [{ role, file }]; with any, the reference method is used (edit
+ * nodes plus the re-identification LoRA), otherwise plain text-to-image. `loras` is a list
+ * of [{ name, strength }] applied one after another.
  */
-export function buildImageGraph({ prompt, negative = '', width, height, count, seed, lora, loraStrength = 0.9, face, prefix }) {
+export function buildImageGraph({ prompt, negative = '', width, height, count, seed, loras = [], refs = [], prefix }) {
+	const useRefs = refs.length > 0;
+	const text = useRefs ? `${prompt} ${refs.map((r, i) => REFERENCE_ROLES[r.role].hint(i + 1)).join(' ')}` : prompt;
 	const g = {
-		1: { class_type: 'UNETLoader', inputs: { unet_name: face ? 'krea2_turbo_int8_convrot.safetensors' : 'krea2_turbo_fp8_scaled.safetensors', weight_dtype: 'default' } },
+		1: { class_type: 'UNETLoader', inputs: { unet_name: useRefs ? 'krea2_turbo_int8_convrot.safetensors' : 'krea2_turbo_fp8_scaled.safetensors', weight_dtype: 'default' } },
 		2: { class_type: 'CLIPLoader', inputs: { clip_name: 'qwen3vl_4b_bf16.safetensors', type: 'krea2', device: 'default' } },
 		3: { class_type: 'VAELoader', inputs: { vae_name: 'qwen_image_vae.safetensors' } },
-		5: { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: prompt } },
+		5: { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text } },
 		6: { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: negative } },
 		7: { class_type: 'EmptyLatentImage', inputs: { width, height, batch_size: count } },
 		8: { class_type: 'KSampler', inputs: { model: ['1', 0], positive: ['5', 0], negative: ['6', 0], latent_image: ['7', 0], seed, steps: 8, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: 1 } },
@@ -60,22 +72,26 @@ export function buildImageGraph({ prompt, negative = '', width, height, count, s
 		10: { class_type: 'SaveImage', inputs: { images: ['9', 0], filename_prefix: prefix } }
 	};
 	let model = ['1', 0];
-	if (face) {
-		g[20] = { class_type: 'LoadImage', inputs: { image: face } };
-		// The face reference is shrunk to 0.14 megapixels: enough for identity, too small to copy clothes or background.
-		g[21] = { class_type: 'ImageScaleToTotalPixels', inputs: { image: ['20', 0], upscale_method: 'area', megapixels: 0.140625, resolution_steps: 16 } };
+	if (useRefs) {
 		g[30] = { class_type: 'LoraLoaderModelOnly', inputs: { model, lora_name: REID_LORA, strength_model: 1 } };
 		model = ['30', 0];
 	}
-	if (lora) {
-		g[4] = { class_type: 'LoraLoaderModelOnly', inputs: { model, lora_name: loraFileName(lora), strength_model: loraStrength } };
-		model = ['4', 0];
-	}
-	if (face) {
+	loras.forEach((l, i) => {
+		const id = i === 0 ? '4' : `4${String.fromCharCode(96 + i)}`; // 4, 4a, 4b
+		g[id] = { class_type: 'LoraLoaderModelOnly', inputs: { model, lora_name: loraFileName(l.name), strength_model: l.strength } };
+		model = [id, 0];
+	});
+	if (useRefs) {
+		const images = {};
+		refs.forEach((r, i) => {
+			g[20 + i * 2] = { class_type: 'LoadImage', inputs: { image: r.file } };
+			g[21 + i * 2] = { class_type: 'ImageScaleToTotalPixels', inputs: { image: [String(20 + i * 2), 0], upscale_method: 'area', megapixels: REFERENCE_ROLES[r.role].megapixels, resolution_steps: 16 } };
+			images[`image${i + 1}`] = [String(21 + i * 2), 0];
+		});
 		g[31] = { class_type: 'Krea2OstrisEditModelPatch', inputs: { model, kv_cache: true } };
 		model = ['31', 0];
-		for (const [k, text] of [[5, prompt], [6, negative]]) {
-			g[k] = { class_type: 'TextEncodeKrea2OstrisEdit', inputs: { clip: ['2', 0], vae: ['3', 0], image1: ['21', 0], prompt: text } };
+		for (const [k, t] of [[5, text], [6, negative]]) {
+			g[k] = { class_type: 'TextEncodeKrea2OstrisEdit', inputs: { clip: ['2', 0], vae: ['3', 0], ...images, prompt: t } };
 			g[`4${k}`] = { class_type: 'FluxKontextMultiReferenceLatentMethod', inputs: { conditioning: [String(k), 0], reference_latents_method: 'index_timestep_zero' } };
 		}
 		Object.assign(g[8].inputs, { positive: ['45', 0], negative: ['46', 0] });

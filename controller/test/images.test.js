@@ -86,7 +86,7 @@ test('a session rents one pod set up with Krea 2, the same-face add-on and the L
 test('pictures are generated with the hand-tested settings and saved on the phone', async () => {
 	await startSession();
 	await api('GET', '/api/images');
-	const g = await generate({ prompt: 'gta6game_ a tall woman, full body, white void', size: 'portrait', count: 2, lora: 'loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors', loraStrength: 0.9 });
+	const g = await generate({ prompt: 'gta6game_ a tall woman, full body, white void', size: 'portrait', count: 2, loras: [{ name: 'loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors', strength: 0.9 }] });
 	assert.equal(g.status, 'done');
 	assert.equal(g.images.length, 2);
 	const graph = comfy.state.prompts[0].prompt;
@@ -99,11 +99,11 @@ test('pictures are generated with the hand-tested settings and saved on the phon
 	assert.match(await res.text(), /^PNG:gen_00001_/);
 });
 
-test('the same-face method wires the face picture exactly as the hand-run script did', async () => {
+test('a face reference alone is wired exactly as the hand-run script did', async () => {
 	await startSession();
 	await api('GET', '/api/images');
 	const face = await upload('face.png', 'image/png');
-	const g = await generate({ prompt: 'the same woman in a red coat', face, lora: 'loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors' });
+	const g = await generate({ prompt: 'the same woman in a red coat', refs: { face }, loras: [{ name: 'loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors', strength: 0.9 }] });
 	assert.equal(g.status, 'done');
 	assert.match(comfy.state.uploads[0].name, /^face-.*face\.png$/);
 	const graph = comfy.state.prompts[0].prompt;
@@ -114,10 +114,31 @@ test('the same-face method wires the face picture exactly as the hand-run script
 	assert.deepEqual(graph['31'], { class_type: 'Krea2OstrisEditModelPatch', inputs: { model: ['4', 0], kv_cache: true } });
 	assert.equal(graph['5'].class_type, 'TextEncodeKrea2OstrisEdit');
 	assert.deepEqual(graph['5'].inputs.image1, ['21', 0]);
+	assert.equal(graph['5'].inputs.prompt, 'the same woman in a red coat Keep the face of the person in image 1.');
 	assert.deepEqual(graph['45'].inputs, { conditioning: ['5', 0], reference_latents_method: 'index_timestep_zero' });
 	assert.deepEqual([graph['8'].inputs.model, graph['8'].inputs.positive, graph['8'].inputs.negative], [['31', 0], ['45', 0], ['46', 0]]);
-	// Without a style LoRA the patch sits directly on the same-face LoRA.
-	assert.deepEqual(buildImageGraph({ prompt: 'x', width: 1024, height: 1024, count: 1, seed: 1, face: 'f.png', prefix: 'p' })['31'].inputs.model, ['30', 0]);
+});
+
+test('face, body and look references can be combined, with several LoRAs stacked', () => {
+	const g = buildImageGraph({
+		prompt: 'A woman on a beach.', width: 1024, height: 1536, count: 1, seed: 1, prefix: 'p',
+		loras: [{ name: 'loras/style.safetensors', strength: 0.9 }, { name: 'loras/detail.safetensors', strength: 0.6 }],
+		refs: [{ role: 'face', file: 'f.png' }, { role: 'body', file: 'b.png' }, { role: 'look', file: 'l.png' }]
+	});
+	assert.deepEqual([g['21'].inputs.megapixels, g['23'].inputs.megapixels, g['25'].inputs.megapixels], [0.140625, 0.5, 0.5]);
+	assert.deepEqual([g['5'].inputs.image1, g['5'].inputs.image2, g['5'].inputs.image3], [['21', 0], ['23', 0], ['25', 0]]);
+	assert.equal(g['5'].inputs.prompt, 'A woman on a beach. Keep the face of the person in image 1. Use the body shape and proportions of the person in image 2. Use the outfit, makeup and styling shown in image 3.');
+	assert.deepEqual([g['4'].inputs.model, g['4a'].inputs.model, g['31'].inputs.model], [['30', 0], ['4', 0], ['4a', 0]]);
+	assert.equal(g['4a'].inputs.strength_model, 0.6);
+
+	// A body reference on its own becomes image 1; no LoRA means the patch sits on the reference LoRA.
+	const solo = buildImageGraph({ prompt: 'x', width: 1024, height: 1024, count: 1, seed: 1, prefix: 'p', refs: [{ role: 'body', file: 'b.png' }] });
+	assert.equal(solo['21'].inputs.megapixels, 0.5);
+	assert.match(solo['5'].inputs.prompt, /body shape and proportions of the person in image 1/);
+	assert.deepEqual(solo['31'].inputs.model, ['30', 0]);
+	// Two LoRAs without references: plain text-to-image through both.
+	const plain = buildImageGraph({ prompt: 'x', width: 1024, height: 1024, count: 1, seed: 1, prefix: 'p', loras: [{ name: 'a.safetensors', strength: 1 }, { name: 'b.safetensors', strength: 0.5 }] });
+	assert.deepEqual([plain['1'].inputs.unet_name, plain['8'].inputs.model, plain['5'].class_type], ['krea2_turbo_fp8_scaled.safetensors', ['4a', 0], 'CLIPTextEncode']);
 });
 
 test('requests are checked, and nothing is generated without a ready session', async () => {
@@ -129,8 +150,8 @@ test('requests are checked, and nothing is generated without a ready session', a
 	comfy.state.ready = true;
 	await api('GET', '/api/images');
 	assert.match((await generate({ prompt: '  ' })).error, /Describe the picture/);
-	assert.match((await generate({ prompt: 'x', lora: 'loras/other.safetensors' })).error, /not loaded/);
-	assert.match((await generate({ prompt: 'x', face: 'missing' })).error, /face picture is missing/);
+	assert.match((await generate({ prompt: 'x', loras: [{ name: 'loras/other.safetensors', strength: 1 }] })).error, /not loaded/);
+	assert.match((await generate({ prompt: 'x', refs: { body: 'missing' } })).error, /body picture is missing/);
 	assert.equal(comfy.state.prompts.length, 0);
 });
 

@@ -836,7 +836,7 @@ const KNOWN_TRIGGERS = [[/GTA_VI_3D_Style/i, 'gta6game_']];
 const loraLabel = (name) => name.split('/').pop().replace(/\.safetensors$/, '');
 
 const chars = {
-	timer: 0, data: null, face: null, sig: '',
+	timer: 0, data: null, refs: {}, sig: '', loraSig: null,
 
 	show() { this.refresh(); this.timer = setInterval(() => this.refresh(), 3000); },
 	hide() { clearInterval(this.timer); },
@@ -873,19 +873,34 @@ const chars = {
 			stop.addEventListener('click', async () => { if (confirm('End the session and shut the GPU down?')) { await api('DELETE', '/api/images/session').catch(() => {}); this.refresh(); } });
 			box.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'spacer' }), stop));
 		}
-		const select = $('img-lora');
-		const want = ['', ...loras.map((l) => l.name)];
-		if (JSON.stringify([...select.options].map((o) => o.value)) !== JSON.stringify(want)) {
-			select.replaceChildren(el('option', { value: '', textContent: 'None' }), ...loras.map((l) => el('option', { value: l.name, textContent: loraLabel(l.name) })));
-			if (loras[0]) select.value = loras[0].name;
+		// One row per LoRA loaded in this session: tick to use it, with its own strength.
+		const names = loras.map((l) => l.name);
+		if (JSON.stringify(names) !== this.loraSig) {
+			this.loraSig = JSON.stringify(names);
+			$('img-loras').replaceChildren(...(names.length ? names.map((name, i) => {
+				const box = el('input', { type: 'checkbox', checked: i === 0 });
+				box.dataset.lora = name;
+				box.addEventListener('change', () => this.loraNote());
+				return el('label', { className: 'lora-row' }, box, el('span', { textContent: loraLabel(name) }), el('input', { type: 'number', min: 0, max: 2, step: 0.05, value: 0.9, ariaLabel: `Strength of ${loraLabel(name)}` }));
+			}) : [el('div', { className: 'muted small', textContent: session.state === 'off' ? 'Your LoRAs are listed here once a session starts.' : 'No LoRAs were found in the loras/ folder of your Backblaze bucket.' })]));
 			this.loraNote();
 		}
 		$('img-go').disabled = session.state !== 'ready' || this.data.generations.some((g) => g.status === 'running');
 	},
 
+	chosenLoras() {
+		return [...$('img-loras').querySelectorAll('.lora-row')].filter((r) => r.querySelector('input[type=checkbox]').checked)
+			.map((r) => ({ name: r.querySelector('input[type=checkbox]').dataset.lora, strength: Number(r.querySelector('input[type=number]').value) || 0.9 })).slice(0, 3);
+	},
+
+	triggers() {
+		return this.chosenLoras().map((l) => KNOWN_TRIGGERS.find(([re]) => re.test(l.name))?.[1]).filter(Boolean);
+	},
+
 	loraNote() {
-		const trigger = KNOWN_TRIGGERS.find(([re]) => re.test($('img-lora').value))?.[1];
-		$('img-lora-note').textContent = trigger ? `This LoRA's trigger word "${trigger}" is added to the start of your description for you.` : '';
+		const t = this.triggers();
+		const many = [...$('img-loras').querySelectorAll('input[type=checkbox]:checked')].length > 3;
+		$('img-lora-note').textContent = [many ? 'Only the first three ticked LoRAs are used.' : '', t.length ? `Trigger word "${t.join('", "')}" is added to the start of your description for you. For other LoRAs, type their trigger word yourself.` : ''].filter(Boolean).join(' ');
 	},
 
 	async quote(minutes, out) {
@@ -902,20 +917,20 @@ const chars = {
 		out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: q.summary }), el('span', { className: 'spacer' }), go));
 	},
 
-	setFace(id, src) {
-		this.face = id;
-		$('img-face-slot').replaceChildren(...(id ? [el('img', { src, alt: 'Face to keep' })] : ['None']));
-		$('img-pick-face').classList.toggle('filled', Boolean(id));
-		$('img-face-clear').hidden = !id;
+	/** Fill or clear one reference slot (face, body or look). */
+	setRef(role, id, src) {
+		if (id) this.refs[role] = id; else delete this.refs[role];
+		const button = document.querySelector(`.pick.ref[data-role="${role}"]`);
+		button.querySelector('.pick-body').replaceChildren(...(id ? [el('img', { src, alt: `${role} reference` })] : ['Add']));
+		button.classList.toggle('filled', Boolean(id));
 	},
 
 	async generate() {
 		const out = $('img-out');
-		const trigger = KNOWN_TRIGGERS.find(([re]) => re.test($('img-lora').value))?.[1];
 		let prompt = $('img-prompt').value.trim();
-		if (trigger && prompt && !prompt.includes(trigger)) prompt = `${trigger} ${prompt}`;
+		for (const t of this.triggers()) if (prompt && !prompt.includes(t)) prompt = `${t} ${prompt}`;
 		try {
-			await api('POST', '/api/images/generate', { prompt, lora: $('img-lora').value, loraStrength: Number($('img-strength').value), size: $('img-size').value, count: Number($('img-count').value), face: this.face || '' });
+			await api('POST', '/api/images/generate', { prompt, loras: this.chosenLoras(), size: $('img-size').value, count: Number($('img-count').value), refs: this.refs });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -928,12 +943,15 @@ const chars = {
 			if (g.status === 'failed') card.append(el('p', { className: 'sys-alert', textContent: g.detail }));
 			if (g.images.length) card.append(el('div', { className: 'shots' }, ...g.images.map((id) => {
 				const src = `/api/uploads/${id}`;
-				const face = el('button', { type: 'button', textContent: 'Use as face' });
-				face.addEventListener('click', () => { this.setFace(id, src); $('img-form').scrollIntoView({ behavior: 'smooth' }); });
+				const useAs = (role, label) => {
+					const btn = el('button', { type: 'button', textContent: label });
+					btn.addEventListener('click', () => { this.setRef(role, id, src); $('img-form').scrollIntoView({ behavior: 'smooth' }); });
+					return btn;
+				};
 				const toVideo = el('button', { type: 'button', textContent: 'Use in Video' });
 				toVideo.addEventListener('click', () => { openPage('video'); video.usePicture(id, src); });
 				return el('div', { className: 'shot' }, el('a', { href: src, target: '_blank' }, el('img', { src, loading: 'lazy', alt: 'Generated picture' })),
-					el('div', { className: 'shot-actions' }, el('a', { href: src, download: '', textContent: 'Save' }), face, toVideo));
+					el('div', { className: 'shot-actions' }, el('a', { href: src, download: '', textContent: 'Save' }), useAs('face', 'Use as face'), useAs('body', 'Use as body'), useAs('look', 'Use as outfit'), toVideo));
 			})));
 			if (g.status !== 'running') {
 				const del = el('button', { type: 'button', className: 'link', textContent: 'Delete' });
@@ -948,16 +966,23 @@ const chars = {
 };
 
 $('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.generate(); });
-$('img-lora').addEventListener('change', () => chars.loraNote());
-$('img-pick-face').addEventListener('click', () => $('img-face-input').click());
-$('img-face-clear').addEventListener('click', () => chars.setFace(null));
-$('img-face-input').addEventListener('change', async (e) => {
+for (const button of document.querySelectorAll('.pick.ref')) {
+	button.addEventListener('click', () => {
+		const { role } = button.dataset;
+		if (chars.refs[role]) return chars.setRef(role, null);
+		chars.pickingRole = role;
+		$('img-ref-input').click();
+	});
+}
+$('img-ref-input').addEventListener('change', async (e) => {
 	const file = e.target.files[0];
+	const role = chars.pickingRole;
 	e.target.value = '';
-	if (!file) return;
-	$('img-face-slot').textContent = 'Uploading…';
-	try { const up = await uploadWithProgress(file, () => {}); chars.setFace(up.id, URL.createObjectURL(file)); }
-	catch (err) { $('img-face-slot').textContent = err.message; }
+	if (!file || !role) return;
+	const body = document.querySelector(`.pick.ref[data-role="${role}"] .pick-body`);
+	body.textContent = 'Uploading…';
+	try { const up = await uploadWithProgress(file, (pct) => { body.textContent = `${pct}%`; }); chars.setRef(role, up.id, URL.createObjectURL(file)); }
+	catch (err) { body.textContent = err.message; }
 });
 
 /* ---------- Model picker ---------- */

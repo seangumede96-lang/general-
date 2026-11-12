@@ -6,7 +6,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createComfyClient, ComfyError } from './comfy.js';
 import { openB2 } from './b2.js';
-import { imagePodSpec, buildImageGraph, SIZES } from './image-recipe.js';
+import { imagePodSpec, buildImageGraph, SIZES, REFERENCE_ROLES } from './image-recipe.js';
 import { COMFY_PORT, LOG_PORT } from './video-recipe.js';
 import { MIN_VRAM } from './gpu.js';
 
@@ -81,15 +81,20 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (!prompt) throw new ImageError('Describe the picture first.');
 		const [width, height] = SIZES[req.size] || SIZES.portrait;
 		const count = Math.min(4, Math.max(1, Number.parseInt(req.count, 10) || 2));
-		const lora = req.lora ? savedLoras().find((l) => l.name === req.lora)?.name : '';
-		if (req.lora && !lora) throw new ImageError('That LoRA was not loaded in this session.');
-		const loraStrength = Math.min(2, Math.max(0, Number(req.loraStrength) || 0.9));
-		let face = null;
-		if (req.face) {
-			face = db.getUpload(String(req.face));
-			if (!face || !face.type.startsWith('image/')) throw new ImageError('The face picture is missing.');
+		// Up to three LoRAs, each with its own strength, applied one after another.
+		const known = new Set(savedLoras().map((l) => l.name));
+		const loras = (Array.isArray(req.loras) ? req.loras : []).slice(0, 3).map((l) => ({ name: String(l?.name || ''), strength: Math.min(2, Math.max(0, Number(l?.strength) || 0.9)) }));
+		if (loras.some((l) => !known.has(l.name))) throw new ImageError('One of those LoRAs was not loaded in this session.');
+		// Reference pictures by role. Order matters: it is how the description refers to them.
+		const refs = [];
+		for (const role of Object.keys(REFERENCE_ROLES)) {
+			const uploadId = req.refs?.[role];
+			if (!uploadId) continue;
+			const upload = db.getUpload(String(uploadId));
+			if (!upload || !upload.type.startsWith('image/')) throw new ImageError(`The ${role} picture is missing.`);
+			refs.push({ role, upload });
 		}
-		return { prompt: prompt.slice(0, 4000), width, height, count, lora, loraStrength, face, size: SIZES[req.size] ? req.size : 'portrait' };
+		return { prompt: prompt.slice(0, 4000), width, height, count, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
 	}
 
 	async function generate(req) {
@@ -98,7 +103,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (!p?.ready_at) throw new ImageError(p ? 'The image engine is still starting.' : 'Start a session first.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
-		const params = { size: v.size, width: v.width, height: v.height, count: v.count, lora: v.lora, loraStrength: v.loraStrength, face: v.face?.id || '' };
+		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(v.refs.map((r) => [r.role, r.upload.id])) };
 		db.insertGeneration({ id, prompt: v.prompt, params, created_at: clock() });
 		run(id, p, v).catch((err) => console.error('[images]', err));
 		return view(db.getGeneration(id));
@@ -109,8 +114,9 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		try {
 			const comfy = comfyFor(p);
 			gpu.touch(p.id);
-			const face = v.face ? await comfy.upload(v.face.path, `face-${v.face.id}-${v.face.name}`, v.face.type) : null;
-			const graph = buildImageGraph({ ...v, face, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
+			const refs = [];
+			for (const r of v.refs) refs.push({ role: r.role, file: await comfy.upload(r.upload.path, `${r.role}-${r.upload.id}-${r.upload.name}`, r.upload.type) });
+			const graph = buildImageGraph({ ...v, refs, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
 			const promptId = await comfy.queue(graph, id);
 			let files;
 			for (;;) {
