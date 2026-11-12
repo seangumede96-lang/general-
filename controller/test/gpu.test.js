@@ -64,7 +64,9 @@ test('a started pod is on the cheapest GPU, in Community Cloud, with its own sel
 	const sent = rp.state.created[0];
 	assert.equal(sent.gpu.id, 'NVIDIA GeForce RTX 3090');
 	assert.equal(sent.cloud, 'COMMUNITY');
-	assert.match(sent.args, /sleep 1920; curl -s -X DELETE https:\/\/api\.runpod\.io\/v2\/pods\/\$RUNPOD_POD_ID/);
+	const args = JSON.parse(sent.args);
+	assert.deepEqual(args.entrypoint, ['bash', '-c']);
+	assert.match(args.cmd[0], /^\(sleep 1920; curl -s -X DELETE https:\/\/api\.runpod\.io\/v2\/pods\/\$RUNPOD_POD_ID .*\) & sleep infinity$/);
 	const s = (await api('GET', '/api/system')).body;
 	assert.equal(s.active.length, 1);
 	assert.equal(s.active[0].rate, 0.22);
@@ -193,7 +195,9 @@ test('RunPod errors are passed on in plain words', async () => {
 	assert.match((await api('POST', '/api/system/quote', { minutes: 10 })).body.error, /rejected the API key/);
 });
 
-test('deadman wrapper keeps the original command and quotes it safely', () => {
-	const cmd = withDeadman("python -c 'print(1)'", 600);
-	assert.match(cmd, /^bash -c '\(sleep 600; curl .*runpodctl pod delete \$RUNPOD_POD_ID\) & python -c '\\''print\(1\)'\\'''$/);
+test('deadman wrapper replaces the entrypoint and keeps the original command intact', () => {
+	const args = JSON.parse(withDeadman("python -c 'print(1)'", 600));
+	assert.deepEqual(args.entrypoint, ['bash', '-c']);
+	assert.equal(args.cmd.length, 1);
+	assert.match(args.cmd[0], /^\(sleep 600; curl .*runpodctl pod delete \$RUNPOD_POD_ID\) & python -c 'print\(1\)'$/);
 });

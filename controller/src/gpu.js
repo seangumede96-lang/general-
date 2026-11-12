@@ -18,12 +18,14 @@ const usd = (n) => `$${n.toFixed(2)}`;
 const ceilCents = (n) => Math.ceil(n * 100 - 1e-9) / 100;
 
 /**
- * Wrap a container start command so the pod deletes itself after `seconds`, using the
+ * Build the pod's start arguments so that it deletes itself after `seconds`, using the
  * pod-scoped key RunPod injects. This is the backstop for a dead or offline controller.
+ * The entrypoint is replaced with bash explicitly, so the timer works whatever ENTRYPOINT
+ * the image declares; `cmd` must therefore be the full command line to run.
  */
 export function withDeadman(cmd, seconds) {
 	const kill = `curl -s -X DELETE ${REAL_API}/pods/$RUNPOD_POD_ID -H "Authorization: Bearer $RUNPOD_API_KEY"; runpodctl pod delete $RUNPOD_POD_ID`;
-	return `bash -c '(sleep ${Math.round(seconds)}; ${kill}) & ${cmd.replace(/'/g, `'\\''`)}'`;
+	return JSON.stringify({ entrypoint: ['bash', '-c'], cmd: [`(sleep ${Math.round(seconds)}; ${kill}) & ${cmd}`] });
 }
 
 export function createGpuManager({ db, clock = Date.now }) {
