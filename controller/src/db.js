@@ -57,6 +57,15 @@ export function openDb(dataDir) {
 		);
 		CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation_id, id);
 		CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS uploads (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			type TEXT NOT NULL,
+			size INTEGER NOT NULL,
+			path TEXT NOT NULL,
+			conversation_id TEXT,          -- null until the file is sent in a message
+			created_at INTEGER NOT NULL
+		);
 		CREATE TABLE IF NOT EXISTS pods (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -81,7 +90,8 @@ export function openDb(dataDir) {
 	for (const [name, ddl] of [
 		['tool_calls', "TEXT NOT NULL DEFAULT ''"],    // assistant: JSON [{id,name,arguments}]
 		['tool_call_id', "TEXT NOT NULL DEFAULT ''"],  // tool: which call this answers
-		['tool_name', "TEXT NOT NULL DEFAULT ''"]
+		['tool_name', "TEXT NOT NULL DEFAULT ''"],
+		['attachments', "TEXT NOT NULL DEFAULT ''"]   // user: JSON [{id,name,type,size}]
 	]) if (!have.has(name)) db.exec(`ALTER TABLE messages ADD COLUMN ${name} ${ddl}`);
 	const podCols = new Set(db.prepare('PRAGMA table_info(pods)').all().map((c) => c.name));
 	for (const [name, ddl] of [
@@ -99,7 +109,13 @@ export function openDb(dataDir) {
 		touch: db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?'),
 		deleteConversation: db.prepare('DELETE FROM conversations WHERE id = ?'),
 		listMessages: db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id'),
-		insertMessage: db.prepare('INSERT INTO messages (conversation_id, role, content, reasoning, status, created_at, tool_calls, tool_call_id, tool_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+		insertMessage: db.prepare('INSERT INTO messages (conversation_id, role, content, reasoning, status, created_at, tool_calls, tool_call_id, tool_name, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+		insertUpload: db.prepare('INSERT INTO uploads (id, name, type, size, path, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+		getUpload: db.prepare('SELECT * FROM uploads WHERE id = ?'),
+		claimUpload: db.prepare('UPDATE uploads SET conversation_id = ? WHERE id = ? AND conversation_id IS NULL'),
+		uploadsOf: db.prepare('SELECT * FROM uploads WHERE conversation_id = ?'),
+		staleUploads: db.prepare('SELECT * FROM uploads WHERE conversation_id IS NULL AND created_at < ?'),
+		deleteUpload: db.prepare('DELETE FROM uploads WHERE id = ?'),
 		insertFact: db.prepare('INSERT INTO facts (text, created_at) VALUES (?, ?)'),
 		allFacts: db.prepare('SELECT id, text, created_at FROM facts ORDER BY id DESC LIMIT 2000'),
 		listPods: db.prepare('SELECT * FROM pods ORDER BY created_at DESC'),
@@ -126,13 +142,20 @@ export function openDb(dataDir) {
 		setTitle: (id, title) => { q.setTitle.run(title, id); },
 		deleteConversation: (id) => { q.deleteConversation.run(id); },
 		listMessages: (id) => q.listMessages.all(id),
-		addMessage(conversationId, { role, content = '', reasoning = '', status = 'ok', toolCalls = null, toolCallId = '', toolName = '' }) {
+		addMessage(conversationId, { role, content = '', reasoning = '', status = 'ok', toolCalls = null, toolCallId = '', toolName = '', attachments = null }) {
 			const now = Date.now();
 			const tool_calls = toolCalls?.length ? JSON.stringify(toolCalls) : '';
-			const r = q.insertMessage.run(conversationId, role, content, reasoning, status, now, tool_calls, toolCallId, toolName);
+			const att = attachments?.length ? JSON.stringify(attachments) : '';
+			const r = q.insertMessage.run(conversationId, role, content, reasoning, status, now, tool_calls, toolCallId, toolName, att);
 			q.touch.run(now, conversationId);
-			return { id: Number(r.lastInsertRowid), conversation_id: conversationId, role, content, reasoning, status, created_at: now, tool_calls, tool_call_id: toolCallId, tool_name: toolName };
+			return { id: Number(r.lastInsertRowid), conversation_id: conversationId, role, content, reasoning, status, created_at: now, tool_calls, tool_call_id: toolCallId, tool_name: toolName, attachments: att };
 		},
+		insertUpload: (u) => { q.insertUpload.run(u.id, u.name, u.type, u.size, u.path, u.created_at); },
+		getUpload: (id) => q.getUpload.get(id),
+		claimUpload: (id, conversationId) => q.claimUpload.run(conversationId, id).changes === 1,
+		uploadsOf: (conversationId) => q.uploadsOf.all(conversationId),
+		staleUploads: (before) => q.staleUploads.all(before),
+		deleteUpload: (id) => { q.deleteUpload.run(id); },
 		addFact(text) {
 			const r = q.insertFact.run(text, Date.now());
 			return Number(r.lastInsertRowid);

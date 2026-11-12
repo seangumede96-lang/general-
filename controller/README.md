@@ -16,6 +16,10 @@ Built and tested against a mock model:
 - **Phone files:** list, read and write, limited to folders you list in Settings.
   Paths and symlinks that lead outside those folders are refused.
 - **Memory:** `remember` and `recall` persist facts across conversations.
+- **Attachments:** a + button in the message box attaches photos, videos and files (up to
+  10 per message, 2 GB each), with upload progress and previews. The model is told each
+  file's name, type and saved location and can read attached text files; it does not yet
+  look inside images or videos.
 - **Model picker:** a chip in the message box shows which model will answer. Tapping it
   lists the free everyday models from the Settings endpoint and four private models; a
   private model shows its worst-case price and wakes only on a second tap.

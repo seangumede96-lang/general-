@@ -89,6 +89,18 @@ function assistantNode({ content, reasoning, status }, streaming = false) {
 	return node;
 }
 
+const fmtSize = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
+const INLINE_IMAGE = /^image\/(png|jpeg|gif|webp|avif)$/;
+
+/** One attached file inside a sent message: a picture, a playable video, or a download chip. */
+function fileNode(f) {
+	const src = `/api/uploads/${f.id}`;
+	if (INLINE_IMAGE.test(f.type)) return el('img', { src, alt: f.name, loading: 'lazy' });
+	if (f.type.startsWith('video/')) return el('video', { src, controls: true, preload: 'metadata', playsInline: true });
+	return el('a', { className: 'file-chip', href: src, download: f.name },
+		el('div', {}, el('div', { className: 'pend-name', textContent: f.name }), el('div', { className: 'pend-size', textContent: fmtSize(f.size) })));
+}
+
 const TOOL_LABELS = {
 	list_files: (a) => (a.path ? `List files in ${a.path}` : 'List shared folders'),
 	read_file: (a) => `Read ${a.path || 'a file'}`,
@@ -134,7 +146,13 @@ function toolNode(call, result) {
 }
 
 function messageNode(m, results) {
-	if (m.role === 'user') return el('div', { className: 'msg user', textContent: m.content });
+	if (m.role === 'user') {
+		const files = m.attachments ? JSON.parse(m.attachments) : [];
+		if (!files.length) return el('div', { className: 'msg user', textContent: m.content });
+		const node = el('div', { className: 'msg user has-files' }, el('div', { className: 'files' }, ...files.map(fileNode)));
+		if (m.content) node.append(el('div', { className: 'bubble', textContent: m.content }));
+		return node;
+	}
 	if (m.role === 'error') return el('div', { className: 'msg error', role: 'alert', textContent: m.content });
 	const calls = m.tool_calls ? JSON.parse(m.tool_calls) : [];
 	if (!calls.length) return assistantNode(m);
@@ -173,7 +191,9 @@ function renderLive() {
 }
 
 function syncSend() {
-	els.send.disabled = !state.working && !els.input.value.trim();
+	const hasFile = pending.some((p) => p.id);
+	const busy = pending.some((p) => p.uploading);
+	els.send.disabled = !state.working && (busy || (!els.input.value.trim() && !hasFile));
 	els.send.setAttribute('aria-label', state.working ? 'Stop generating' : 'Send');
 }
 
@@ -270,8 +290,11 @@ function handleEvent(ev) {
 
 async function send() {
 	const text = els.input.value.trim();
-	if (!text || state.working) return;
+	const ready = pending.filter((p) => p.id);
+	if ((!text && !ready.length) || state.working || pending.some((p) => p.uploading)) return;
 	els.input.value = '';
+	pending = pending.filter((p) => !p.id);
+	renderTray();
 	autoGrow();
 	try {
 		if (!state.currentId) {
@@ -279,14 +302,82 @@ async function send() {
 			state.conversations.unshift(conv);
 			await openConversation(conv.id);
 		}
-		await api('POST', `/api/conversations/${state.currentId}/messages`, { text });
+		await api('POST', `/api/conversations/${state.currentId}/messages`, { text, attachments: ready.map((p) => p.id) });
+		for (const p of ready) if (p.preview) URL.revokeObjectURL(p.preview);
 	} catch (err) {
 		els.input.value = text;
+		pending = [...ready, ...pending];
+		renderTray();
 		autoGrow();
 		state.messages.push({ id: `local-${Date.now()}`, role: 'error', content: `Message not sent: ${err.message}` });
 		renderThread();
 	}
 }
+
+/* ---------- Attachments ---------- */
+
+/** Files chosen but not yet sent: { file, preview, progress, uploading, id, error, xhr } */
+let pending = [];
+
+function renderTray() {
+	$('tray').replaceChildren(...pending.map((p) => {
+		const isImage = p.file.type.startsWith('image/');
+		const isVideo = p.file.type.startsWith('video/');
+		const node = el('div', { className: `pend${isImage || isVideo ? '' : ' file'}${p.error ? ' failed' : ''}`, title: p.file.name });
+		if (isImage) node.append(el('img', { src: p.preview, alt: p.file.name }));
+		else if (isVideo) node.append(el('video', { src: `${p.preview}#t=0.1`, muted: true, preload: 'metadata', playsInline: true }));
+		else node.append(el('div', { className: 'pend-name', textContent: p.file.name }), el('div', { className: 'pend-size', textContent: fmtSize(p.file.size) }));
+		if (p.uploading) node.append(el('div', { className: 'pend-bar', style: `width:${p.progress}%` }));
+		if (p.error) node.append(el('div', { className: 'pend-err', textContent: p.error }));
+		const x = el('button', { type: 'button', className: 'pend-x', ariaLabel: `Remove ${p.file.name}` });
+		x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+		x.addEventListener('click', () => {
+			p.xhr?.abort();
+			if (p.preview) URL.revokeObjectURL(p.preview);
+			pending = pending.filter((q) => q !== p);
+			renderTray();
+		});
+		node.append(x);
+		return node;
+	}));
+	syncSend();
+}
+
+/** Upload one file with progress. XMLHttpRequest is used because fetch cannot report upload progress. */
+function uploadFile(p) {
+	const xhr = p.xhr = new XMLHttpRequest();
+	xhr.open('POST', `/api/uploads?name=${encodeURIComponent(p.file.name)}`);
+	xhr.setRequestHeader('Content-Type', p.file.type || 'application/octet-stream');
+	xhr.upload.onprogress = (e) => { if (e.lengthComputable) { p.progress = Math.round(e.loaded / e.total * 100); renderTray(); } };
+	xhr.onload = () => {
+		p.uploading = false;
+		let body = {};
+		try { body = JSON.parse(xhr.responseText); } catch { /* handled below */ }
+		if (xhr.status === 200 && body.id) p.id = body.id; else p.error = body.error || 'Upload failed';
+		renderTray();
+	};
+	xhr.onerror = () => { p.uploading = false; p.error = 'Upload failed'; renderTray(); };
+	xhr.onabort = () => { p.uploading = false; };
+	xhr.send(p.file);
+}
+
+function addFiles(files) {
+	for (const file of files) {
+		if (pending.length >= 10) break;
+		const visual = file.type.startsWith('image/') || file.type.startsWith('video/');
+		const p = { file, preview: visual ? URL.createObjectURL(file) : null, progress: 0, uploading: true, id: null, error: null };
+		pending.push(p);
+		uploadFile(p);
+	}
+	renderTray();
+}
+
+$('attach').addEventListener('click', () => $('file-input').click());
+$('file-input').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
+// Pasting a screenshot or dropping files onto the page attaches them too.
+els.input.addEventListener('paste', (e) => { if (e.clipboardData?.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } });
+document.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
+document.addEventListener('drop', (e) => { if (e.dataTransfer?.files.length) { e.preventDefault(); addFiles(e.dataTransfer.files); } });
 
 const stop = () => api('POST', `/api/conversations/${state.currentId}/stop`).catch(() => {});
 

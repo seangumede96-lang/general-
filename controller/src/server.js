@@ -2,7 +2,10 @@
 // A turn runs detached from any browser request, so it keeps going (and is saved) when the
 // phone sleeps; a reconnecting client gets a snapshot of the reply so far, then live deltas.
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, rm, stat } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { randomUUID } from 'node:crypto';
 import { join, normalize, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, SECRET_SETTINGS } from './db.js';
@@ -14,6 +17,11 @@ const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const MAX_BODY = 1024 * 1024;
 const MAX_STEPS = 12;
+const MAX_ATTACHMENTS = 10;
+const DAY_MS = 24 * 3600 * 1000;
+// Types the browser may display in place. Everything else is offered as a download.
+const INLINE_TYPES = /^(image\/(png|jpeg|gif|webp|avif)|video\/|audio\/)/;
+const fmtSize = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
 class HttpError extends Error {
 	constructor(status, message) { super(message); this.status = status; }
@@ -45,10 +53,73 @@ const titleFrom = (text) => {
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3 }) {
 	const db = openDb(dataDir);
+	const uploadsDir = join(dataDir, 'uploads');
 	const gpu = createGpuManager({ db, clock });
-	const tools = createTools({ db, gpu });
+	const tools = createTools({ db, gpu, uploadsDir });
+
+	const removeUpload = async (u) => {
+		await rm(dirname(u.path), { recursive: true, force: true });
+		db.deleteUpload(u.id);
+	};
+	// Files that were uploaded but never sent in a message are cleared after a day.
+	for (const u of db.staleUploads(Date.now() - DAY_MS)) removeUpload(u).catch(() => {});
+
+	/** Save an uploaded file straight to disk; nothing is held in memory, so videos are fine. */
+	async function receiveUpload(req, url) {
+		const name = (url.searchParams.get('name') || 'file').replace(/[\\/\0]/g, '_').replace(/^\.+/, '').slice(0, 120) || 'file';
+		const declared = Number(req.headers['content-length']);
+		if (declared > maxUploadBytes) throw new HttpError(413, `That file is too large. The limit is ${fmtSize(maxUploadBytes)}.`);
+		const id = randomUUID();
+		const dir = join(uploadsDir, id);
+		await mkdir(dir, { recursive: true, mode: 0o700 });
+		const path = join(dir, name);
+		let size = 0;
+		try {
+			await pipeline(req, async function* (source) {
+				for await (const chunk of source) {
+					size += chunk.length;
+					if (size > maxUploadBytes) throw new HttpError(413, `That file is too large. The limit is ${fmtSize(maxUploadBytes)}.`);
+					yield chunk;
+				}
+			}, createWriteStream(path, { mode: 0o600 }));
+		} catch (err) {
+			await rm(dir, { recursive: true, force: true });
+			throw err instanceof HttpError ? err : new HttpError(400, 'The upload was interrupted.');
+		}
+		if (!size) { await rm(dir, { recursive: true, force: true }); throw new HttpError(400, 'That file is empty.'); }
+		const type = String(req.headers['content-type'] || 'application/octet-stream').split(';')[0].trim().slice(0, 100);
+		db.insertUpload({ id, name, type, size, path, created_at: Date.now() });
+		return { id, name, type, size };
+	}
+
+	/** Send an uploaded file back, with byte ranges so videos can seek. */
+	async function serveUpload(req, res, id) {
+		const u = db.getUpload(id);
+		const info = u && await stat(u.path).catch(() => null);
+		if (!info) throw new HttpError(404, 'File not found');
+		const inline = INLINE_TYPES.test(u.type);
+		const headers = {
+			'Content-Type': inline ? u.type : 'application/octet-stream',
+			'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(u.name)}`,
+			// Uploaded content must never run as a page of this app.
+			'Content-Security-Policy': "sandbox; default-src 'none'; media-src 'self'; img-src 'self'",
+			'X-Content-Type-Options': 'nosniff',
+			'Accept-Ranges': 'bytes',
+			'Cache-Control': 'private, max-age=3600'
+		};
+		const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+		if (range && (range[1] || range[2])) {
+			const start = range[1] ? Number(range[1]) : Math.max(0, info.size - Number(range[2]));
+			const end = range[1] && range[2] ? Math.min(Number(range[2]), info.size - 1) : info.size - 1;
+			if (start > end || start >= info.size) { res.writeHead(416, { 'Content-Range': `bytes */${info.size}` }); return res.end(); }
+			res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${info.size}`, 'Content-Length': end - start + 1 });
+			return pipeline(createReadStream(u.path, { start, end }), res).catch(() => {});
+		}
+		res.writeHead(200, { ...headers, 'Content-Length': info.size });
+		return pipeline(createReadStream(u.path), res).catch(() => {});
+	}
 	// The watchdog stops idle and expired pods. unref: it must not keep the process alive.
 	const watchdog = watchdogMs ? setInterval(() => gpu.tick().catch((err) => console.error('[gpu]', err.message)), watchdogMs) : null;
 	watchdog?.unref();
@@ -104,7 +175,13 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 				continue;
 			}
 			closeOpen();
-			if (m.role === 'user') out.push({ role: 'user', content: m.content });
+			if (m.role === 'user') {
+				// The model cannot see the files themselves; it is told what they are and where
+				// they are saved, so tools can work with them.
+				const files = m.attachments ? JSON.parse(m.attachments) : [];
+				const note = files.map((f) => `- ${f.name} (${f.type}, ${fmtSize(f.size)}) saved at ${db.getUpload(f.id)?.path || 'a file that has since been removed'}`).join('\n');
+				out.push({ role: 'user', content: [m.content, note && `[The user attached ${files.length === 1 ? 'a file' : `${files.length} files`}]\n${note}`].filter(Boolean).join('\n\n') });
+			}
 			if (m.role !== 'assistant') continue;
 			const calls = m.tool_calls ? JSON.parse(m.tool_calls) : [];
 			if (!m.content && !calls.length) continue;
@@ -232,18 +309,27 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 		['DELETE', /^\/api\/conversations\/([\w-]+)$/, (_req, id) => {
 			mustGet(id);
 			if (live.has(id)) cancelTurn(live.get(id));
+			for (const u of db.uploadsOf(id)) removeUpload(u).catch(() => {});
 			db.deleteConversation(id);
 			return { ok: true };
 		}],
 		['POST', /^\/api\/conversations\/([\w-]+)\/messages$/, async (req, id) => {
 			const conversation = mustGet(id);
-			const { text } = await readJson(req);
-			if (typeof text !== 'string' || !text.trim()) throw new HttpError(400, 'text is required');
+			const { text = '', attachments = [] } = await readJson(req);
+			if (typeof text !== 'string' || !Array.isArray(attachments)) throw new HttpError(400, 'text must be a string and attachments a list');
+			if (!text.trim() && !attachments.length) throw new HttpError(400, 'Write a message or attach a file');
+			if (attachments.length > MAX_ATTACHMENTS) throw new HttpError(400, `At most ${MAX_ATTACHMENTS} files per message`);
 			if (live.has(id)) throw new HttpError(409, 'A reply is already being generated');
-			const message = db.addMessage(id, { role: 'user', content: text });
+			const files = attachments.map((uploadId) => {
+				const u = typeof uploadId === 'string' && db.getUpload(uploadId);
+				// Each upload belongs to exactly one message; an id cannot be reused elsewhere.
+				if (!u || !db.claimUpload(u.id, id)) throw new HttpError(400, 'An attached file is missing or was already sent');
+				return { id: u.id, name: u.name, type: u.type, size: u.size };
+			});
+			const message = db.addMessage(id, { role: 'user', content: text, attachments: files });
 			broadcast(id, { t: 'user', message });
 			if (!conversation.title) {
-				const title = titleFrom(text);
+				const title = titleFrom(text.trim() || files.map((f) => f.name).join(', '));
 				db.setTitle(id, title);
 				broadcast(id, { t: 'title', title });
 			}
@@ -366,6 +452,14 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 
 		const ev = url.pathname.match(/^\/api\/conversations\/([\w-]+)\/events$/);
 		if (ev && req.method === 'GET') return attachEvents(req, res, ev[1]);
+
+		if (url.pathname === '/api/uploads' && req.method === 'POST') {
+			const out = await receiveUpload(req, url);
+			res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+			return res.end(JSON.stringify(out));
+		}
+		const up = url.pathname.match(/^\/api\/uploads\/([\w-]+)$/);
+		if (up && req.method === 'GET') return serveUpload(req, res, up[1]);
 
 		if (url.pathname.startsWith('/api/')) {
 			for (const [method, pattern, fn] of routes) {

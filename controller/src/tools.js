@@ -66,8 +66,18 @@ async function resolveAllowed(path, allowedDirs) {
 	throw new ToolError(`"${path}" is outside the folders shared with the assistant (${allowedDirs.join(', ')}).`);
 }
 
-export function createTools({ db, gpu }) {
+export function createTools({ db, gpu, uploadsDir }) {
 	const dirs = () => parseAllowedDirs(db.getSettings().allowedDirs);
+	// Files the user attached in chat can be read (never written) wherever they were saved.
+	const readable = () => [...dirs(), ...(uploadsDir ? [uploadsDir] : [])];
+	/** Resolve a path for reading. Errors describe only the folders the user chose to share. */
+	async function resolveReadable(path) {
+		try { return await resolveAllowed(path, readable()); }
+		catch (err) {
+			if (!(err instanceof ToolError)) throw err;
+			return resolveAllowed(path, dirs());
+		}
+	}
 
 	const tools = [
 		{
@@ -80,7 +90,7 @@ export function createTools({ db, gpu }) {
 					const shared = dirs();
 					return shared.length ? `Shared folders:\n${shared.join('\n')}` : 'No folders are shared with the assistant yet. The user can add them in Settings.';
 				}
-				const dir = await resolveAllowed(path, dirs());
+				const dir = await resolveReadable(path);
 				const entries = await readdir(dir, { withFileTypes: true });
 				if (!entries.length) return '(empty folder)';
 				const lines = [];
@@ -99,7 +109,7 @@ export function createTools({ db, gpu }) {
 			description: `Read a text file from a shared folder (first ${MAX_READ_BYTES / 1024} KB).`,
 			parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
 			async run({ path }) {
-				const file = await resolveAllowed(path, dirs());
+				const file = await resolveReadable(path);
 				const info = await stat(file);
 				if (info.isDirectory()) throw new ToolError(`"${path}" is a folder. Use list_files.`);
 				const buf = (await readFile(file)).subarray(0, MAX_READ_BYTES);
