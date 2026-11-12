@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<div id="js-error" hidden></div>
 <div id="scrim" hidden></div>
 <aside id="sidebar" aria-label="Conversations">
 	<div class="side-top">
@@ -147,11 +148,11 @@
 
 				<div class="card-cap" style="margin-top:14px">Reference pictures (optional)</div>
 				<div class="pick-row three">
-					<button type="button" class="pick ref" data-role="face"><span class="pick-cap">Face</span><span class="pick-body">Add</span></button>
-					<button type="button" class="pick ref" data-role="body"><span class="pick-cap">Body</span><span class="pick-body">Add</span></button>
-					<button type="button" class="pick ref" data-role="look"><span class="pick-cap">Outfit / makeup</span><span class="pick-body">Add</span></button>
+					<label class="pick ref" data-role="face" for="img-ref-face" role="button" tabindex="0"><span class="pick-cap">Face</span><span class="pick-body">Add</span></label>
+					<label class="pick ref" data-role="body" for="img-ref-body" role="button" tabindex="0"><span class="pick-cap">Body</span><span class="pick-body">Add</span></label>
+					<label class="pick ref" data-role="look" for="img-ref-look" role="button" tabindex="0"><span class="pick-cap">Outfit / makeup</span><span class="pick-body">Add</span></label>
 				</div>
-				<input id="img-ref-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+				<input id="img-ref-face" data-role="face" class="file-hidden ref-input" type="file" accept="image/*" tabindex="-1"><input id="img-ref-body" data-role="body" class="file-hidden ref-input" type="file" accept="image/*" tabindex="-1"><input id="img-ref-look" data-role="look" class="file-hidden ref-input" type="file" accept="image/*" tabindex="-1">
 				<small>Upload any picture for each, or tap "Use as…" on one you made. Crop the face picture to the face only, or its clothes leak in. Tap a filled box to remove it. Use made-up characters, or real adults who agreed.</small>
 
 				<label style="margin-top:14px">Shape <select id="img-size"><option value="portrait">Portrait</option><option value="square">Square</option><option value="landscape">Landscape</option></select></label>
@@ -176,11 +177,11 @@
 				<p class="muted small">Pick a short clip and a picture of the character you want in it. The person in the clip is replaced; the movement, camera and background stay.</p>
 
 				<div class="pick-row">
-					<button type="button" class="pick" id="vid-pick-video"><span class="pick-cap">1 · Your clip</span><span class="pick-body" id="vid-video-slot">Choose a video</span></button>
-					<button type="button" class="pick" id="vid-pick-image"><span class="pick-cap">2 · The character</span><span class="pick-body" id="vid-image-slot">Choose a picture</span></button>
+					<label class="pick" id="vid-pick-video" for="vid-video-input" role="button" tabindex="0"><span class="pick-cap">1 · Your clip</span><span class="pick-body" id="vid-video-slot">Choose a video</span></label>
+					<label class="pick" id="vid-pick-image" for="vid-image-input" role="button" tabindex="0"><span class="pick-cap">2 · The character</span><span class="pick-body" id="vid-image-slot">Choose a picture</span></label>
 				</div>
-				<input id="vid-video-input" type="file" accept="video/*" hidden>
-				<input id="vid-image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+				<input id="vid-video-input" class="file-hidden" type="file" accept="video/*" tabindex="-1">
+				<input id="vid-image-input" class="file-hidden" type="file" accept="image/*" tabindex="-1">
 
 				<label>Describe the character (optional)
 					<input id="vid-prompt" type="text" maxlength="500" placeholder="a woman with short silver hair, black jacket">
@@ -210,10 +211,10 @@
 			<div id="tray" class="tray"></div>
 			<textarea id="input" rows="1" placeholder="Message" autocomplete="off"></textarea>
 			<div class="composer-row">
-				<button id="attach" type="button" class="attach" aria-label="Attach photos, videos or files">
+				<label id="attach" class="attach" for="file-input" role="button" tabindex="0" aria-label="Attach photos, videos or files">
 					<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-				</button>
-				<input id="file-input" type="file" multiple hidden>
+				</label>
+				<input id="file-input" class="file-hidden" type="file" multiple tabindex="-1">
 				<button id="model-chip" type="button" class="chip" aria-haspopup="dialog">
 					<span id="model-dot" class="dot"></span>
 					<span id="model-name">Choose a model</span>

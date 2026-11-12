@@ -1,5 +1,16 @@
 import { renderMarkdown } from './markdown.js';
 
+// If anything in the page breaks, say so on screen: on a phone there is no console to look at.
+function showScriptError(message) {
+	const box = document.getElementById('js-error');
+	box.textContent = `Something in the page broke: ${message}. Take a screenshot of this for support, then reload.`;
+	box.hidden = false;
+	box.onclick = () => { box.hidden = true; };
+}
+window.addEventListener('error', (e) => showScriptError(`${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`));
+window.addEventListener('unhandledrejection', (e) => showScriptError(e.reason?.message || String(e.reason)));
+
+
 const $ = (id) => document.getElementById(id);
 const els = {
 	conversations: $('conversations'), thread: $('thread'), scroller: $('scroller'), title: $('title'),
@@ -372,7 +383,6 @@ function addFiles(files) {
 	renderTray();
 }
 
-$('attach').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
 // Pasting a screenshot or dropping files onto the page attaches them too.
 els.input.addEventListener('paste', (e) => { if (e.clipboardData?.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } });
@@ -824,8 +834,6 @@ const video = {
 	}
 };
 
-$('vid-pick-video').addEventListener('click', () => $('vid-video-input').click());
-$('vid-pick-image').addEventListener('click', () => $('vid-image-input').click());
 $('vid-video-input').addEventListener('change', (e) => { if (e.target.files[0]) video.choose('clip', e.target.files[0]); e.target.value = ''; });
 $('vid-image-input').addEventListener('change', (e) => { if (e.target.files[0]) video.choose('picture', e.target.files[0]); e.target.value = ''; });
 $('vid-form').addEventListener('submit', (e) => { e.preventDefault(); video.quote(); });
@@ -974,24 +982,28 @@ const chars = {
 };
 
 $('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.generate(); });
-for (const button of document.querySelectorAll('.pick.ref')) {
-	button.addEventListener('click', () => {
-		const { role } = button.dataset;
-		if (chars.refs[role]) return chars.setRef(role, null);
-		chars.pickingRole = role;
-		$('img-ref-input').click();
+// Each reference box is a label for its own file input. Tapping a filled box clears it instead.
+for (const box of document.querySelectorAll('.pick.ref')) {
+	box.addEventListener('click', (e) => {
+		if (chars.refs[box.dataset.role]) { e.preventDefault(); chars.setRef(box.dataset.role, null); }
 	});
 }
-$('img-ref-input').addEventListener('change', async (e) => {
-	const file = e.target.files[0];
-	const role = chars.pickingRole;
-	e.target.value = '';
-	if (!file || !role) return;
-	const body = document.querySelector(`.pick.ref[data-role="${role}"] .pick-body`);
-	body.textContent = 'Uploading…';
-	try { const up = await uploadWithProgress(file, (pct) => { body.textContent = `${pct}%`; }); chars.setRef(role, up.id, URL.createObjectURL(file)); }
-	catch (err) { body.textContent = err.message; }
-});
+for (const input of document.querySelectorAll('.ref-input')) {
+	input.addEventListener('change', async (e) => {
+		const file = e.target.files[0];
+		const { role } = input.dataset;
+		e.target.value = '';
+		if (!file) return;
+		const body = document.querySelector(`.pick.ref[data-role="${role}"] .pick-body`);
+		body.textContent = 'Uploading…';
+		try { const up = await uploadWithProgress(file, (pct) => { body.textContent = `${pct}%`; }); chars.setRef(role, up.id, URL.createObjectURL(file)); }
+		catch (err) { body.textContent = err.message; }
+	});
+}
+// Labels acting as buttons should also answer the keyboard.
+for (const label of document.querySelectorAll('label[role="button"]')) {
+	label.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); label.click(); } });
+}
 
 /* ---------- Model picker ---------- */
 
