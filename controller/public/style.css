@@ -152,8 +152,11 @@ body.view-system #scroller, body.view-system #composer { display: none; }
 .card.warn { border-color: #6b5a2a; background: #262218; }
 .hist { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; font-variant-numeric: tabular-nums; }
 .hist:first-child { border-top: 0; padding-top: 0; }
-#sys-quote-out { margin-top: 12px; }
-#sys-quote-out:empty { display: none; }
+.quote-out { margin-top: 12px; }
+.quote-out:empty { display: none; }
+.brain-state { font-weight: 600; margin-bottom: 6px; }
+.brain-state.ready { color: #81c995; }
+.brain-state.starting { color: #f2c66d; }
 .approval-note { padding: 0 12px 10px; font-size: 14px; color: #f2c66d; }
 @media (max-width: 520px) { .grid3 { grid-template-columns: 1fr; } }
 

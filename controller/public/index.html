@@ -65,6 +65,20 @@
 				<div id="sys-active"></div>
 			</div>
 
+			<div class="card">
+				<div class="card-cap">Private brain</div>
+				<div id="sys-brain-state" class="brain-state"></div>
+				<p class="muted small">Runs an open model on a rented GPU. While it is awake, chat uses it; when it is off, chat uses the endpoint in Settings. It shuts down by itself after the idle time below.</p>
+				<label>Model <input id="sys-brain-model" type="text" autocapitalize="off" spellcheck="false" placeholder="owner/repository:QUANT">
+					<small>A GGUF model on Hugging Face. Downloaded fresh each time the brain wakes.</small>
+				</label>
+				<div class="row">
+					<label class="inline">Minutes <input id="sys-brain-minutes" type="number" min="1" value="30" inputmode="numeric"></label>
+					<button id="sys-brain-quote" type="button" class="btn-ghost">Get price</button>
+				</div>
+				<div id="sys-brain-out" class="quote-out"></div>
+			</div>
+
 			<div class="card" id="sys-start-card">
 				<div class="card-cap">Test pod</div>
 				<p class="muted small">Rents the cheapest 24 GB GPU and does nothing with it. Use it once to prove start, cost tracking and automatic shutdown.</p>
@@ -72,7 +86,7 @@
 					<label class="inline">Minutes <input id="sys-minutes" type="number" min="1" value="5" inputmode="numeric"></label>
 					<button id="sys-quote" type="button" class="btn-ghost">Get price</button>
 				</div>
-				<div id="sys-quote-out"></div>
+				<div id="sys-quote-out" class="quote-out"></div>
 			</div>
 
 			<form class="card" id="sys-form">

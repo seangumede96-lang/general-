@@ -19,7 +19,11 @@ export const SETTING_DEFAULTS = {
 	// Total you are willing to spend on GPUs. Pods are refused once this is used up.
 	budgetTotal: '50',
 	maxPodMinutes: '60',
-	idleMinutes: '10'
+	idleMinutes: '10',
+	// The private brain: a GGUF model on Hugging Face, served by llama.cpp on a rented pod.
+	brainModel: 'unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M',
+	brainContext: '16384',
+	podProxyTemplate: 'https://{id}-{port}.proxy.runpod.net'
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */
@@ -76,6 +80,12 @@ export function openDb(dataDir) {
 		['tool_call_id', "TEXT NOT NULL DEFAULT ''"],  // tool: which call this answers
 		['tool_name', "TEXT NOT NULL DEFAULT ''"]
 	]) if (!have.has(name)) db.exec(`ALTER TABLE messages ADD COLUMN ${name} ${ddl}`);
+	const podCols = new Set(db.prepare('PRAGMA table_info(pods)').all().map((c) => c.name));
+	for (const [name, ddl] of [
+		['kind', "TEXT NOT NULL DEFAULT 'test'"],  // test | brain
+		['secret', "TEXT NOT NULL DEFAULT ''"],    // key protecting the service on the pod; never sent to the browser
+		['ready_at', 'INTEGER']                    // when the service on the pod first answered
+	]) if (!podCols.has(name)) db.exec(`ALTER TABLE pods ADD COLUMN ${name} ${ddl}`);
 
 	const q = {
 		listConversations: db.prepare('SELECT * FROM conversations ORDER BY updated_at DESC'),
@@ -91,7 +101,8 @@ export function openDb(dataDir) {
 		recentFacts: db.prepare('SELECT id, text, created_at FROM facts ORDER BY id DESC LIMIT 20'),
 		listPods: db.prepare('SELECT * FROM pods ORDER BY created_at DESC'),
 		getPod: db.prepare('SELECT * FROM pods WHERE id = ?'),
-		insertPod: db.prepare('INSERT INTO pods (id, name, gpu, rate, purpose, created_at, last_used_at, deadline_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+		insertPod: db.prepare('INSERT INTO pods (id, name, gpu, rate, purpose, created_at, last_used_at, deadline_at, kind, secret) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+		setPodReady: db.prepare('UPDATE pods SET ready_at = ? WHERE id = ? AND ready_at IS NULL'),
 		endPod: db.prepare('UPDATE pods SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL'),
 		touchPod: db.prepare('UPDATE pods SET last_used_at = ? WHERE id = ?'),
 		setPodActualCost: db.prepare('UPDATE pods SET actual_cost = ? WHERE id = ?'),
@@ -130,7 +141,8 @@ export function openDb(dataDir) {
 		},
 		listPods: () => q.listPods.all(),
 		getPod: (id) => q.getPod.get(id),
-		insertPod: (p) => { q.insertPod.run(p.id, p.name, p.gpu, p.rate, p.purpose, p.created_at, p.last_used_at, p.deadline_at); },
+		insertPod: (p) => { q.insertPod.run(p.id, p.name, p.gpu, p.rate, p.purpose, p.created_at, p.last_used_at, p.deadline_at, p.kind || 'test', p.secret || ''); },
+		setPodReady: (id, at) => { q.setPodReady.run(at, id); },
 		endPod: (id, at, reason) => { q.endPod.run(at, reason, id); },
 		touchPod: (id, at) => { q.touchPod.run(at, id); },
 		setPodActualCost: (id, cost) => { q.setPodActualCost.run(cost, id); },

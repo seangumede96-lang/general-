@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 // RunPod pod lifecycle with a spend ledger. Rules enforced here, in code:
 //   - one pod at a time, and only if its worst-case cost fits the remaining budget
 //   - every pod has a fixed maximum lifetime, decided before it starts
@@ -8,6 +9,9 @@
 const REAL_API = 'https://api.runpod.io/v2';
 const DEADMAN_GRACE_S = 120;
 const HOUR_MS = 3600 * 1000;
+const BRAIN_PORT = 8080;
+// A pod that is still downloading its model is not idle; give it this long before the idle rule applies.
+const STARTUP_GRACE_MS = 20 * 60000;
 
 export class GpuError extends Error {
 	constructor(message, code = 'failed') { super(message); this.code = code; }
@@ -24,7 +28,10 @@ const ceilCents = (n) => Math.ceil(n * 100 - 1e-9) / 100;
  * the image declares; `cmd` must therefore be the full command line to run.
  */
 export function withDeadman(cmd, seconds) {
-	const kill = `curl -s -X DELETE ${REAL_API}/pods/$RUNPOD_POD_ID -H "Authorization: Bearer $RUNPOD_API_KEY"; runpodctl pod delete $RUNPOD_POD_ID`;
+	// Images differ in what they ship, so try every tool that could send the request.
+	const url = `${REAL_API}/pods/$RUNPOD_POD_ID`;
+	const auth = '"Authorization: Bearer $RUNPOD_API_KEY"';
+	const kill = `curl -s -X DELETE ${url} -H ${auth}; wget -q -O- --method=DELETE --header=${auth} ${url}; runpodctl pod delete $RUNPOD_POD_ID`;
 	return JSON.stringify({ entrypoint: ['bash', '-c'], cmd: [`(sleep ${Math.round(seconds)}; ${kill}) & ${cmd}`] });
 }
 
@@ -136,7 +143,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 			const now = clock();
 			// Trust the rate RunPod reports for the pod it actually placed.
 			const rate = Number(pod.cost) > 0 ? Number(pod.cost) : gpu.rate;
-			db.insertPod({ id: pod.id, name: spec.name, gpu: gpu.name, rate, purpose, created_at: now, last_used_at: now, deadline_at: now + minutes * 60000 });
+			db.insertPod({ id: pod.id, name: spec.name, gpu: gpu.name, rate, purpose, created_at: now, last_used_at: now, deadline_at: now + minutes * 60000, kind: spec.kind, secret: spec.secret });
 			return db.getPod(pod.id);
 		}
 		throw new GpuError(`None of the available GPUs could be started. ${lastError?.message || ''}`.trim(), 'unavailable');
@@ -152,6 +159,42 @@ export function createGpuManager({ db, clock = Date.now }) {
 
 	const touch = (id) => db.touchPod(id, clock());
 
+	const proxyUrl = (podId, port) => db.getSettings().podProxyTemplate.replace('{id}', podId).replace('{port}', port).replace(/\/+$/, '');
+	const brainPod = () => db.listPods().find((p) => !p.ended_at && p.kind === 'brain') || null;
+
+	/** The pod spec for the private brain: llama.cpp serving one model, locked with a random key. */
+	function brainSpec() {
+		const s = db.getSettings();
+		const model = s.brainModel.trim();
+		if (!/^[\w.-]+\/[\w.-]+(:[\w.-]+)?$/.test(model)) throw new GpuError('The brain model must look like "owner/repository:QUANT" on Hugging Face.', 'invalid');
+		const ctx = Math.max(2048, Number.parseInt(s.brainContext, 10) || 16384);
+		const secret = randomBytes(24).toString('hex');
+		return {
+			kind: 'brain', secret, name: 'assistant-brain', image: 'ghcr.io/ggml-org/llama.cpp:server-cuda', disk: 40, ports: [`${BRAIN_PORT}/http`],
+			// The pod's address is public, so the server only answers requests carrying this key.
+			env: { LLAMA_API_KEY: secret },
+			cmd: `/app/llama-server -hf ${model} --host 0.0.0.0 --port ${BRAIN_PORT} -ngl all -c ${ctx} -a brain`
+		};
+	}
+
+	/** Ask the brain pod whether its model has finished loading; remember the first yes. */
+	async function probeBrain() {
+		const pod = brainPod();
+		if (!pod || pod.ready_at) return pod;
+		try {
+			const res = await fetch(`${proxyUrl(pod.id, BRAIN_PORT)}/health`, { signal: AbortSignal.timeout(8000) });
+			if (res.ok) { db.setPodReady(pod.id, clock()); db.touchPod(pod.id, clock()); }
+		} catch { /* still booting or downloading the model */ }
+		return brainPod();
+	}
+
+	/** Where chat requests should go while the brain is up, or null to use the configured endpoint. */
+	function brainEndpoint() {
+		const pod = brainPod();
+		if (!pod?.ready_at) return null;
+		return { podId: pod.id, baseUrl: `${proxyUrl(pod.id, BRAIN_PORT)}/v1`, apiKey: pod.secret, model: 'brain' };
+	}
+
 	/** Periodic check: stop pods that are past their deadline or idle, and notice ones that vanished. */
 	async function tick() {
 		const { idleMinutes, key } = cfg();
@@ -160,7 +203,13 @@ export function createGpuManager({ db, clock = Date.now }) {
 		for (const pod of db.listPods().filter((p) => !p.ended_at)) {
 			try {
 				if (now >= pod.deadline_at) { await stop(pod.id, 'time limit reached'); continue; }
-				if (now - pod.last_used_at >= idleMinutes * 60000) { await stop(pod.id, 'idle'); continue; }
+				if (pod.kind === 'brain' && !pod.ready_at) {
+					await probeBrain();
+					if (!db.getPod(pod.id).ready_at) {
+						if (now - pod.created_at >= STARTUP_GRACE_MS) await stop(pod.id, 'never became ready');
+						continue;
+					}
+				} else if (now - pod.last_used_at >= idleMinutes * 60000) { await stop(pod.id, 'idle'); continue; }
 				const remote = await call('GET', `/pods/${encodeURIComponent(pod.id)}`);
 				if (remote.status === 'TERMINATED') db.endPod(pod.id, now, 'ended on RunPod');
 				else if (remote.status === 'ERROR') await stop(pod.id, 'pod reported an error');
@@ -210,7 +259,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 			try { await reconcile(); out.unknown = await unknownPods(); }
 			catch (err) { out.error = err.message; }
 		}
-		const view = (p) => ({ ...p, cost: ceilCents(p.actual_cost ?? accrued(p, now)), final: p.actual_cost != null });
+		if (c.key) await probeBrain();
+		const view = ({ secret, ...p }) => ({ ...p, cost: ceilCents(p.actual_cost ?? accrued(p, now)), final: p.actual_cost != null });
 		const pods = db.listPods();
 		out.active = pods.filter((p) => !p.ended_at).map((p) => ({
 			...view(p),
@@ -219,11 +269,13 @@ export function createGpuManager({ db, clock = Date.now }) {
 		}));
 		out.history = pods.filter((p) => p.ended_at).slice(0, 20).map(view);
 		out.budget = budget();
+		const brain = pods.find((p) => !p.ended_at && p.kind === 'brain');
+		out.brain = { state: !brain ? 'off' : brain.ready_at ? 'ready' : 'starting', model: db.getSettings().brainModel };
 		return out;
 	}
 
-	return { quote, start, stop, touch, tick, status, budget, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
+	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
 
 /** A do-nothing pod used to prove the lifecycle end to end before real workloads exist. */
-export const TEST_POD = { name: 'assistant-test', image: 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404', cmd: 'sleep infinity', disk: 20 };
+export const TEST_POD = { kind: 'test', name: 'assistant-test', image: 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404', cmd: 'sleep infinity', disk: 20 };

@@ -12,6 +12,9 @@ import { createServer } from 'node:http';
 export async function startMockModel(opts = {}) {
 	const state = { chunks: ['Hello', ' from the', ' mock model.'], delayMs: 0, requireKey: null, requests: [], replies: [], ...opts };
 	const server = createServer(async (req, res) => {
+		// llama.cpp answers /health without a key: 503 while loading, 200 when ready.
+		if (req.url === '/health') { res.writeHead(state.loading ? 503 : 200, { 'Content-Type': 'application/json' }); return res.end('{}'); }
+		state.lastAuth = req.headers.authorization || '';
 		if (state.requireKey && req.headers.authorization !== `Bearer ${state.requireKey}`) {
 			res.writeHead(401, { 'Content-Type': 'application/json' });
 			return res.end(JSON.stringify({ error: { message: 'bad key' } }));

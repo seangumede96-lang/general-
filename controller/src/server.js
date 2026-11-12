@@ -168,13 +168,17 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 		};
 		let status = 'ok';
 		try {
-			const model = await resolveModel(settings, signal);
 			for (let step = 0; ; step++) {
+				// While the private brain is up, chat goes there (and counts as activity, so
+				// it is not shut down for idling mid-conversation). Otherwise use Settings.
+				const brain = gpu.brainEndpoint();
+				if (brain) gpu.touch(brain.podId);
+				const target = brain || { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: await resolveModel(settings, signal) };
 				if (step >= MAX_STEPS) throw new Error(`Stopped after ${MAX_STEPS} tool steps without finishing. Ask me to continue if the task needs more.`);
 				const result = await streamChat({
-					baseUrl: settings.baseUrl,
-					apiKey: settings.apiKey,
-					model,
+					baseUrl: target.baseUrl,
+					apiKey: target.apiKey,
+					model: target.model,
 					messages: buildHistory(id, settings),
 					tools: tools.definitions(),
 					temperature: Number.parseFloat(settings.temperature),
@@ -194,7 +198,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 			}
 		} catch (err) {
 			status = signal.aborted ? 'stopped' : 'error';
-			if (status === 'error') turn.error = describeError(err, settings);
+			if (status === 'error') turn.error = describeError(err, gpu.brainEndpoint() || settings);
 		}
 		// Persist whatever arrived, even on stop/failure, so nothing the user saw is lost.
 		if (turn.text || turn.thinking) save({ role: 'assistant', content: turn.text, reasoning: turn.thinking, status });
@@ -278,15 +282,21 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000 }) {
 		}],
 		// Starting a pod spends money, so the caller must echo back the estimate it was shown.
 		['POST', /^\/api\/system\/pods$/, async (req) => {
-			const { minutes, confirmEstimate } = await readJson(req);
+			const { minutes, confirmEstimate, kind = 'test' } = await readJson(req);
+			if (kind !== 'test' && kind !== 'brain') throw new HttpError(400, 'kind must be "test" or "brain"');
 			return gpuCall(async () => {
+				const spec = kind === 'brain' ? gpu.brainSpec() : TEST_POD;
 				const q = await gpu.quote({ minutes });
 				if (!q.allowed) throw new GpuError(q.reason, 'refused');
 				if (confirmEstimate !== q.estimate) throw new GpuError(`The price changed to ${q.estimate.toFixed(2)} USD. Review the new quote and confirm again.`, 'refused');
-				return gpu.start({ minutes, purpose: 'Test pod', spec: TEST_POD });
+				const { secret, ...pod } = await gpu.start({ minutes, purpose: kind === 'brain' ? 'Private brain' : 'Test pod', spec });
+				return pod;
 			});
 		}],
-		['DELETE', /^\/api\/system\/pods\/([\w-]+)$/, (_req, podId) => gpuCall(() => gpu.stop(podId, 'stopped by you')).then((pod) => pod || { ok: true })],
+		['DELETE', /^\/api\/system\/pods\/([\w-]+)$/, async (_req, podId) => {
+			await gpuCall(() => gpu.stop(podId, 'stopped by you'));
+			return { ok: true };
+		}],
 		['GET', /^\/api\/models$/, async () => {
 			const s = db.getSettings();
 			try { return { models: await listModels({ baseUrl: s.baseUrl, apiKey: s.apiKey, signal: AbortSignal.timeout(8000) }) }; }

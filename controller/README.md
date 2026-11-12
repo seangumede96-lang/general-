@@ -22,13 +22,19 @@ Built and tested against a mock model:
   also carries its own timer to delete itself if the phone goes offline. Every pod is
   recorded in a cost ledger; RunPod's actual bill replaces the estimate when available.
   Pods on the account that this app did not start are flagged.
+- **Private brain (System page):** starts a pod running llama.cpp with a GGUF model from
+  Hugging Face, locked with a random key. Chat switches to it when the model has loaded
+  and falls back to the Settings endpoint when it is off. Chatting counts as activity;
+  ten quiet minutes shut it down.
 
-Not built yet: a real workload on the pod (the brain, ComfyUI), Backblaze B2, Character
+Not built yet: ComfyUI on the pod, Backblaze B2, Character
 and Video studios, MCP extensions, key encryption and login. See `../docs/PLAN.md`.
 
-Not yet tried on a real phone, a real model or the real RunPod API. Two things can only
-be confirmed with a real pod: that the pod's own self-delete timer works with the key
-RunPod injects, and that the ledger matches RunPod's billing.
+Tried on a real phone (realme RMX3834, Android 15, Ubuntu proot inside Termux): all tests
+pass and the page loads in Chrome. Not yet tried with a real model or the real RunPod
+API. To confirm with real pods: that the pod's own self-delete timer works with the key
+RunPod injects, that the ledger matches RunPod's billing, and that the llama.cpp image
+starts with the command used here and the default model name resolves.
 
 ## Run it
 

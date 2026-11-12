@@ -2,6 +2,7 @@
 // Entry point. Listens on localhost only by default: the UI is opened in the phone's own
 // browser, and nothing else on the network should be able to reach it.
 import { homedir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp } from './server.js';
 
@@ -13,6 +14,8 @@ const app = createApp({ dataDir });
 const addr = await app.listen(port, host);
 console.log(`Controller running at http://${addr.address}:${addr.port}`);
 console.log(`Data directory: ${dataDir}`);
+// The app's own PID, so scripts can check on it without guessing which process a shell started.
+writeFileSync(join(dataDir, 'controller.pid'), String(process.pid));
 if (host !== '127.0.0.1' && host !== 'localhost') {
 	console.warn('Warning: listening beyond localhost. There is no login yet, so anyone who can reach this port can use it.');
 }

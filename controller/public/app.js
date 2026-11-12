@@ -444,8 +444,13 @@ async function refreshSystem(fillForm) {
 		el('span', { textContent: `${p.final ? '' : '≈ '}${money(p.cost)}` })))
 		: [el('div', { className: 'muted', textContent: 'No pods yet.' })]));
 
+	const brainText = { off: 'Asleep. Nothing is being charged for it.', starting: 'Waking up: downloading and loading the model. This takes several minutes.', ready: 'Awake. Chat is using it.' };
+	Object.assign($('sys-brain-state'), { className: `brain-state ${s.brain.state}`, textContent: brainText[s.brain.state] });
+
 	if (fillForm) {
 		const settings = await api('GET', '/api/settings');
+		$('sys-brain-model').value = settings.brainModel;
+		$('sys-brain-out').replaceChildren();
 		for (const name of ['budgetTotal', 'maxPodMinutes', 'idleMinutes']) sys.form.elements[name].value = settings[name];
 		sys.form.elements.runpodApiKey.value = '';
 		sys.form.elements.runpodApiKey.placeholder = settings.hasRunpodApiKey ? 'Saved (hidden)' : 'Not set';
@@ -454,24 +459,32 @@ async function refreshSystem(fillForm) {
 	}
 }
 
-$('sys-quote').addEventListener('click', async () => {
-	const minutes = Number(sys.minutes.value);
-	sys.quoteOut.replaceChildren(el('div', { className: 'muted small', textContent: 'Checking prices…' }));
+/** Show the worst-case price for a pod, then start it only when the user confirms that price. */
+async function quoteAndStart(kind, minutes, out) {
+	out.replaceChildren(el('div', { className: 'muted small', textContent: 'Checking prices…' }));
+	const fail = (message) => out.replaceChildren(el('div', { className: 'sys-alert', textContent: message }));
 	let q;
-	try { q = await api('POST', '/api/system/quote', { minutes }); }
-	catch (err) { sys.quoteOut.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); return; }
-	if (!q.allowed) { sys.quoteOut.replaceChildren(el('div', { className: 'sys-alert', textContent: q.reason })); return; }
+	try { q = await api('POST', '/api/system/quote', { minutes }); } catch (err) { return fail(err.message); }
+	if (!q.allowed) return fail(q.reason);
 	const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Start for up to ${money(q.estimate)}` });
 	go.addEventListener('click', async () => {
 		go.disabled = true;
 		go.textContent = 'Starting…';
 		try {
-			await api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate });
-			sys.quoteOut.replaceChildren();
-		} catch (err) { sys.quoteOut.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
+			await api('POST', '/api/system/pods', { minutes, confirmEstimate: q.estimate, kind });
+			out.replaceChildren();
+		} catch (err) { fail(err.message); }
 		refreshSystem(false);
 	});
-	sys.quoteOut.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: q.summary }), el('span', { className: 'spacer' }), go));
+	out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: q.summary }), el('span', { className: 'spacer' }), go));
+}
+
+$('sys-quote').addEventListener('click', () => quoteAndStart('test', Number(sys.minutes.value), sys.quoteOut));
+$('sys-brain-quote').addEventListener('click', async () => {
+	const out = $('sys-brain-out');
+	try { await api('PUT', '/api/settings', { brainModel: $('sys-brain-model').value.trim() }); }
+	catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); return; }
+	quoteAndStart('brain', Number($('sys-brain-minutes').value), out);
 });
 
 sys.form.addEventListener('submit', async (e) => {
