@@ -72,6 +72,16 @@ test('with both clouds allowed, the cheapest wins wherever it is', async () => {
 	} finally { rp.state.gpus.find((g) => g.name === 'RTX A4000').price.secure = 0.25; }
 });
 
+test('big-download jobs prefer RunPod\'s own data centres when one is free, else fall back', async () => {
+	await api('PUT', '/api/settings', { podCloud: 'ANY' });
+	const fast = await app.gpu.quote({ minutes: 30, minVram: 24, fastNetwork: true });
+	assert.deepEqual(fast.options.map((o) => o.cloud), ['SECURE', 'SECURE'], 'RTX 3090 and 4090 in Secure Cloud');
+	const normal = await app.gpu.quote({ minutes: 30, minVram: 24 });
+	assert.equal(normal.options[0].cloud, 'COMMUNITY');
+	await api('PUT', '/api/settings', { podCloud: 'COMMUNITY' });
+	assert.equal((await app.gpu.quote({ minutes: 30, minVram: 24, fastNetwork: true })).options[0].cloud, 'COMMUNITY');
+});
+
 test('a much dearer card is never offered as a fallback', async () => {
 	const saved = rp.state.gpus;
 	rp.state.gpus = [

@@ -14,6 +14,26 @@ export const LOG_PORT = 8189;
 export const FPS = 16;
 
 const HF = 'https://huggingface.co';
+
+/**
+ * Shell lines that download [url, path] pairs side by side and report progress. The first
+ * real run showed why this matters: plain downloads were too slow to finish in the reserved
+ * time and logged nothing. This uses a multi-connection downloader when it can be installed,
+ * and writes "STEP n/m Downloading models (x of y files, z GB)" every 15 seconds.
+ */
+export function downloadLines(files, root, step) {
+	const q = (u) => `'${u.replace(/'/g, '')}'`;
+	return [
+		`echo "STEP ${step} Downloading models"`,
+		'(apt-get install -y -qq aria2 >/dev/null 2>&1 || true)',
+		`mkdir -p ${[...new Set(files.map(([, d]) => `${root}/${d.split('/').slice(0, -1).join('/')}`))].join(' ')}`,
+		'get() { if command -v aria2c >/dev/null; then aria2c -q -x 16 -s 16 -k 1M --retry-wait 3 -m 5 --allow-overwrite=true -d "$(dirname "$2")" -o "$(basename "$2")" "$1" && touch "$2.done"; else curl -fsSL --retry 5 --connect-timeout 20 -o "$2" "$1" && touch "$2.done"; fi; }',
+		...files.map(([url, dest]) => `get ${q(url)} "${root}/${dest}" &`),
+		`while [ "$(ls ${root}/*/*.done 2>/dev/null | wc -l)" -lt ${files.length} ] && [ -n "$(jobs -r)" ]; do sleep 15; echo "STEP ${step} Downloading models ($(ls ${root}/*/*.done 2>/dev/null | wc -l) of ${files.length} files, $(du -sBG ${root} | cut -f1 | tr -d G) GB)"; done`,
+		'wait',
+		...files.map(([, dest]) => `test -s "${root}/${dest}" || { echo "MISSING ${dest}"; false; }`)
+	];
+}
 const MODELS = [
 	[`${HF}/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_bf16.safetensors`, 'vae/Wan2_1_VAE_bf16.safetensors'],
 	[`${HF}/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors`, 'clip_vision/clip_vision_h.safetensors'],
@@ -49,12 +69,7 @@ function setupScript() {
 		...NODE_PACKS_PLAIN.map((r) => `git clone -q --depth 1 https://github.com/${r}`),
 		'(cd ComfyUI-AdaptiveWindowSize/ComfyUI-AdaptiveWindowSize && mv * ../)',
 		'pip install -q --upgrade onnxruntime-gpu==1.22',
-		'echo "STEP 3/4 Downloading models"',
-		`mkdir -p ${M}/detection ${M}/vae ${M}/clip_vision ${M}/text_encoders ${M}/diffusion_models ${M}/loras`,
-		// Downloads run side by side; each is then checked, because a failed background job would otherwise go unnoticed.
-		...MODELS.map(([url, dest]) => `wget -q "${url}" -O "${M}/${dest}" &`),
-		'wait',
-		...MODELS.map(([, dest]) => `test -s "${M}/${dest}"`),
+		...downloadLines(MODELS.map(([url, dest]) => [url, dest]), M, '3/4'),
 		'echo "STEP 4/4 Starting the video engine"',
 		`cd /ComfyUI && exec python main.py --listen --port ${COMFY_PORT} --use-sage-attention`
 	];
@@ -67,7 +82,8 @@ export const comfyPodSpec = () => ({
 });
 
 /** Minutes of pod time to reserve: fresh setup, then generation, with headroom. All estimates until benchmarked. */
-export const SETUP_MINUTES = 16;
+// The first real run needed 5 minutes just to boot and had not finished downloading after 21 more.
+export const SETUP_MINUTES = 28;
 export const MINUTES_PER_CLIP_SECOND = 2;
 export const minutesFor = (seconds) => Math.ceil(SETUP_MINUTES + seconds * MINUTES_PER_CLIP_SECOND + 4);
 

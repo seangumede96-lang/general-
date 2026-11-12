@@ -53,7 +53,19 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 	const view = (g) => ({ id: g.id, status: g.status, detail: g.detail, prompt: g.prompt, params: JSON.parse(g.params), images: JSON.parse(g.images), created_at: g.created_at });
 
+	let lorasListedAt = 0;
+	/** Show what is in the Backblaze loras/ folder even before a session, refreshed at most every 5 minutes. */
+	async function listLoras() {
+		if (!b2Ready() || pod() || clock() - lorasListedAt < 5 * 60000) return;
+		lorasListedAt = clock();
+		try {
+			const files = (await (await openB2(b2Config())).list('loras/')).filter((f) => f.name.endsWith('.safetensors'));
+			db.setSettings({ imageLoras: JSON.stringify(files.map(({ name, size }) => ({ name, size }))) });
+		} catch { /* shown when a session is started */ }
+	}
+
 	async function status() {
+		await listLoras();
 		let p = pod();
 		if (p && !p.ready_at) { await probe(p); p = pod(); }
 		const last = db.listPods().find((x) => x.kind === 'image');
@@ -87,7 +99,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		} catch (err) { return { prompt: text, enhanced: false, why: `The prompt could not be written automatically (${err.message.slice(0, 120)}), so your own words were used.` }; }
 	}
 
-	const quote = (minutes) => gpu.quote({ minutes, minVram: MIN_VRAM.image });
+	const quote = (minutes) => gpu.quote({ minutes, minVram: MIN_VRAM.image, fastNetwork: true });
 
 	async function start({ minutes, confirmEstimate }) {
 		const q = await quote(minutes);
@@ -100,7 +112,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const files = (await b2.list('loras/')).filter((f) => f.name.endsWith('.safetensors'));
 			loras = await Promise.all(files.map(async (f) => ({ name: f.name, size: f.size, url: await b2.link(f.name) })));
 		}
-		const started = await gpu.start({ minutes, minVram: MIN_VRAM.image, purpose: 'Character images', spec: imagePodSpec(loras) });
+		const started = await gpu.start({ minutes, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(loras) });
 		db.setSettings({ imageLoras: JSON.stringify(loras.map(({ name, size }) => ({ name, size }))) });
 		return started.id;
 	}

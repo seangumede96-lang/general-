@@ -74,7 +74,7 @@ test('a session rents one pod set up with Krea 2, the same-face add-on and the L
 	const cmd = JSON.parse(sent.args).cmd[0];
 	assert.match(cmd, /krea2_turbo_fp8_scaled[\s\S]*krea2_turbo_int8_convrot[\s\S]*qwen3vl_4b_bf16[\s\S]*qwen_image_vae[\s\S]*krea2_reid_rank32/);
 	assert.match(cmd, /ComfyUI-Krea2-Ostris-Edit checkout -q 7756566/);
-	assert.match(cmd, /loras\/GTA_VI_3D_Style_krea2_3313988_epoch_10\.safetensors" 'https:\/\/f000\.example-b2\.test\/file\/mybucket\/loras\/GTA_VI_3D_Style_krea2_3313988_epoch_10\.safetensors\?Authorization=dl-3600'/);
+	assert.ok(cmd.includes(`get 'https://f000.example-b2.test/file/mybucket/loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors?Authorization=dl-3600' "/root/ComfyUI/models/loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors" &`));
 	assert.ok(!cmd.includes('secret-app-key') && !cmd.includes('readme.txt'), 'no key and no non-LoRA files reach the pod');
 	assert.deepEqual(sent.env, {});
 

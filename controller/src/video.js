@@ -14,6 +14,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 5000 }) {
 	const cancelled = new Set();
+	const running = new Map(); // job id -> promise of its run
 	let workflowTemplate = null;
 
 	const limits = () => ({ maxClipSeconds: Math.max(1, Number.parseInt(db.getSettings().maxClipSeconds, 10) || 10) });
@@ -48,7 +49,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		const { seconds } = validate(request);
 		if (db.listJobs().some((j) => ACTIVE.has(j.status))) throw new VideoError('A video is already being processed.');
 		const minutes = minutesFor(seconds);
-		const q = await gpu.quote({ minutes, minVram: MIN_VRAM.comfy });
+		const q = await gpu.quote({ minutes, minVram: MIN_VRAM.comfy, fastNetwork: true });
 		return { ...q, seconds, minutes, trimmed: Number(request.seconds) > seconds, maxClipSeconds: limits().maxClipSeconds };
 	}
 
@@ -71,7 +72,8 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			prompt: String(request.prompt || '').trim().slice(0, 500),
 			params: { ...size, seconds, minutes: q.minutes, estimate: q.estimate }, rights_confirmed_at: now, created_at: now
 		});
-		run(id, q.minutes).catch((err) => console.error('[video]', err));
+		const task = run(id, q.minutes).catch((err) => console.error('[video]', err)).finally(() => running.delete(id));
+		running.set(id, task);
 		return view(db.getJob(id));
 	}
 
@@ -110,7 +112,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const template = await loadTemplate();
 			buildWorkflow(template, { video: 'x', image: 'x', prompt: '', seed: 0, ...params }); // fail before renting if the file is wrong
 
-			const pod = await gpu.start({ minutes, minVram: MIN_VRAM.comfy, purpose: 'Video: character replacement', spec: comfyPodSpec() });
+			const pod = await gpu.start({ minutes, minVram: MIN_VRAM.comfy, fastNetwork: true, purpose: 'Video: character replacement', spec: comfyPodSpec() });
 			podId = pod.id;
 			db.updateJob(id, { pod_id: podId });
 			const comfy = createComfyClient(gpu.proxyUrl(podId, COMFY_PORT));
@@ -176,6 +178,11 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 	return {
 		quote, create, recover, limits,
+		/** On shutdown: cancel what is running and wait for each job to delete its pod. */
+		async shutdown() {
+			for (const id of running.keys()) cancelled.add(id);
+			await Promise.allSettled([...running.values()]);
+		},
 		list: () => db.listJobs().map(view),
 		get: (id) => { const j = db.getJob(id); return j ? view(j) : null; },
 		cancel(id) {

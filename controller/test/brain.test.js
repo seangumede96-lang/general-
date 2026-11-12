@@ -149,7 +149,7 @@ test('chatting keeps the brain awake; silence lets it be shut down; chat then fa
 test('a brain that is still downloading is not treated as idle, but is not left forever', async () => {
 	pod.state.loading = true;
 	await startBrain(60);
-	now += 15 * MIN;
+	now += 25 * MIN;
 	await app.gpu.tick();
 	assert.deepEqual(rp.state.deleted, []);
 	now += 6 * MIN;

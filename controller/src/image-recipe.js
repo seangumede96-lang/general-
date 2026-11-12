@@ -1,7 +1,7 @@
 // The Characters page's image engine: Krea 2 Turbo in ComfyUI with a style LoRA and the
 // same-face method. This is the recipe worked out by hand on 11 November 2026 (ComfyUI
 // graph from gen.py / gen_reid.py in the pipeline notes), turned into code.
-import { COMFY_PORT, LOG_PORT } from './video-recipe.js';
+import { COMFY_PORT, LOG_PORT, downloadLines } from './video-recipe.js';
 
 const HF = 'https://huggingface.co';
 const REID_LORA = 'krea2_reid_rank32.safetensors';
@@ -30,11 +30,7 @@ export function imagePodSpec(loras = []) {
 		'cd /root && git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI && cd ComfyUI',
 		'pip install -q --break-system-packages -r requirements.txt && pip install -q --break-system-packages -U torchaudio torchvision pillow',
 		'git clone -q https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit custom_nodes/ComfyUI-Krea2-Ostris-Edit && git -C custom_nodes/ComfyUI-Krea2-Ostris-Edit checkout -q 7756566',
-		'echo "STEP 2/3 Downloading models"',
-		`mkdir -p ${M}/diffusion_models ${M}/text_encoders ${M}/vae ${M}/loras`,
-		...files.map(([url, dest]) => `curl -sSL --retry 5 --connect-timeout 20 -o "${M}/${dest}" '${url.replace(/'/g, '')}' &`),
-		'wait',
-		...files.map(([, dest]) => `test -s "${M}/${dest}"`),
+		...downloadLines(files, M, '2/3'),
 		'echo "STEP 3/3 Starting the image engine"',
 		`exec python3 main.py --listen 0.0.0.0 --port ${COMFY_PORT}`
 	].join('\n');

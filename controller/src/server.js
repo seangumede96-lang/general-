@@ -552,6 +552,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		gpu, studio, images,
 		async close() {
 			clearInterval(watchdog);
+			await studio.shutdown();
 			for (const turn of live.values()) cancelTurn(turn);
 			for (const set of subscribers.values()) for (const res of set) res.end();
 			server.closeAllConnections?.();

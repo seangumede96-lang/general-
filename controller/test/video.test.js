@@ -38,14 +38,14 @@ beforeEach(async () => {
 	Object.assign(comfy.state, { ready: true, pollsUntilDone: 2, outcome: 'ok', template: TEMPLATE, uploads: [], prompts: [], historyChecks: 0, setupLog: 'STEP 3/4 Downloading models\n' });
 	app = createApp({ dataDir: join(root, `d${++n}`), watchdogMs: 0, videoPollMs: 5 });
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
-	await api('PUT', '/api/settings', { runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, videoWorkflowUrl: `${comfy.baseUrl}/workflow.json` });
+	await api('PUT', '/api/settings', { maxPodMinutes: '90', runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, videoWorkflowUrl: `${comfy.baseUrl}/workflow.json` });
 });
 
 test('a job runs end to end: rent, set up, upload, generate, save, delete the pod', async () => {
 	const request = await newRequest({ prompt: 'a woman in a red dress' });
 	const q = (await api('POST', '/api/video/quote', request)).body;
 	assert.equal(q.allowed, true);
-	assert.equal(q.minutes, 30, '16 setup + 5 s x 2 + 4 headroom');
+	assert.equal(q.minutes, 42, '28 setup + 5 s x 2 + 4 headroom');
 	assert.equal(rp.state.created.length, 0, 'a quote rents nothing');
 
 	const started = await startJob(request);
@@ -56,7 +56,8 @@ test('a job runs end to end: rent, set up, upload, generate, save, delete the po
 	const pod = rp.state.created[0];
 	assert.equal(pod.image, 'wlsdml1114/multitalk-base:1.7');
 	assert.deepEqual(pod.ports, ['8188/http', '8189/http']);
-	assert.match(JSON.parse(pod.args).cmd[0], /^\(sleep 1920; .*\) & mkdir -p \/srv\/log/);
+	assert.match(JSON.parse(pod.args).cmd[0], /^\(sleep 2640; .*\) & mkdir -p \/srv\/log/);
+	assert.equal(pod.cloud, 'COMMUNITY', 'this test pins Community Cloud');
 	assert.deepEqual(comfy.state.uploads.map((u) => u.name.replace(/^(in|ref)-[\w-]{36}-/, '$1:')), ['in:clip.mp4', 'ref:face.jpg']);
 
 	const wf = comfy.state.prompts[0].prompt;
@@ -98,7 +99,7 @@ test('long clips are trimmed to the limit and the quote says so', async () => {
 	const q = (await api('POST', '/api/video/quote', await newRequest({ seconds: 42 }))).body;
 	assert.equal(q.seconds, 10);
 	assert.equal(q.trimmed, true);
-	assert.equal(q.minutes, 40);
+	assert.equal(q.minutes, 52);
 });
 
 test('setup progress from the pod is shown while it loads, then generation starts', async () => {
@@ -177,11 +178,13 @@ test('a job interrupted by a restart is closed and its pod deleted', async () =>
 	assert.equal((await api('GET', '/api/system')).body.active.length, 0);
 });
 
+const cmd0 = () => comfyPodSpec().cmd;
 test('recipe details', () => {
 	assert.deepEqual(outputSize(1920, 1080), { width: 832, height: 480 });
 	assert.deepEqual(outputSize(1080, 1920), { width: 480, height: 832 });
 	assert.deepEqual(outputSize(1000, 1000), { width: 640, height: 640 });
-	assert.equal(minutesFor(5), 30);
+	assert.equal(minutesFor(5), 42);
+	assert.match(cmd0(), /aria2c -q -x 16[\s\S]*Downloading models \(\$\(ls/);
 	const cmd = comfyPodSpec().cmd;
 	assert.match(cmd, /STEP 1\/4[\s\S]*STEP 2\/4[\s\S]*STEP 3\/4[\s\S]*STEP 4\/4/);
 	assert.match(cmd, /Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ\.safetensors/);
