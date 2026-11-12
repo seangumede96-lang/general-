@@ -322,7 +322,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return out;
 	}
 
-	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
+	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
 
 /**
@@ -341,7 +341,7 @@ export const brainLabel = (id) => BRAIN_PRESETS.find((p) => p.id === id)?.label 
 export const isUncensored = (id) => BRAIN_PRESETS.find((p) => p.id === id)?.uncensored ?? /abliterat|uncensored|heretic|unfiltered/i.test(id);
 
 /** VRAM each kind of pod needs. A test pod runs nothing, so any GPU will do. */
-export const MIN_VRAM = { test: 0, brain: 24 };
+export const MIN_VRAM = { test: 0, brain: 24, comfy: 24 };
 
 /** A do-nothing pod used to prove the lifecycle end to end before real workloads exist. */
 export const TEST_POD = { kind: 'test', name: 'assistant-test', image: 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404', cmd: 'sleep infinity', disk: 20 };

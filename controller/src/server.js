@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb, SECRET_SETTINGS } from './db.js';
 import { streamChat, listModels } from './model.js';
 import { createTools } from './tools.js';
+import { createVideoStudio, VideoError } from './video.js';
 import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel, isUncensored } from './gpu.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -53,11 +54,21 @@ const titleFrom = (text) => {
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3 }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000 }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
 	const gpu = createGpuManager({ db, clock });
 	const tools = createTools({ db, gpu, uploadsDir });
+	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs });
+	studio.recover().catch((err) => console.error('[video]', err.message));
+	const studioCall = async (fn) => {
+		try { return await fn(); }
+		catch (err) {
+			if (err instanceof VideoError) throw new HttpError(409, err.message);
+			if (err instanceof GpuError) throw new HttpError(err.code === 'not_configured' ? 400 : 502, err.message);
+			throw err;
+		}
+	};
 
 	const removeUpload = async (u) => {
 		await rm(dirname(u.path), { recursive: true, force: true });
@@ -361,6 +372,14 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			db.setSettings(patch);
 			return publicSettings(db.getSettings());
 		}],
+		['GET', /^\/api\/video$/, () => ({ jobs: studio.list(), limits: studio.limits() })],
+		['POST', /^\/api\/video\/quote$/, async (req) => studioCall(async () => studio.quote(await readJson(req)))],
+		['POST', /^\/api\/video\/jobs$/, async (req) => studioCall(async () => studio.create(await readJson(req)))],
+		['POST', /^\/api\/video\/jobs\/([\w-]+)\/cancel$/, (_req, jobId) => {
+			const job = studio.cancel(jobId);
+			if (!job) throw new HttpError(404, 'Job not found');
+			return job;
+		}],
 		// Everything the chat's model picker needs: what is in use, and what can be chosen.
 		['GET', /^\/api\/brains$/, async () => {
 			await gpu.probeBrain().catch(() => {});
@@ -491,7 +510,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			server.once('error', reject);
 			server.listen(port, host, () => resolve(server.address()));
 		}),
-		gpu,
+		gpu, studio,
 		async close() {
 			clearInterval(watchdog);
 			for (const turn of live.values()) cancelTurn(turn);

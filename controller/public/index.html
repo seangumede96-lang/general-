@@ -22,6 +22,10 @@
 	</div>
 	<nav id="conversations"></nav>
 	<div class="side-bottom">
+		<button id="open-video" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>
+			Video
+		</button>
 		<button id="open-system" class="side-btn">
 			<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
 			System
@@ -114,6 +118,45 @@
 			<div class="card">
 				<div class="card-cap">History</div>
 				<div id="sys-history"></div>
+			</div>
+		</div>
+	</section>
+
+	<section id="video" hidden>
+		<div class="sys-wrap">
+			<div id="vid-active"></div>
+			<div id="vid-result"></div>
+
+			<form class="card" id="vid-form">
+				<div class="card-cap">Replace a character</div>
+				<p class="muted small">Pick a short clip and a picture of the character you want in it. The person in the clip is replaced; the movement, camera and background stay.</p>
+
+				<div class="pick-row">
+					<button type="button" class="pick" id="vid-pick-video"><span class="pick-cap">1 · Your clip</span><span class="pick-body" id="vid-video-slot">Choose a video</span></button>
+					<button type="button" class="pick" id="vid-pick-image"><span class="pick-cap">2 · The character</span><span class="pick-body" id="vid-image-slot">Choose a picture</span></button>
+				</div>
+				<input id="vid-video-input" type="file" accept="video/*" hidden>
+				<input id="vid-image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+
+				<label>Describe the character (optional)
+					<input id="vid-prompt" type="text" maxlength="500" placeholder="a woman with short silver hair, black jacket">
+					<small>A few words help the model keep details the picture does not show.</small>
+				</label>
+
+				<label class="check"><input id="vid-rights" type="checkbox"> <span>This footage is mine or licensed to me, everyone in it is an adult and has agreed to this use.</span></label>
+
+				<div class="row"><span id="vid-note" class="muted small"></span><span class="spacer"></span><button type="submit" id="vid-quote" class="btn-ghost">Get price</button></div>
+				<div id="vid-quote-out" class="quote-out"></div>
+			</form>
+
+			<div class="card">
+				<div class="card-cap">Change the style</div>
+				<p class="muted small">Restyling a clip (for example into animation) is not built yet.</p>
+			</div>
+
+			<div class="card">
+				<div class="card-cap">Earlier videos</div>
+				<div id="vid-history"></div>
 			</div>
 		</div>
 	</section>

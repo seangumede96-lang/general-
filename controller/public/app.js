@@ -472,44 +472,57 @@ const sys = {
 const money = (n) => `$${Number(n).toFixed(2)}`;
 const clock = (secs) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 
+/* Pages other than chat. Each has a section in the HTML and hooks to start and stop its refresh. */
+const pages = {
+	system: { title: 'System', show: () => { refreshSystem(true); sys.timer = setInterval(() => refreshSystem(false), 5000); }, hide: () => clearInterval(sys.timer) },
+	video: { title: 'Video', show: () => video.show(), hide: () => video.hide() }
+};
+const nav = { page: null, returnTo: null, pushed: false };
+
 function setView(view) {
-	const system = view === 'system';
-	document.body.classList.toggle('view-system', system);
-	sys.view.hidden = !system;
-	$('back').hidden = !system;
-	clearInterval(sys.timer);
-	if (system) {
+	const page = pages[view] ? view : null;
+	if (nav.page && nav.page !== page) pages[nav.page].hide();
+	// "view-system" is the historical class name for "a page other than chat is showing".
+	document.body.classList.toggle('view-system', Boolean(page));
+	for (const name of Object.keys(pages)) $(name).hidden = name !== page;
+	$('back').hidden = !page;
+	const changed = nav.page !== page;
+	nav.page = page;
+	if (page && changed) {
 		closeEvents();
-		els.title.textContent = 'System';
+		els.title.textContent = pages[page].title;
 		renderSidebar();
-		refreshSystem(true);
-		sys.timer = setInterval(() => refreshSystem(false), 5000);
+		pages[page].show();
 	}
 }
 
-/** Open the System page, remembering which chat was open so Back returns to it. */
-function openSystem() {
-	if (document.body.classList.contains('view-system')) return;
-	sys.returnTo = state.currentId;
-	state.currentId = null;
-	// A history entry of its own, so the phone's back button or gesture leaves the page too.
-	history.pushState({ system: true }, '', '#system');
-	sys.pushed = true;
-	setView('system');
+/** Open a page, remembering which chat was open so Back returns to it. */
+function openPage(name) {
+	if (nav.page === name) return;
+	if (!nav.page) {
+		nav.returnTo = state.currentId;
+		state.currentId = null;
+		// A history entry of its own, so the phone's back button or gesture leaves the page too.
+		history.pushState({ page: name }, '', `#${name}`);
+		nav.pushed = true;
+	} else {
+		history.replaceState({ page: name }, '', `#${name}`);
+	}
+	setView(name);
 }
 
-/** Leave the System page for the chat that was open before, or a blank chat. */
-function leaveSystem() {
-	if (!document.body.classList.contains('view-system')) return;
-	const id = sys.returnTo;
-	sys.returnTo = null;
-	sys.pushed = false;
+/** Leave a page for the chat that was open before, or a blank chat. */
+function leavePage() {
+	if (!nav.page) return;
+	const id = nav.returnTo;
+	nav.returnTo = null;
+	nav.pushed = false;
 	if (id && state.conversations.some((c) => c.id === id)) openConversation(id);
 	else showBlank();
 }
 
-$('back').addEventListener('click', () => { if (sys.pushed) history.back(); else leaveSystem(); });
-window.addEventListener('popstate', leaveSystem);
+$('back').addEventListener('click', () => { if (nav.pushed) history.back(); else leavePage(); });
+window.addEventListener('popstate', leavePage);
 
 function kv(pairs) {
 	return el('div', { className: 'kv' }, ...pairs.map(([k, v]) => el('span', {}, `${k} `, el('b', { textContent: v }))));
@@ -524,7 +537,7 @@ async function stopPod(id, label) {
 async function refreshSystem(fillForm) {
 	let s;
 	try { s = await api('GET', '/api/system'); } catch (err) { sys.error.hidden = false; sys.error.textContent = err.message; return; }
-	if (sys.view.hidden) return;
+	if (nav.page !== 'system') return;
 	sys.error.hidden = !s.error;
 	sys.error.textContent = s.error || '';
 
@@ -618,7 +631,192 @@ sys.form.addEventListener('submit', async (e) => {
 	} catch (err) { sys.formStatus.textContent = err.message; }
 });
 
-$('open-system').addEventListener('click', () => { setDrawer(false); openSystem(); });
+$('open-system').addEventListener('click', () => { setDrawer(false); openPage('system'); });
+$('open-video').addEventListener('click', () => { setDrawer(false); openPage('video'); });
+
+/* ---------- Video Studio ---------- */
+
+const VIDEO_STEPS = [['starting', 'Renting a GPU'], ['loading', 'Setting up the video engine'], ['uploading', 'Sending your clip'], ['generating', 'Replacing the character'], ['saving', 'Saving the result']];
+
+/** Upload one file, reporting progress; resolves with the server's { id, name, type, size }. */
+function uploadWithProgress(file, onProgress) {
+	return new Promise((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open('POST', `/api/uploads?name=${encodeURIComponent(file.name)}`);
+		xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+		xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100)); };
+		xhr.onload = () => {
+			let body = {};
+			try { body = JSON.parse(xhr.responseText); } catch { /* handled below */ }
+			if (xhr.status === 200 && body.id) resolve(body); else reject(new Error(body.error || 'Upload failed'));
+		};
+		xhr.onerror = () => reject(new Error('Upload failed'));
+		xhr.send(file);
+	});
+}
+
+const video = {
+	timer: 0, clip: null, picture: null, jobs: [], dismissed: new Set(),
+
+	show() { this.refresh(); this.timer = setInterval(() => this.refresh(), 3000); },
+	hide() { clearInterval(this.timer); },
+
+	async refresh() {
+		let data;
+		try { data = await api('GET', '/api/video'); } catch { return; }
+		if (nav.page !== 'video') return;
+		this.jobs = data.jobs;
+		this.maxClipSeconds = data.limits.maxClipSeconds;
+		this.render();
+	},
+
+	render() {
+		const active = this.jobs.find((j) => j.active);
+		$('vid-active').replaceChildren(...(active ? [this.activeCard(active)] : []));
+		const latest = this.jobs.find((j) => !j.active && !this.dismissed.has(j.id) && Date.now() - j.ended_at < 3600 * 1000);
+		$('vid-result').replaceChildren(...(!active && latest ? [this.resultCard(latest)] : []));
+		$('vid-form').hidden = Boolean(active);
+		const past = this.jobs.filter((j) => !j.active);
+		$('vid-history').replaceChildren(...(past.length ? past.map((j) => {
+			const when = new Date(j.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+			const right = j.result
+				? el('a', { href: `/api/uploads/${j.result}`, download: '', textContent: 'Download' })
+				: el('span', { className: 'muted', textContent: j.status === 'cancelled' ? 'Cancelled' : 'Failed' });
+			return el('div', { className: 'hist' }, el('span', {}, when, el('span', { className: 'muted', textContent: ` · ${j.params.seconds} s clip${j.status === 'failed' ? ` · ${j.detail}` : ''}` })), right);
+		}) : [el('div', { className: 'muted', textContent: 'Nothing yet.' })]));
+		this.note();
+	},
+
+	activeCard(job) {
+		const at = VIDEO_STEPS.findIndex(([s]) => s === job.status);
+		const mins = Math.max(0, Math.floor((Date.now() - job.created_at) / 60000));
+		const stop = el('button', { type: 'button', className: 'btn-danger', textContent: 'Cancel' });
+		stop.addEventListener('click', async () => {
+			if (!confirm('Cancel this video? The GPU is shut down and time already used is still charged.')) return;
+			stop.disabled = true;
+			await api('POST', `/api/video/jobs/${job.id}/cancel`).catch(() => {});
+			this.refresh();
+		});
+		return el('div', { className: 'card' },
+			el('div', { className: 'card-cap', textContent: 'Working on your video' }),
+			el('ul', { className: 'steps' }, ...VIDEO_STEPS.map(([, label], i) => {
+				const text = el('span', {}, label);
+				if (i === at && job.detail && job.detail !== label) text.append(' ', el('small', { textContent: `· ${job.detail}` }));
+				return el('li', { className: i < at ? 'done' : i === at ? 'now' : '' }, text);
+			})),
+			el('div', { className: 'row' },
+				el('span', { className: 'muted small', textContent: `${mins} min so far. Reserved up to ${job.params.minutes} min, at most ${money(job.params.estimate)}. You can leave this page.` }),
+				el('span', { className: 'spacer' }), stop));
+	},
+
+	resultCard(job) {
+		const dismiss = el('button', { type: 'button', className: 'btn-ghost', textContent: 'Make another' });
+		dismiss.addEventListener('click', () => { this.dismissed.add(job.id); this.render(); });
+		if (job.status !== 'done') {
+			return el('div', { className: 'card' },
+				el('div', { className: 'card-cap', textContent: job.status === 'cancelled' ? 'Cancelled' : 'That did not work' }),
+				el('p', { className: 'sys-alert', textContent: job.detail || 'The video could not be made.' }),
+				el('div', { className: 'row' }, el('span', { className: 'muted small', textContent: 'The GPU has been shut down.' }), el('span', { className: 'spacer' }), dismiss));
+		}
+		const src = `/api/uploads/${job.result}`;
+		return el('div', { className: 'card' },
+			el('div', { className: 'card-cap', textContent: 'Your video is ready' }),
+			el('video', { className: 'result-video', src, controls: true, playsInline: true, preload: 'metadata' }),
+			el('div', { className: 'row' }, el('span', { className: 'spacer' }), dismiss, el('a', { className: 'btn-primary', href: src, download: '', textContent: 'Save to phone' })));
+	},
+
+	note() {
+		const c = this.clip;
+		$('vid-note').textContent = c?.meta && c.meta.seconds > this.maxClipSeconds
+			? `Only the first ${this.maxClipSeconds} seconds will be processed (your clip is ${Math.round(c.meta.seconds)} s).`
+			: '';
+	},
+
+	/** Read a video file's length and size in the browser, before anything is uploaded. */
+	metadata(file) {
+		return new Promise((resolve) => {
+			const v = document.createElement('video');
+			v.preload = 'metadata';
+			v.onloadedmetadata = () => resolve({ seconds: v.duration, width: v.videoWidth, height: v.videoHeight });
+			v.onerror = () => resolve(null);
+			v.src = URL.createObjectURL(file);
+		});
+	},
+
+	async choose(kind, file) {
+		const slot = $(kind === 'clip' ? 'vid-video-slot' : 'vid-image-slot');
+		const button = slot.parentElement;
+		$('vid-quote-out').replaceChildren();
+		const item = { file, id: null, meta: null };
+		this[kind] = item;
+		if (kind === 'clip') {
+			item.meta = await this.metadata(file);
+			if (!item.meta || !(item.meta.seconds > 0)) { this.clip = null; slot.textContent = 'That video could not be read. Try another.'; return; }
+		}
+		const url = URL.createObjectURL(file);
+		const preview = kind === 'clip' ? el('video', { src: `${url}#t=0.1`, muted: true, playsInline: true, preload: 'metadata' }) : el('img', { src: url, alt: 'Character picture' });
+		const status = el('span', { className: 'pick-cap', textContent: 'Uploading 0%' });
+		slot.replaceChildren(preview);
+		button.classList.add('filled');
+		button.querySelector('.pick-status')?.remove();
+		status.classList.add('pick-status');
+		button.append(status);
+		this.note();
+		try {
+			const up = await uploadWithProgress(file, (pct) => { status.textContent = `Uploading ${pct}%`; });
+			if (this[kind] !== item) return;
+			item.id = up.id;
+			status.textContent = kind === 'clip' ? `${Math.round(item.meta.seconds)} s · ${item.meta.width}×${item.meta.height}` : 'Ready';
+		} catch (err) {
+			if (this[kind] === item) { this[kind] = null; status.textContent = err.message; }
+		}
+	},
+
+	request() {
+		return {
+			kind: 'replace', input: this.clip.id, reference: this.picture.id, prompt: $('vid-prompt').value,
+			seconds: this.clip.meta.seconds, width: this.clip.meta.width, height: this.clip.meta.height
+		};
+	},
+
+	async quote() {
+		const out = $('vid-quote-out');
+		const fail = (message) => out.replaceChildren(el('div', { className: 'sys-alert', textContent: message }));
+		if (!this.clip?.id) return fail(this.clip ? 'Your clip is still uploading.' : 'Choose a video first.');
+		if (!this.picture?.id) return fail(this.picture ? 'The picture is still uploading.' : 'Choose a picture of the character first.');
+		if (!$('vid-rights').checked) return fail('Tick the box to confirm you may use this footage.');
+		out.replaceChildren(el('div', { className: 'muted small', textContent: 'Checking prices…' }));
+		let q;
+		try { q = await api('POST', '/api/video/quote', this.request()); } catch (err) { return fail(err.message); }
+		if (!q.allowed) return fail(q.reason);
+		const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Process for up to ${money(q.estimate)}` });
+		go.addEventListener('click', async () => {
+			go.disabled = true;
+			go.textContent = 'Starting…';
+			try {
+				await api('POST', '/api/video/jobs', { ...this.request(), rightsConfirmed: true, confirmEstimate: q.estimate });
+				this.clip = this.picture = null;
+				$('vid-form').reset();
+				for (const [slot, text] of [['vid-video-slot', 'Choose a video'], ['vid-image-slot', 'Choose a picture']]) {
+					$(slot).textContent = text;
+					$(slot).parentElement.classList.remove('filled');
+					$(slot).parentElement.querySelector('.pick-status')?.remove();
+				}
+				out.replaceChildren();
+				this.refresh();
+			} catch (err) { fail(err.message); }
+		});
+		out.replaceChildren(
+			el('div', { className: 'small', textContent: `${q.seconds} seconds of video. A GPU is reserved for up to ${q.minutes} minutes: about ${Math.round(q.minutes - q.seconds * 2 - 4)} to set up, the rest to generate. ${q.summary}` }),
+			el('div', { className: 'row', style: 'margin-top:10px' }, el('span', { className: 'muted small', textContent: 'You pay only for the minutes used.' }), el('span', { className: 'spacer' }), go));
+	}
+};
+
+$('vid-pick-video').addEventListener('click', () => $('vid-video-input').click());
+$('vid-pick-image').addEventListener('click', () => $('vid-image-input').click());
+$('vid-video-input').addEventListener('change', (e) => { if (e.target.files[0]) video.choose('clip', e.target.files[0]); e.target.value = ''; });
+$('vid-image-input').addEventListener('change', (e) => { if (e.target.files[0]) video.choose('picture', e.target.files[0]); e.target.value = ''; });
+$('vid-form').addEventListener('submit', (e) => { e.preventDefault(); video.quote(); });
 
 /* ---------- Model picker ---------- */
 
@@ -764,6 +962,6 @@ fitWindow();
 refreshChip();
 await refreshConversations();
 const wanted = location.hash.slice(1);
-if (wanted === 'system') { state.currentId = null; setView('system'); }
+if (pages[wanted]) { state.currentId = null; setView(wanted); }
 else if (wanted && state.conversations.some((c) => c.id === wanted)) await openConversation(wanted);
 else showBlank();

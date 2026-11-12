@@ -20,6 +20,12 @@ Built and tested against a mock model:
   10 per message, 2 GB each), with upload progress and previews. The model is told each
   file's name, type and saved location and can read attached text files; it does not yet
   look inside images or videos.
+- **Video Studio (Video page):** character replacement. Pick a clip and a picture of the
+  character, confirm you may use the footage, see the worst-case price, and the app rents
+  a GPU, installs the video engine (ComfyUI with Wan 2.2 Animate), runs the job, saves the
+  result to the phone and deletes the pod. Clips are trimmed to 10 seconds for now. Style
+  transfer is not built. **Tested only against a mock engine so far**: the pod setup and
+  the workflow have not yet run on a real GPU, and the time and price figures are estimates.
 - **Model picker:** a chip in the message box shows which model will answer. Tapping it
   lists the free everyday models from the Settings endpoint and four private models; a
   private model shows its worst-case price and wakes only on a second tap.
@@ -90,8 +96,19 @@ mock RunPod API.
 - `src/model.js`: OpenAI-compatible streaming client, including tool calls
 - `src/tools.js`: tool registry, argument validation, folder limits
 - `src/gpu.js`: RunPod pod lifecycle, budget checks, cost ledger (REST API v2)
+- `src/video.js`, `src/video-recipe.js`, `src/comfy.js`: Video Studio job runner, the pod
+  setup and workflow it uses, and the client for the video engine's API
 - `src/db.js`: SQLite storage
 - `public/`: the chat page (plain HTML, CSS and JS, no build step)
+
+## Video engine sources
+
+The Video Studio's pod setup follows the Dockerfile of
+[wlsdml1114/Wan_Animate_Runpod_hub](https://github.com/wlsdml1114/Wan_Animate_Runpod_hub),
+and its workflow file is downloaded from that project at a pinned commit (it is not copied
+into this repository, because that project states no licence). The setup installs
+third-party ComfyUI add-ons and models on the rented pod only; nothing from them runs on
+the phone. The pod's address is not password-protected while a job runs.
 
 ## Credit
 

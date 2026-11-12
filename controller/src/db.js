@@ -26,7 +26,10 @@ export const SETTING_DEFAULTS = {
 	brainContext: '16384',
 	podProxyTemplate: 'https://{id}-{port}.proxy.runpod.net',
 	// Which brain chat should use: 'private' (the rented GPU, whenever it is awake) or 'everyday'.
-	chatBrain: 'private'
+	chatBrain: 'private',
+	// Video Studio: longest clip processed in one go, and an override for the workflow file.
+	maxClipSeconds: '10',
+	videoWorkflowUrl: ''
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */
@@ -57,6 +60,22 @@ export function openDb(dataDir) {
 		);
 		CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation_id, id);
 		CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS jobs (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,              -- replace | style
+			status TEXT NOT NULL,            -- starting | loading | uploading | generating | saving | done | failed | cancelled
+			detail TEXT NOT NULL DEFAULT '', -- what is happening now, or why it failed
+			input_upload TEXT NOT NULL,
+			ref_upload TEXT NOT NULL DEFAULT '',
+			prompt TEXT NOT NULL DEFAULT '',
+			params TEXT NOT NULL DEFAULT '{}',
+			result_upload TEXT NOT NULL DEFAULT '',
+			pod_id TEXT NOT NULL DEFAULT '',
+			rights_confirmed_at INTEGER NOT NULL,  -- when the user confirmed they may use the footage
+			created_at INTEGER NOT NULL,
+			step_started_at INTEGER NOT NULL,
+			ended_at INTEGER
+		);
 		CREATE TABLE IF NOT EXISTS uploads (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -110,6 +129,11 @@ export function openDb(dataDir) {
 		deleteConversation: db.prepare('DELETE FROM conversations WHERE id = ?'),
 		listMessages: db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id'),
 		insertMessage: db.prepare('INSERT INTO messages (conversation_id, role, content, reasoning, status, created_at, tool_calls, tool_call_id, tool_name, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+		insertJob: db.prepare('INSERT INTO jobs (id, kind, status, input_upload, ref_upload, prompt, params, rights_confirmed_at, created_at, step_started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+		getJob: db.prepare('SELECT * FROM jobs WHERE id = ?'),
+		listJobs: db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT 30'),
+		deleteJob: db.prepare('DELETE FROM jobs WHERE id = ?'),
+		claimUploadFor: db.prepare('UPDATE uploads SET conversation_id = ? WHERE id = ? AND conversation_id IS NULL'),
 		insertUpload: db.prepare('INSERT INTO uploads (id, name, type, size, path, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
 		getUpload: db.prepare('SELECT * FROM uploads WHERE id = ?'),
 		claimUpload: db.prepare('UPDATE uploads SET conversation_id = ? WHERE id = ? AND conversation_id IS NULL'),
@@ -149,6 +173,15 @@ export function openDb(dataDir) {
 			const r = q.insertMessage.run(conversationId, role, content, reasoning, status, now, tool_calls, toolCallId, toolName, att);
 			q.touch.run(now, conversationId);
 			return { id: Number(r.lastInsertRowid), conversation_id: conversationId, role, content, reasoning, status, created_at: now, tool_calls, tool_call_id: toolCallId, tool_name: toolName, attachments: att };
+		},
+		insertJob: (j) => { q.insertJob.run(j.id, j.kind, j.status, j.input_upload, j.ref_upload, j.prompt, JSON.stringify(j.params || {}), j.rights_confirmed_at, j.created_at, j.created_at); },
+		getJob: (id) => q.getJob.get(id),
+		listJobs: () => q.listJobs.all(),
+		deleteJob: (id) => { q.deleteJob.run(id); },
+		/** Update named columns of a job. Column names come from code, never from a request. */
+		updateJob(id, patch) {
+			const cols = Object.keys(patch);
+			db.prepare(`UPDATE jobs SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...cols.map((c) => patch[c]), id);
 		},
 		insertUpload: (u) => { q.insertUpload.run(u.id, u.name, u.type, u.size, u.path, u.created_at); },
 		getUpload: (id) => q.getUpload.get(id),
