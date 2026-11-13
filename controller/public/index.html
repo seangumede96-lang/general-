@@ -127,6 +127,43 @@
 		</div>
 	</section>
 
+	<section id="body" hidden>
+		<div class="body-wrap">
+			<div id="body-view" class="body-view"></div>
+			<div class="body-views">
+				<button type="button" class="chip-btn" data-angle="0">Front</button>
+				<button type="button" class="chip-btn" data-angle="1.5708">Side</button>
+				<button type="button" class="chip-btn" data-angle="3.1416">Back</button>
+				<span class="spacer"></span>
+				<span class="muted small">Drag to turn</span>
+			</div>
+			<div class="card">
+				<div class="row">
+					<div class="seg" id="body-base"><button type="button" data-base="female">Female</button><button type="button" data-base="male">Male</button></div>
+					<span class="spacer"></span>
+					<button type="button" class="link" id="body-reset">Reset</button>
+				</div>
+				<div class="card-cap" style="margin-top:12px">Body types</div>
+				<div class="chips" id="body-presets"></div>
+				<div class="card-cap" style="margin-top:12px">Head shape</div>
+				<div class="chips" id="body-heads"></div>
+				<div class="card-cap" style="margin-top:12px">Lengths</div>
+				<div class="vsliders" id="body-vsliders"></div>
+				<div class="card-cap" style="margin-top:12px">Widths and volume</div>
+				<div id="body-hsliders"></div>
+			</div>
+			<div class="card">
+				<div class="card-cap">My bodies</div>
+				<div class="chips" id="body-saved"></div>
+				<div class="row" style="margin-top:10px"><input id="body-name" type="text" placeholder="Name this body" maxlength="40"><button type="button" class="btn-ghost" id="body-save">Save</button></div>
+			</div>
+			<div class="card">
+				<button type="button" class="btn-primary" id="body-use" style="width:100%">Use this body for pictures</button>
+				<p class="muted small" style="margin:10px 0 0">Your pictures start from this shape and pose. The model follows it closely, not exactly: stronger keeps the shape tighter, weaker looks more natural.</p>
+			</div>
+		</div>
+	</section>
+
 	<section id="characters" hidden>
 		<div class="sys-wrap">
 			<div class="card">
@@ -155,6 +192,18 @@
 				<input id="img-ref-face" data-role="face" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1"><input id="img-ref-body" data-role="body" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1"><input id="img-ref-look" data-role="look" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1">
 				<small id="img-ref-note"></small>
 
+				<div class="card-cap" style="margin-top:14px">Body shape (optional)</div>
+				<div class="row" id="img-shape-row">
+					<div id="img-shape-thumb" class="shape-thumb">None</div>
+					<div style="flex:1;min-width:150px">
+						<button type="button" class="btn-ghost" id="img-shape-open">Open body editor</button>
+						<div id="img-shape-strength-row" hidden>
+							<label class="inline" style="margin-top:10px">Follow shape <input id="img-shape-strength" type="range" min="0" max="100" step="1" value="45"></label>
+							<span class="muted small" id="img-shape-strength-text"></span>
+							<button type="button" class="link" id="img-shape-clear">Remove</button>
+						</div>
+					</div>
+				</div>
 				<label style="margin-top:14px">Shape <select id="img-size"><option value="portrait">Portrait</option><option value="square">Square</option><option value="landscape">Landscape</option></select></label>
 				<div class="row">
 					<label class="inline">Pictures <input id="img-count" type="number" min="1" max="4" value="2" inputmode="numeric"></label>

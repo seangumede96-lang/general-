@@ -34,6 +34,13 @@ Built and tested against a mock model:
   result to the phone and deletes the pod. Clips are trimmed to 10 seconds for now. Style
   transfer is not built. **Tested only against a mock engine so far**: the pod setup and
   the workflow have not yet run on a real GPU, and the time and price figures are estimates.
+- **Body editor (Body page, from Characters):** a 3D mannequin, female or male base, that
+  reshapes live as you drag: vertical sliders for height, neck, torso, leg and arm length;
+  horizontal sliders for head, neck width, shoulders, chest, bust, waist, hips, glutes,
+  thighs, calves and arm thickness; body-type presets, head shapes, and saved bodies. "Use
+  this body" renders it at the picture's size and the next pictures start from that shape,
+  partly repainted ("Follow shape" sets how tightly). Proportions carry over closely, not
+  exactly. Uses three.js (MIT), included in `public/vendor/three`.
 - **Model picker:** a chip in the message box shows which model will answer. Tapping it
   lists the free everyday models from the Settings endpoint and four private models; a
   private model shows its worst-case price and wakes only on a second tap.

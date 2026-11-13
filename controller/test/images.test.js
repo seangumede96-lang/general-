@@ -70,7 +70,7 @@ test('a session rents one pod set up with Krea 2, the same-face add-on and the L
 	const r = await startSession(30);
 	assert.equal(r.status, 200);
 	const sent = rp.state.created[0];
-	assert.equal(sent.image, 'runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404');
+	assert.equal(sent.image, 'ghcr.io/seangumede96-lang/assistant-image-engine:latest', 'the ready-made engine built on GitHub');
 	const cmd = JSON.parse(sent.args).cmd[0];
 	assert.match(cmd, /krea2_turbo_fp8_scaled[\s\S]*krea2_turbo_int8_convrot[\s\S]*qwen3vl_4b_bf16[\s\S]*qwen_image_vae[\s\S]*krea2_reid_rank32/);
 	assert.match(cmd, /ComfyUI-Krea2-Ostris-Edit checkout -q 7756566/);
@@ -239,6 +239,23 @@ test('a session reserves setup time on top of the minutes asked for, and a stall
 	assert.equal(s.session.state, 'off');
 	assert.match(s.session.lastEnd, /never finished setting up \(.*\); it was at step 2\/3 Downloading models \(2 of 6 files, 9 GB\)/);
 	assert.deepEqual(s.session.setupLog, ['STEP 1/3 Installing the image engine', 'STEP 2/3 Downloading models (2 of 6 files, 9 GB)']);
+});
+
+test('a body shape from the editor becomes the starting picture, partly repainted', async () => {
+	const g = buildImageGraph({ prompt: 'x', width: 1024, height: 1536, count: 2, seed: 1, prefix: 'p', shape: 'shape-1.png', shapeDenoise: 0.7 });
+	assert.deepEqual(g['41'].inputs, { image: ['40', 0], upscale_method: 'lanczos', width: 1024, height: 1536, crop: 'center' });
+	assert.deepEqual(g['43'].inputs, { samples: ['42', 0], amount: 2 });
+	assert.deepEqual([g['8'].inputs.latent_image, g['8'].inputs.denoise], [['43', 0], 0.7]);
+	assert.equal(g['7'], undefined, 'no empty starting picture when a shape is used');
+
+	await startSession();
+	await api('GET', '/api/images');
+	const shape = await upload('body-shape.png', 'image/png');
+	const done = await generate({ prompt: 'a woman', shape, shapeDenoise: 0.66 });
+	assert.equal(done.status, 'done');
+	assert.match(comfy.state.uploads.at(-1).name, /^shape-/);
+	assert.equal(comfy.state.prompts.at(-1).prompt['8'].inputs.denoise, 0.66);
+	assert.match((await generate({ prompt: 'x', shape: 'missing' })).error, /body shape picture is missing/);
 });
 
 test('without Backblaze the session still starts, with no LoRAs', async () => {

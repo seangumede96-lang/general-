@@ -566,7 +566,8 @@ const clock = (secs) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2
 const pages = {
 	system: { title: 'System', show: () => { refreshSystem(true); sys.timer = setInterval(() => refreshSystem(false), 5000); }, hide: () => clearInterval(sys.timer) },
 	video: { title: 'Video', show: () => video.show(), hide: () => video.hide() },
-	characters: { title: 'Characters', show: () => chars.show(), hide: () => chars.hide() }
+	characters: { title: 'Characters', show: () => chars.show(), hide: () => chars.hide() },
+	body: { title: 'Body', show: () => bodyEditor.show(), hide: () => {} }
 };
 const nav = { page: null, returnTo: null, pushed: false };
 
@@ -1036,6 +1037,22 @@ const chars = {
 		out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: `${q.useMinutes} minutes of use, plus up to ${q.setupMinutes} for setup. ${q.summary}` }), el('span', { className: 'spacer' }), go));
 	},
 
+	shape: null,
+	setShape(id, src) {
+		this.shape = id ? { id } : null;
+		$('img-shape-thumb').replaceChildren(...(id ? [el('img', { src, alt: 'Body shape' })] : ['None']));
+		$('img-shape-strength-row').hidden = !id;
+		this.shapeText();
+	},
+	shapeText() {
+		const v = Number($('img-shape-strength').value);
+		$('img-shape-strength-text').textContent = v >= 70 ? ' Tight: shape followed closely, may look stiff' : v >= 30 ? ' Balanced' : ' Loose: more natural, shape only roughly';
+	},
+	/** Slider 0-100 (right = follow tighter) to the engine's denoise: how much of the guide is repainted. */
+	shapeDenoise() {
+		return Math.round((0.92 - Number($('img-shape-strength').value) / 100 * 0.47) * 100) / 100;
+	},
+
 	/** Reference pictures per role: { face: [{ id, src }], body: [...], look: [...] }, up to 3 in each box. */
 	refCount() { return Object.values(this.refs).reduce((n, list) => n + list.length, 0); },
 
@@ -1122,7 +1139,7 @@ const chars = {
 		// Remember the strengths used, so next time each LoRA starts where you left it.
 		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
 		try {
-			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs, refCounts });
+			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs, refCounts, shape: this.shape?.id || '', shapeDenoise: this.shapeDenoise() });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -1164,6 +1181,9 @@ const chars = {
 };
 
 $('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.generate(); });
+$('img-shape-open').addEventListener('click', () => openPage('body'));
+$('img-shape-clear').addEventListener('click', () => chars.setShape(null));
+$('img-shape-strength').addEventListener('input', () => chars.shapeText());
 chars.renderRefs();
 for (const input of document.querySelectorAll('.ref-input')) {
 	input.addEventListener('change', async (e) => {
@@ -1183,6 +1203,107 @@ for (const input of document.querySelectorAll('.ref-input')) {
 for (const label of document.querySelectorAll('label[role="button"]')) {
 	label.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); label.click(); } });
 }
+
+/* ---------- Body editor ---------- */
+
+const bodyEditor = {
+	viewer: null, values: null, module: null,
+
+	async show() {
+		// The 3D library is about 2 MB, so it loads only when the editor is first opened.
+		if (!this.module) {
+			try { this.module = await import('./body.js'); }
+			catch (err) { $('body-view').textContent = `The 3D view could not start: ${err.message}`; return; }
+			this.viewer = this.module.createViewer($('body-view'));
+			this.values = JSON.parse(localStorage.getItem('bodyCurrent') || 'null') || this.module.defaults('female');
+			this.build();
+		}
+		this.refresh();
+	},
+
+	saved() { try { return JSON.parse(localStorage.getItem('bodyTemplates') || '[]'); } catch { return []; } },
+
+	/** Draw the controls once; refresh() keeps them in step with the values. */
+	build() {
+		const m = this.module;
+		const label = (sl, v) => sl.unit ? `${Math.round(v)} ${sl.unit}` : sl.key === 'bust' || sl.key === 'glutes' ? `${Math.round(v * 100)}` : `${v >= 1 ? '+' : ''}${Math.round((v - 1) * 100)}%`;
+		const slider = (sl) => {
+			const input = el('input', { type: 'range', min: sl.min, max: sl.max, step: sl.step, ariaLabel: sl.label });
+			const out = el('span');
+			input.dataset.key = sl.key;
+			input.addEventListener('input', () => { this.values[sl.key] = Number(input.value); out.textContent = label(sl, this.values[sl.key]); this.changed(); });
+			return { input, out, sl };
+		};
+		this.controls = [];
+		$('body-vsliders').replaceChildren(...m.SLIDERS.filter((x) => x.vertical).map((sl) => {
+			const c = slider(sl); this.controls.push(c);
+			return el('div', { className: 'vslider' }, c.out, c.input, el('b', { textContent: sl.label }));
+		}));
+		$('body-hsliders').replaceChildren(...m.SLIDERS.filter((x) => !x.vertical).map((sl) => {
+			const c = slider(sl); this.controls.push(c);
+			return el('label', { className: 'hslider' }, el('b', { textContent: sl.label }), c.input, c.out);
+		}));
+		this.labelOf = label;
+		for (const button of $('body-base').querySelectorAll('button')) button.addEventListener('click', () => { this.values = m.defaults(button.dataset.base); this.changed(true); });
+		$('body-reset').addEventListener('click', () => { this.values = m.defaults(this.values.base); this.changed(true); });
+		$('body-heads').replaceChildren(...Object.keys(m.HEAD_SHAPES).map((shape) => {
+			const b = el('button', { type: 'button', textContent: shape[0].toUpperCase() + shape.slice(1) });
+			b.dataset.shape = shape;
+			b.addEventListener('click', () => { this.values.headShape = shape; this.changed(true); });
+			return b;
+		}));
+		for (const b of document.querySelectorAll('.body-views button')) b.addEventListener('click', () => this.viewer.setView(Number(b.dataset.angle)));
+		$('body-save').addEventListener('click', () => {
+			const name = $('body-name').value.trim() || `Body ${this.saved().length + 1}`;
+			localStorage.setItem('bodyTemplates', JSON.stringify([...this.saved().filter((t) => t.name !== name), { name, values: { ...this.values } }]));
+			$('body-name').value = '';
+			this.refresh();
+		});
+		$('body-use').addEventListener('click', () => this.use());
+	},
+
+	changed(redraw = false) {
+		localStorage.setItem('bodyCurrent', JSON.stringify(this.values));
+		this.viewer.update(this.values);
+		if (redraw) this.refresh();
+	},
+
+	refresh() {
+		const m = this.module;
+		if (!m) return;
+		for (const c of this.controls) { c.input.value = this.values[c.sl.key]; c.out.textContent = this.labelOf(c.sl, this.values[c.sl.key]); }
+		for (const b of $('body-base').querySelectorAll('button')) b.classList.toggle('on', b.dataset.base === this.values.base);
+		for (const b of $('body-heads').querySelectorAll('button')) b.classList.toggle('on', b.dataset.shape === this.values.headShape);
+		$('body-presets').replaceChildren(...Object.entries(m.PRESETS[this.values.base]).map(([name, preset]) => {
+			const b = el('button', { type: 'button', textContent: name });
+			b.addEventListener('click', () => { this.values = { ...m.defaults(this.values.base), headShape: this.values.headShape, ...preset }; this.changed(true); });
+			return b;
+		}));
+		const saved = this.saved();
+		$('body-saved').replaceChildren(...(saved.length ? saved.map((t) => {
+			const b = el('button', { type: 'button', textContent: t.name });
+			b.addEventListener('click', () => { this.values = { ...m.defaults(t.values.base), ...t.values }; this.changed(true); });
+			b.addEventListener('contextmenu', (e) => { e.preventDefault(); if (confirm(`Delete "${t.name}"?`)) { localStorage.setItem('bodyTemplates', JSON.stringify(this.saved().filter((x) => x.name !== t.name))); this.refresh(); } });
+			return b;
+		}) : [el('span', { className: 'muted small', textContent: 'Saved bodies appear here. Long-press one to delete it.' })]));
+		this.viewer.update(this.values);
+	},
+
+	/** Render the body at the picture's size and hand it to the Characters page as a shape guide. */
+	async use() {
+		const button = $('body-use');
+		button.disabled = true;
+		button.textContent = 'Preparing…';
+		try {
+			const [w, h] = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] }[$('img-size').value] || [1024, 1536];
+			const blob = await this.viewer.snapshot(w, h, 0);
+			const up = await uploadWithProgress(new File([blob], 'body-shape.png', { type: 'image/png' }), () => {});
+			chars.setShape(up.id, URL.createObjectURL(blob));
+			openPage('characters');
+		} catch (err) { alert(`The body could not be prepared: ${err.message}`); }
+		finally { button.disabled = false; button.textContent = 'Use this body for pictures'; }
+	}
+};
 
 /* ---------- Model picker ---------- */
 

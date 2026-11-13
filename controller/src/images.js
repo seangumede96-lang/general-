@@ -169,7 +169,13 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			}
 		}
 		if (refs.length > MAX_REFERENCES) throw new ImageError(`At most ${MAX_REFERENCES} reference pictures in total can be used at once.`);
-		return { prompt: prompt.slice(0, 4000), width, height, count, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
+		let shape = null;
+		if (req.shape) {
+			shape = db.getUpload(String(req.shape));
+			if (!shape || !shape.type.startsWith('image/')) throw new ImageError('The body shape picture is missing. Open the body editor and tap "Use this body" again.');
+		}
+		const shapeDenoise = Math.min(0.95, Math.max(0.3, Number(req.shapeDenoise) || 0.72));
+		return { shape, shapeDenoise, prompt: prompt.slice(0, 4000), width, height, count, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
 	}
 
 	async function generate(req) {
@@ -178,7 +184,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (!p?.ready_at) throw new ImageError(p ? 'The image engine is still starting.' : 'Start a session first.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
-		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), asked: v.prompt, note: '' };
+		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, asked: v.prompt, note: '' };
 		v.enhance = req.enhance === true;
 		v.prefix = String(req.prefix || '').trim().slice(0, 100);
 		db.insertGeneration({ id, prompt: v.prompt, params, created_at: clock() });
@@ -201,7 +207,8 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			if (v.prefix && !v.prompt.includes(v.prefix)) v.prompt = `${v.prefix} ${v.prompt}`;
 			const refs = [];
 			for (const r of v.refs) refs.push({ role: r.role, count: r.count, file: await comfy.upload(r.upload.path, `${r.role}-${r.upload.id}-${r.upload.name}`, r.upload.type) });
-			const graph = buildImageGraph({ ...v, refs, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
+			const shapeFile = v.shape ? await comfy.upload(v.shape.path, `shape-${v.shape.id}.png`, v.shape.type) : null;
+			const graph = buildImageGraph({ ...v, refs, shape: shapeFile, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
 			const promptId = await comfy.queue(graph, id);
 			let files;
 			for (;;) {

@@ -72,7 +72,7 @@ export const referenceMegapixels = (r) => REFERENCE_ROLES[r.role].megapixels * M
  * nodes plus the re-identification LoRA), otherwise plain text-to-image. `loras` is a list
  * of [{ name, strength }] applied one after another.
  */
-export function buildImageGraph({ prompt, negative = '', width, height, count, seed, loras = [], refs = [], prefix }) {
+export function buildImageGraph({ prompt, negative = '', width, height, count, seed, loras = [], refs = [], prefix, shape = null, shapeDenoise = 0.72 }) {
 	const useRefs = refs.length > 0;
 	const text = useRefs ? `${prompt} ${referenceHints(refs)}` : prompt;
 	const g = {
@@ -110,6 +110,16 @@ export function buildImageGraph({ prompt, negative = '', width, height, count, s
 			g[`4${k}`] = { class_type: 'FluxKontextMultiReferenceLatentMethod', inputs: { conditioning: [String(k), 0], reference_latents_method: 'index_timestep_zero' } };
 		}
 		Object.assign(g[8].inputs, { positive: ['45', 0], negative: ['46', 0] });
+	}
+	// A body shape from the body editor: the picture starts from that render instead of from
+	// noise, and only part of it is repainted, so the proportions carry over.
+	if (shape) {
+		g[40] = { class_type: 'LoadImage', inputs: { image: shape } };
+		g[41] = { class_type: 'ImageScale', inputs: { image: ['40', 0], upscale_method: 'lanczos', width, height, crop: 'center' } };
+		g[42] = { class_type: 'VAEEncode', inputs: { pixels: ['41', 0], vae: ['3', 0] } };
+		g[43] = { class_type: 'RepeatLatentBatch', inputs: { samples: ['42', 0], amount: count } };
+		Object.assign(g[8].inputs, { latent_image: ['43', 0], denoise: shapeDenoise });
+		delete g[7];
 	}
 	g[8].inputs.model = model;
 	return g;

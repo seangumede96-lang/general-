@@ -38,7 +38,7 @@ export const SETTING_DEFAULTS = {
 	imageLoras: '[]',
 	imageSetupLog: '',
 	// The ready-made image engine (empty = install on the stock PyTorch image each time).
-	imageEngineImage: ''
+	imageEngineImage: 'ghcr.io/seangumede96-lang/assistant-image-engine:latest'
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */
