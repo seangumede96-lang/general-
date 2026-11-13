@@ -132,5 +132,10 @@ export function buildWorkflow(template, { video, image, prompt, seed, width, hei
 	need('151', 'INTConstant').value = height;
 	Object.assign(need('30', 'VHS_VideoCombine'), { frame_rate: FPS, save_output: true, filename_prefix: 'assistant' });
 	need('22', 'WanVideoModelLoader').attention_mode = attention === 'sdpa' ? 'sdpa' : 'sageattn';
+	// No torch.compile: on the first real run it crashed while compiling a fused LoRA kernel
+	// (Triton/Inductor subprocess error) after all the setup was done. Plain execution is a
+	// little slower but has no compile step to fail.
+	delete need('22', 'WanVideoModelLoader').compile_args;
+	for (const [id, node] of Object.entries(wf)) if (node.class_type === 'WanVideoTorchCompileSettings') delete wf[id];
 	return wf;
 }

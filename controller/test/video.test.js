@@ -357,3 +357,13 @@ test('video GPUs use the ready-made video engine by default', async () => {
 	assert.equal(job.status, 'done');
 	assert.equal(rp.state.created[0].image, READY_VIDEO_ENGINE);
 });
+
+test('the workflow runs without torch.compile (it crashed compiling on a real GPU)', async () => {
+	const job = await finished((await startJob(await newRequest())).body.id);
+	assert.equal(job.status, 'done');
+	const wf = comfy.state.prompts[0].prompt;
+	assert.equal(wf['22'].inputs.compile_args, undefined);
+	assert.ok(!Object.values(wf).some((n) => n.class_type === 'WanVideoTorchCompileSettings'));
+	// nothing else points at the removed node
+	for (const n of Object.values(wf)) for (const v of Object.values(n.inputs)) if (Array.isArray(v)) assert.ok(wf[v[0]], `dangling link to ${v[0]}`);
+});
