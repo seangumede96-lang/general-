@@ -74,6 +74,34 @@ for a, b in [('buttocks/buttocks-volume', 'glutes'), ('hip/hip-scale-depth', 'hi
              ('stomach/stomach-pregnant', 'belly'), ('head/head-scale-vert', 'head-height'), ('head/head-scale-horiz', 'head-width'), ('breast/breast-dist', 'breast-dist')]:
     morphs[f'{b}-up'] = target(f'{a}-incr.target')
     morphs[f'{b}-down'] = target(f'{a}-decr.target')
+# Bow legs (varus) and knock knees (valgus): MakeHuman's per-leg valgus targets, both legs together.
+def both(a, b):
+    out = dict(a)
+    for k, v in b.items(): out[k] = tuple(p + q for p, q in zip(out.get(k, (0, 0, 0)), v))
+    return out
+morphs['bowlegs-up'] = both(target('armslegs/l-leg-valgus-decr.target'), target('armslegs/r-leg-valgus-decr.target'))
+morphs['bowlegs-down'] = both(target('armslegs/l-leg-valgus-incr.target'), target('armslegs/r-leg-valgus-incr.target'))
+
+# Thigh gap: MakeHuman has no target for it, so it is made here. The inner side of each thigh,
+# from just below the crotch down towards the knee, moves outwards (or inwards for "less").
+def smooth(t):
+    t = min(1.0, max(0.0, t))
+    return t * t * (3 - 2 * t)
+CROTCH, KNEE, LIMIT, AMOUNT = -0.35, -4.2, 2.6, 0.17  # MakeHuman units are decimetres
+legs = [(new, verts[old]) for old, new in remap.items() if new < eye_start and KNEE - 0.3 < verts[old][1] < CROTCH and abs(verts[old][0]) < LIMIT]
+gap = {}
+for i, (x, y, z) in legs:
+    side = [abs(v[0]) for _, v in legs if abs(v[1] - y) < 0.2 and v[0] * x > 0]
+    if len(side) < 4: continue
+    lo, hi = min(side), max(side)
+    centre, radius = (lo + hi) / 2, max(0.05, (hi - lo) / 2)
+    inner = smooth((centre - abs(x)) / radius * 1.5)
+    t1 = smooth((CROTCH - y) / 0.9)
+    t2 = smooth((CROTCH - 1.0 - y) / (CROTCH - 1.0 - KNEE))
+    dx = inner * t1 * (1 - t2) * AMOUNT
+    if dx > 1e-4: gap[i] = (dx if x > 0 else -dx, 0.0, 0.0)
+morphs['thigh-gap-up'] = gap
+morphs['thigh-gap-down'] = {k: (-v[0], 0.0, 0.0) for k, v in gap.items()}
 morphs['breast-up'] = target('breast/breast-trans-up.target')
 morphs['breast-down'] = target('breast/breast-trans-down.target')
 for shape in ['oval', 'round', 'square', 'rectangular', 'triangular', 'invertedtriangular', 'diamond']:

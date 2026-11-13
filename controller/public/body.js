@@ -28,6 +28,8 @@ export const SLIDERS = [
 	{ key: 'glutes', label: 'Glutes', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'belly', label: 'Belly', min: -1, max: 1, step: 0.01 },
 	{ key: 'thighs', label: 'Thighs', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'thighGap', label: 'Thigh gap', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'bowLegs', label: 'Bow legs', min: -1.3, max: 1.5, step: 0.01 },
 	{ key: 'calves', label: 'Calves', min: -1.2, max: 1.3, step: 0.01 },
 	{ key: 'arms', label: 'Arm thickness', min: -1.2, max: 1.4, step: 0.01 }
 ];
@@ -48,6 +50,8 @@ const DRIVES = {
 	glutes: [['glutes', 1]],
 	belly: [['belly', 1]],
 	thighs: [['thigh-circ', 1]],
+	thighGap: [['thigh-gap', 1]],
+	bowLegs: [['bowlegs', 1]],
 	calves: [['calf-circ', 1]],
 	arms: [['upperarm-circ', 1], ['wrist-circ', 0.4]]
 };
