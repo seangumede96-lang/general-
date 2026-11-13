@@ -41,6 +41,7 @@ export const SLIDERS = [
 	{ key: 'buttOut', label: 'Sticks out', group: 'butt', min: -1, max: 1.3, step: 0.01 },
 	{ key: 'buttSplit', label: 'Cheek separation', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'hipDips', label: 'Hip dips', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'hipDipHeight', label: 'Hip dip height (lower ↔ higher)', group: 'butt', min: -1, max: 1, step: 0.01 },
 	{ key: 'buttWidth', label: 'Butt width', group: 'butt', min: -1, max: 1.2, step: 0.01 },
 	{ key: 'buttFullness', label: 'Fullness: bottom ↔ top', group: 'butt', min: -1, max: 1, step: 0.01 },
 	{ key: 'stance', label: 'Feet apart', group: 'legs', min: 0, max: 1, step: 0.01 },
@@ -95,7 +96,6 @@ const DRIVES = {
 	buttOut: [['glute-out', 1]],
 	buttWidth: [['glute-width', 1]],
 	buttSplit: [['glute-split', 1]],
-	hipDips: [['hip-dips', 1]],
 	fupa: [['fupa', 1]],
 	buttFullness: [['glute-top', 1]],
 	bowLegs: [['bowlegs', 1]],
@@ -259,6 +259,14 @@ export function weights(v) {
 	two(`${g}-weight`, at('weight'));
 	two(`${g}-muscle`, at('muscle'));
 	for (const [key, drives] of Object.entries(DRIVES)) for (const [name, k] of drives) two(name, at(key) * k);
+	// Hip dips are stored at five heights; the height slider blends the two nearest.
+	const dip = at('hipDips');
+	if (dip) {
+		const f = (Math.max(-1, Math.min(1, v.hipDipHeight || 0)) + 1) * 2;
+		const i = Math.min(3, Math.floor(f)), t = f - i;
+		two(`hip-dips-${i}`, dip * (1 - t));
+		two(`hip-dips-${i + 1}`, dip * t);
+	}
 	if (HEAD_SHAPES[v.headShape]) add(HEAD_SHAPES[v.headShape], HEAD_AMOUNT);
 	return w;
 }

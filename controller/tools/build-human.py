@@ -191,19 +191,24 @@ def band(y0, y1, xmax):
 # Hip dips: the outer side of the hips, between the hip bone and the top of the thigh, sinks in.
 DIP_Y, DIP_H = CROTCH + 0.55, 0.45
 hip_band = band(DIP_Y - 1.2, DIP_Y + 1.2, 2.3)
-dips = {}
-for k in hip_band:
-    x, y, z = bp[k]
-    side = [abs(bp[j][0]) for j in hip_band if abs(bp[j][1] - y) < 0.08]
-    wmax = max(side)
-    outer = smooth((abs(x) / wmax - 0.72) / 0.28)
-    zs = [bp[j][2] for j in hip_band if abs(bp[j][1] - y) < 0.08]
-    zc = sum(zs) / len(zs)
-    lateral = smooth(1 - abs(z - zc) / 0.9)
-    w = outer * lateral * math.exp(-((y - DIP_Y) / DIP_H) ** 2)
-    if w > 1e-3: dips[k] = (-(0.2 * w) if x > 0 else 0.2 * w, 0.0, 0.0)
-morphs['hip-dips-up'] = dips
-morphs['hip-dips-down'] = {k: (-v[0] * 0.8, 0.0, 0.0) for k, v in dips.items()}
+# Made at five heights (6 cm apart) so the editor can slide the dip up and down by blending
+# neighbours.
+DIP_STEPS = [-0.6, -0.3, 0.0, 0.3, 0.6]
+for n, off in enumerate(DIP_STEPS):
+    dips = {}
+    for k in hip_band:
+        x, y, z = bp[k]
+        side = [abs(bp[j][0]) for j in hip_band if abs(bp[j][1] - y) < 0.08]
+        wmax = max(side)
+        outer = smooth((abs(x) / wmax - 0.72) / 0.28)
+        zs = [bp[j][2] for j in hip_band if abs(bp[j][1] - y) < 0.08]
+        zc = sum(zs) / len(zs)
+        lateral = smooth(1 - abs(z - zc) / 0.9)
+        w = outer * lateral * math.exp(-((y - DIP_Y - off) / 0.35) ** 2)
+        if w > 1e-3: dips[k] = (-(0.2 * w) if x > 0 else 0.2 * w, 0.0, 0.0)
+    morphs[f'hip-dips-{n}-up'] = dips
+    morphs[f'hip-dips-{n}-down'] = {k: (-v[0] * 0.8, 0.0, 0.0) for k, v in dips.items()}
+layout_extra = {'hipDipSteps': len(DIP_STEPS)}
 # Lower belly (FUPA): a soft mound above the pubic bone, on the front only.
 FUPA_Y = CROTCH + 0.65
 fupa = {}

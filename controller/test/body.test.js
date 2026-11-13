@@ -24,7 +24,7 @@ test('every slider, preset and head shape drives morph targets that exist in the
 	for (const v of [all, { ...all, base: 'male' }, ...Object.keys(body.HEAD_SHAPES).map((headShape) => ({ ...body.defaults(), headShape }))]) {
 		for (const name of Object.keys(body.weights(v))) assert.ok(human.morphs[name], `missing morph ${name}`);
 	}
-	for (const s of body.SLIDERS) if (!['height', 'armPose', 'stance'].includes(s.key)) {
+	for (const s of body.SLIDERS) if (!['height', 'armPose', 'stance', 'hipDipHeight'].includes(s.key)) {
 		const lo = body.weights({ ...body.defaults(), [s.key]: s.min });
 		const hi = body.weights({ ...body.defaults(), [s.key]: s.max });
 		assert.notDeepEqual(lo, hi, `${s.key} changes nothing`);
@@ -79,4 +79,14 @@ test('feet stand close together by default and spread with "Feet apart"', () => 
 	const together = Math.abs(spread(body.defaults())), apart = Math.abs(spread({ ...body.defaults(), stance: 1 }));
 	assert.ok(together < apart * 0.75, `feet ${together} vs ${apart}`);
 	assert.ok(together > 5, 'the feet do not cross');
+});
+
+test('the hip dip height slider moves the dip up and down', () => {
+	const w = (h) => body.weights({ ...body.defaults(), hipDips: 1, hipDipHeight: h });
+	assert.deepEqual(Object.keys(w(-1)).filter((k) => k.startsWith('hip-dips')), ['hip-dips-0-up']);
+	assert.deepEqual(Object.keys(w(1)).filter((k) => k.startsWith('hip-dips')), ['hip-dips-4-up']);
+	const mid = w(0.25);
+	assert.ok(mid['hip-dips-2-up'] > 0 && mid['hip-dips-3-up'] > 0);
+	for (let n = 0; n < 5; n++) assert.ok(human.morphs[`hip-dips-${n}-up`]?.idx.length > 20, `dip ${n} missing`);
+	assert.equal(Object.keys(body.weights({ ...body.defaults(), hipDipHeight: 0.5 })).filter((k) => k.startsWith('hip-dips')).length, 0);
 });
