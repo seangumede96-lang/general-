@@ -33,10 +33,15 @@ export function downloadLines(files, root, step) {
 		'get() { size "$1" > "$2.total"; if command -v aria2c >/dev/null; then aria2c -q -x 16 -s 16 -k 1M --file-allocation=none --retry-wait 3 -m 5 --allow-overwrite=true -d "$(dirname "$2")" -o "$(basename "$2")" "$1" && touch "$2.done"; else curl -fsSL --retry 5 --connect-timeout 20 -o "$2" "$1" && touch "$2.done"; fi; }',
 		// One line per file for the app: name, bytes so far, total bytes.
 		`files() { for f in ${paths}; do echo "$(basename "$f") $(stat -c %s "$f" 2>/dev/null || echo 0) $(cat "$f.total" 2>/dev/null || echo 0)"; done > /srv/log/files.tmp && mv /srv/log/files.tmp /srv/log/files.txt; }`,
-		...files.map(([url, dest]) => `get ${q(url)} "${root}/${dest}" &`),
-		`while [ "$(ls ${root}/*/*.done 2>/dev/null | wc -l)" -lt ${files.length} ] && [ -n "$(jobs -r)" ]; do sleep 5; files; echo "STEP ${step} Downloading models ($(ls ${root}/*/*.done 2>/dev/null | wc -l) of ${files.length} files, $(du -sBG ${root} | cut -f1 | tr -d G) GB)"; done`,
-		'wait',
+		// Remember each download's process, so only these are waited for: the pod's self-delete
+		// timer runs in the background of this same shell and must not be waited on.
+		'pids=""',
+		...files.map(([url, dest]) => `get ${q(url)} "${root}/${dest}" & pids="$pids $!"`),
+		'running() { for p in $pids; do kill -0 "$p" 2>/dev/null && return 0; done; return 1; }',
+		`while running; do sleep 5; files; echo "STEP ${step} Downloading models ($(ls ${root}/*/*.done 2>/dev/null | wc -l) of ${files.length} files, $(awk '{s+=$2} END{printf "%d", s/1e9}' /srv/log/files.txt) GB)"; done`,
+		'wait $pids || true',
 		'files',
+		`echo "Downloads finished: $(ls ${root}/*/*.done 2>/dev/null | wc -l) of ${files.length} files. Disk: $(df -h ${root} | tail -1)"`,
 		...files.map(([, dest]) => `test -s "${root}/${dest}" || { echo "MISSING ${dest}"; false; }`)
 	];
 }
