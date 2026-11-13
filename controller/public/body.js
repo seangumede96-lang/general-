@@ -291,7 +291,15 @@ export function createViewer(container) {
 		renderer.render(scene, camera);
 	}
 
+	// While a slider is dragged it can fire many times per frame; rebuild once per frame at most.
+	let pending = null;
 	function update(values) {
+		const first = pending === null;
+		pending = values;
+		if (first) requestAnimationFrame(() => { const v = pending; pending = null; rebuild(v); });
+	}
+
+	function rebuild(values) {
 		for (const m of group.children) m.geometry.dispose();
 		group.clear();
 		const built = buildBody(values);
@@ -313,6 +321,7 @@ export function createViewer(container) {
 		setView(angle) { yaw = angle; draw(); },
 		/** A front (or chosen) view at exactly w by h pixels on a white background, as a PNG blob. */
 		async snapshot(w, h, angle = 0) {
+			if (pending) { const v = pending; pending = null; rebuild(v); }
 			const cam = camera.clone();
 			const prevBg = scene.background;
 			const prevYaw = yaw;
