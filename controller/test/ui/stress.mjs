@@ -106,6 +106,7 @@ const actions = {
 	async deleteConversation() { await closeDialogs(); await openDrawer(); await tap('.conv-del'); },
 	async pages() { await goPage(pick(['system', 'video', 'characters'])); },
 	async back() { await closeDialogs(); await tap('#back'); },
+	async dialogBack() { await toChat(); await tap('#model-chip'); await sleep(150); await page.goBack({ timeout: 1500 }).catch(() => {}); await sleep(150); if (await page.evaluate(() => document.querySelectorAll('dialog[open]').length)) note('back gesture does not close the model sheet', `[after: ${log.slice(-3).join(' > ')}]`); },
 	async browserBack() { await page.goBack({ timeout: 2000 }).catch(() => {}); if (!page.url().startsWith(base)) await page.goto(base + '/').catch(() => {}); },
 	async reload() { await page.reload({ timeout: 5000 }).catch(() => {}); },
 	async reopen() { await page.close().catch(() => {}); await newPage(); },
@@ -118,7 +119,7 @@ const actions = {
 		const what = pick(['session', 'session', 'generate', 'generate', 'refs', 'loras', 'gallery', 'end']);
 		if (what === 'session') { await page.fill('#img-minutes', pick(['30', '5', '0', '', '500']), { timeout: 800 }).catch(() => {}); await tap('#img-session .btn-ghost'); await sleep(250); await tap('#img-session .btn-primary'); if (chance(0.3)) await tap('#img-session .btn-primary'); }
 		if (what === 'generate') { await page.fill('#img-prompt', pick(NASTY_TEXT), { timeout: 1000 }).catch(() => {}); await page.fill('#img-count', pick(['2', '0', '9', '', '-1']), { timeout: 800 }).catch(() => {}); if (chance(0.5)) await page.locator('#img-enhance').setChecked(chance(0.5), { timeout: 800 }).catch(() => {}); await tap('#img-go'); if (chance(0.3)) await tap('#img-go'); }
-		if (what === 'refs') { const role = pick(['face', 'body', 'look']); if (chance(0.6)) await page.setInputFiles(`#img-ref-${role}`, pick([png, join(filesDir, 'note.txt')]), { timeout: 1500 }).catch(() => {}); else await tap(`.pick.ref[data-role=${role}]`); }
+		if (what === 'refs') { const role = pick(['face', 'body', 'look']); if (chance(0.6)) await page.setInputFiles(`#img-ref-${role}`, pick([[png], [png, png], [png, png, png, png], [join(filesDir, 'note.txt')]]), { timeout: 1500 }).catch(() => {}); else await tap(pick([`.pick.ref[data-role=${role}] .pend-x`, `.pick.ref[data-role=${role}] .ref-add`])); }
 		if (what === 'loras') { await tap('.lora-row input[type=checkbox]'); await page.locator('.lora-row input[type=number]').first().fill(pick(['0.9', '', '5', '-2', 'x']), { timeout: 800 }).catch(() => {}); }
 		if (what === 'gallery') await tap(pick(['.shot-actions button', '.gen .link']));
 		if (what === 'end') await tap('#img-session .btn-danger');
@@ -148,7 +149,7 @@ const actions = {
 		if (what === 'restart') { appDown = true; await app.close().catch((e) => note('app close failed', e.message)); app = createApp(options); await app.listen(PORT, '127.0.0.1'); appDown = false; }
 	}
 };
-const WEIGHTS = { sendMessage: 9, stopReply: 3, approval: 5, newChat: 3, openConversation: 4, deleteConversation: 1, pages: 5, back: 4, browserBack: 2, reload: 2, reopen: 1, modelSheet: 4, settings: 2, attach: 3, system: 4, characters: 9, video: 5, resize: 1, chaos: 4 };
+const WEIGHTS = { dialogBack: 2, sendMessage: 9, stopReply: 3, approval: 5, newChat: 3, openConversation: 4, deleteConversation: 1, pages: 5, back: 4, browserBack: 2, reload: 2, reopen: 1, modelSheet: 4, settings: 2, attach: 3, system: 4, characters: 9, video: 5, resize: 1, chaos: 4 };
 const bag = Object.entries(WEIGHTS).flatMap(([name, w]) => Array(w).fill(name));
 
 /** Rules that must hold after every action, whatever was tapped. */
@@ -168,6 +169,7 @@ async function checkInvariants(step, name) {
 			backShown: shown(document.getElementById('back')),
 			// The app must fill the window: a gap at the bottom means the layout height is stale.
 			gap: Math.round(window.innerHeight - document.querySelector('main').getBoundingClientRect().bottom),
+			refsOver: ['face', 'body', 'look'].reduce((n, r) => n + document.querySelectorAll(`.pick.ref[data-role=${r}] .ref-thumb`).length, 0),
 			deadButtons: [...document.querySelectorAll('button:disabled')].filter((b) => b.offsetParent && getComputedStyle(b).opacity === '1' && b.id !== 'send').map((b) => b.id || b.textContent.trim().slice(0, 20))
 		};
 	}).catch(() => null);
@@ -182,6 +184,7 @@ async function checkInvariants(step, name) {
 	if (!r.title) note('empty title', where);
 	if (r.junk) note('raw value on screen', `${r.junk} ${where}`);
 	if (r.dialogs > 1) note('two dialogs open', where);
+	if (r.refsOver > 3) note('more than 3 reference pictures accepted', where);
 	if (Math.abs(r.gap) > 2) note('app does not fill the window', `${r.gap}px gap ${where}`);
 	if (r.deadButtons.length) note('disabled button looks enabled', `${r.deadButtons.join(', ')} ${where}`);
 	if (r.injected) note('unsafe content rendered from a message', where);

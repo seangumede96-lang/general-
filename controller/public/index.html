@@ -148,12 +148,12 @@
 
 				<div class="card-cap" style="margin-top:14px">Reference pictures (optional)</div>
 				<div class="pick-row three">
-					<label class="pick ref" data-role="face" for="img-ref-face" role="button" tabindex="0"><span class="pick-cap">Face</span><span class="pick-body">Add</span></label>
-					<label class="pick ref" data-role="body" for="img-ref-body" role="button" tabindex="0"><span class="pick-cap">Body</span><span class="pick-body">Add</span></label>
-					<label class="pick ref" data-role="look" for="img-ref-look" role="button" tabindex="0"><span class="pick-cap">Outfit / makeup</span><span class="pick-body">Add</span></label>
+					<div class="pick ref" data-role="face"><span class="pick-cap">Face</span><div class="pick-body"></div></div>
+					<div class="pick ref" data-role="body"><span class="pick-cap">Body</span><div class="pick-body"></div></div>
+					<div class="pick ref" data-role="look"><span class="pick-cap">Outfit / makeup</span><div class="pick-body"></div></div>
 				</div>
 				<input id="img-ref-face" data-role="face" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1"><input id="img-ref-body" data-role="body" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1"><input id="img-ref-look" data-role="look" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1">
-				<small id="img-ref-note">Tap a box to add pictures, up to 3 in total across all three. Tap × on a picture to remove it. Crop face pictures to the face only, or their clothes leak in. Use made-up characters, or real adults who agreed.</small>
+				<small id="img-ref-note"></small>
 
 				<label style="margin-top:14px">Shape <select id="img-size"><option value="portrait">Portrait</option><option value="square">Square</option><option value="landscape">Landscape</option></select></label>
 				<div class="row">

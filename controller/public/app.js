@@ -524,7 +524,7 @@ $('open-settings').addEventListener('click', async () => {
 	els.settingsForm.elements.apiKey.value = '';
 	els.settingsForm.elements.apiKey.placeholder = s.hasApiKey ? 'Saved (hidden)' : 'Not set';
 	setStatus('');
-	els.settings.showModal();
+	openDialog(els.settings);
 });
 
 $('cancel-settings').addEventListener('click', () => els.settings.close());
@@ -614,7 +614,27 @@ function leavePage() {
 }
 
 $('back').addEventListener('click', () => { if (nav.pushed) history.back(); else leavePage(); });
-window.addEventListener('popstate', leavePage);
+
+/**
+ * Open a dialog with its own history entry, so the phone's back button or gesture closes it
+ * instead of leaving the app or getting stuck. Closing it any other way removes that entry.
+ */
+function openDialog(dialog) {
+	if (dialog.open) return;
+	dialog.showModal();
+	history.pushState({ dialog: dialog.id }, '');
+	dialog.dataset.pushed = '1';
+}
+for (const dialog of document.querySelectorAll('dialog')) {
+	dialog.addEventListener('close', () => {
+		if (dialog.dataset.pushed) { delete dialog.dataset.pushed; if (history.state?.dialog === dialog.id) history.back(); }
+	});
+}
+window.addEventListener('popstate', () => {
+	const open = [...document.querySelectorAll('dialog[open]')];
+	if (open.length) { for (const d of open) { delete d.dataset.pushed; d.close(); } return; }
+	leavePage();
+});
 
 function kv(pairs) {
 	return el('div', { className: 'kv' }, ...pairs.map(([k, v]) => el('span', {}, `${k} `, el('b', { textContent: v }))));
@@ -1026,23 +1046,27 @@ const chars = {
 		return true;
 	},
 
+	/** Each box shows its pictures, each with ×, and a "+ Add" tile while fewer than 3 are chosen in total. */
 	renderRefs() {
-		const full = this.refCount() >= 3;
+		const count = this.refCount();
+		const full = count >= 3;
 		for (const box of document.querySelectorAll('.pick.ref')) {
 			const { role } = box.dataset;
 			const list = this.refs[role] || [];
-			box.querySelector('.pick-body').replaceChildren(...(list.length ? list.map((r, i) => {
+			const thumbs = list.map((r, i) => {
 				const x = el('button', { type: 'button', className: 'pend-x', ariaLabel: 'Remove this picture' });
 				x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-				x.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); list.splice(i, 1); this.renderRefs(); });
+				x.addEventListener('click', () => { list.splice(i, 1); this.renderRefs(); });
 				return el('div', { className: 'ref-thumb' }, el('img', { src: r.src, alt: `${role} reference` }), x);
-			}) : ['Add']));
+			});
+			// The tile is a label for the box's file input: tapping it opens the phone's picker directly.
+			const add = full
+				? el('div', { className: 'ref-add off' }, el('b', { textContent: '+' }), 'Limit of 3')
+				: el('label', { className: 'ref-add', htmlFor: `img-ref-${role}` }, el('b', { textContent: '+' }), list.length ? 'Add another' : 'Add');
+			box.querySelector('.pick-body').replaceChildren(...thumbs, add);
 			box.classList.toggle('filled', list.length > 0);
-			box.classList.toggle('full', full);
 		}
-		$('img-ref-note').firstChild.textContent = full
-			? 'That is 3 pictures, the most the image engine can use at once. Tap × on one to make room. '
-			: 'Tap a box to add pictures, up to 3 in total across all three. Tap × on a picture to remove it. Crop face pictures to the face only, or their clothes leak in. Use made-up characters, or real adults who agreed.';
+		$('img-ref-note').textContent = `${count} of 3 pictures chosen. Tap + to add (you can pick several at once), × to remove. Crop face pictures to the face only, or their clothes leak in. Use made-up characters, or real adults who agreed.`;
 	},
 
 	async generate() {
@@ -1103,12 +1127,7 @@ const chars = {
 };
 
 $('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.generate(); });
-// Each reference box is a label for its own file input; more pictures can be added until 3 in total.
-for (const box of document.querySelectorAll('.pick.ref')) {
-	box.addEventListener('click', (e) => {
-		if (chars.refCount() >= 3) { e.preventDefault(); alert('There are already 3 reference pictures, the most the image engine can use at once. Tap × on one to make room.'); }
-	});
-}
+chars.renderRefs();
 for (const input of document.querySelectorAll('.ref-input')) {
 	input.addEventListener('change', async (e) => {
 		const files = [...e.target.files].slice(0, 3 - chars.refCount());
@@ -1274,7 +1293,7 @@ async function showWake(preset, box) {
 $('model-chip').addEventListener('click', async () => {
 	await refreshChip();
 	renderPicker();
-	picker.dialog.showModal();
+	openDialog(picker.dialog);
 });
 $('models-close').addEventListener('click', () => picker.dialog.close());
 picker.dialog.addEventListener('click', (e) => { if (e.target === picker.dialog) picker.dialog.close(); });
