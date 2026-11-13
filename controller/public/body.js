@@ -321,6 +321,7 @@ export function createViewer(container) {
 	renderer.domElement.addEventListener('pointerdown', (e) => { dragging = e.clientX; renderer.domElement.setPointerCapture(e.pointerId); });
 	renderer.domElement.addEventListener('pointermove', (e) => { if (dragging === null) return; yaw += (e.clientX - dragging) * 0.012; dragging = e.clientX; draw(); });
 	renderer.domElement.addEventListener('pointerup', () => { dragging = null; });
+	renderer.domElement.addEventListener('pointercancel', () => { dragging = null; });
 	renderer.domElement.style.touchAction = 'pan-y';
 	new ResizeObserver(resize).observe(container);
 

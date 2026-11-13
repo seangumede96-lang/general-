@@ -254,6 +254,11 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 .vslider b { font-size: 13px; }
 .vslider span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .hslider { display: grid; grid-template-columns: 110px 1fr 52px; align-items: center; gap: 10px; padding: 4px 0; font-size: 14px; }
+.hs-track { touch-action: pan-y; padding: 8px 0; cursor: pointer; }
+.hs-track input { pointer-events: none; display: block; }
+.saved-chip { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; }
+.saved-chip button { border: 0 !important; }
+.saved-chip .chip-x { padding: 7px 12px 7px 4px; color: var(--muted); font-size: 16px; line-height: 1; }
 .hslider input { width: 100%; margin: 0; padding: 0; border: 0; background: none; accent-color: #8b7cf6; }
 .hslider span { text-align: right; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .card .row input#body-name { flex: 1; margin: 0; }

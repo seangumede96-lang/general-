@@ -569,7 +569,11 @@ const pages = {
 	characters: { title: 'Characters', show: () => chars.show(), hide: () => chars.hide() },
 	body: { title: 'Body', show: () => bodyEditor.show(), hide: () => {} }
 };
-const nav = { page: null, returnTo: null, pushed: false };
+// stack: pages underneath the one showing (a sub-page such as the body editor sits on Characters),
+// each with a history entry of its own so the phone's back gesture steps back through them.
+const nav = { page: null, returnTo: null, pushed: false, stack: [] };
+/** Pages that are opened from another page, and so go back to it. */
+const PARENT_PAGE = { body: 'characters' };
 
 function setView(view) {
 	const page = pages[view] ? view : null;
@@ -580,6 +584,7 @@ function setView(view) {
 	$('back').hidden = !page;
 	const changed = nav.page !== page;
 	nav.page = page;
+	if (!page) nav.stack = [];
 	if (page && changed) {
 		localStorage.setItem('lastView', page);
 		closeEvents();
@@ -589,19 +594,33 @@ function setView(view) {
 	}
 }
 
-/** Open a page, remembering which chat was open so Back returns to it. */
-function openPage(name) {
+/**
+ * Open a page, remembering which chat was open so Back returns to it. A sub-page (sub: true)
+ * opens on top of the current page, so Back returns to that page rather than to the chat.
+ */
+function openPage(name, { sub = false } = {}) {
 	if (nav.page === name) return;
 	if (!nav.page) {
 		nav.returnTo = state.currentId;
 		state.currentId = null;
+		nav.stack = [];
 		// A history entry of its own, so the phone's back button or gesture leaves the page too.
 		history.pushState({ page: name }, '', `#${name}`);
 		nav.pushed = true;
+	} else if (sub) {
+		nav.stack.push(nav.page);
+		history.pushState({ page: name }, '', `#${name}`);
 	} else {
 		history.replaceState({ page: name }, '', `#${name}`);
 	}
 	setView(name);
+}
+
+/** One step back: the page underneath, else the chat. */
+function goBack() {
+	if (nav.pushed) history.back(); // popstate does the rest
+	else if (nav.stack.length) setView(nav.stack.pop());
+	else leavePage();
 }
 
 /** Leave a page for the chat that was open before, or a blank chat. */
@@ -610,11 +629,12 @@ function leavePage() {
 	const id = nav.returnTo;
 	nav.returnTo = null;
 	nav.pushed = false;
+	nav.stack = [];
 	if (id && state.conversations.some((c) => c.id === id)) openConversation(id);
 	else showBlank();
 }
 
-$('back').addEventListener('click', () => { if (nav.pushed) history.back(); else leavePage(); });
+$('back').addEventListener('click', goBack);
 
 /**
  * Open a dialog with its own history entry, so the phone's back button or gesture closes it
@@ -634,6 +654,7 @@ for (const dialog of document.querySelectorAll('dialog')) {
 window.addEventListener('popstate', () => {
 	const open = [...document.querySelectorAll('dialog[open]')];
 	if (open.length) { for (const d of open) { delete d.dataset.pushed; d.close(); } return; }
+	if (nav.stack.length) { setView(nav.stack.pop()); return; }
 	leavePage();
 });
 
@@ -1164,7 +1185,7 @@ const chars = {
 					return btn;
 				};
 				const toVideo = el('button', { type: 'button', textContent: 'Use in Video' });
-				toVideo.addEventListener('click', () => { openPage('video'); video.usePicture(id, src); });
+				toVideo.addEventListener('click', () => { openPage('video', { sub: true }); video.usePicture(id, src); });
 				return el('div', { className: 'shot' }, el('a', { href: src, target: '_blank' }, el('img', { src, loading: 'lazy', alt: 'Generated picture' })),
 					el('div', { className: 'shot-actions' }, el('a', { href: src, download: '', textContent: 'Save' }), useAs('face', 'Use as face'), useAs('body', 'Use as body'), useAs('look', 'Use as outfit'), toVideo));
 			})));
@@ -1181,7 +1202,7 @@ const chars = {
 };
 
 $('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.generate(); });
-$('img-shape-open').addEventListener('click', () => openPage('body'));
+$('img-shape-open').addEventListener('click', () => openPage('body', { sub: true }));
 $('img-shape-clear').addEventListener('click', () => chars.setShape(null));
 $('img-shape-strength').addEventListener('input', () => chars.shapeText());
 chars.renderRefs();
@@ -1205,6 +1226,46 @@ for (const label of document.querySelectorAll('label[role="button"]')) {
 }
 
 /* ---------- Body editor ---------- */
+
+/**
+ * A horizontal slider that does not get in the way of scrolling. On a phone, Chrome moves a
+ * slider to wherever a finger lands, so scrolling past a list of them changes them by accident.
+ * Here a finger has to move sideways first to drag (the thumb then moves with the finger, from
+ * where it was); an upward or downward swipe scrolls the page and leaves the slider alone; a
+ * plain tap still sets the value at that spot.
+ */
+function scrollFriendlySlider(track, input) {
+	let start = null;
+	const set = (v) => {
+		const min = Number(input.min), max = Number(input.max);
+		input.value = String(Math.min(max, Math.max(min, v)));
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	};
+	const range = () => Number(input.max) - Number(input.min);
+	track.addEventListener('pointerdown', (e) => {
+		if (e.button > 0) return;
+		start = { x: e.clientX, y: e.clientY, v: Number(input.value), drag: e.pointerType === 'mouse', id: e.pointerId };
+		if (start.drag) { track.setPointerCapture(e.pointerId); set(Number(input.min) + ((e.clientX - track.getBoundingClientRect().left) / track.clientWidth) * range()); start.v = Number(input.value); }
+	});
+	track.addEventListener('pointermove', (e) => {
+		if (!start || e.pointerId !== start.id) return;
+		const dx = e.clientX - start.x, dy = e.clientY - start.y;
+		if (!start.drag) {
+			if (Math.abs(dy) > 8 && Math.abs(dy) >= Math.abs(dx)) { start = null; return; } // scrolling
+			if (Math.abs(dx) <= 6) return;
+			start.drag = true;
+			start.x = e.clientX; // no jump: the thumb moves from where it was
+			track.setPointerCapture(e.pointerId);
+			return;
+		}
+		set(start.v + (dx / track.clientWidth) * range());
+	});
+	track.addEventListener('pointerup', (e) => {
+		if (start && !start.drag && e.pointerId === start.id) set(Number(input.min) + ((e.clientX - track.getBoundingClientRect().left) / track.clientWidth) * range());
+		start = null;
+	});
+	track.addEventListener('pointercancel', () => { start = null; });
+}
 
 const bodyEditor = {
 	viewer: null, values: null, module: null,
@@ -1241,7 +1302,9 @@ const bodyEditor = {
 		}));
 		$('body-hsliders').replaceChildren(...m.SLIDERS.filter((x) => !x.vertical).map((sl) => {
 			const c = slider(sl); this.controls.push(c);
-			return el('label', { className: 'hslider' }, el('b', { textContent: sl.label }), c.input, c.out);
+			const track = el('div', { className: 'hs-track' }, c.input);
+			scrollFriendlySlider(track, c.input);
+			return el('div', { className: 'hslider' }, el('b', { textContent: sl.label }), track, c.out);
 		}));
 		this.labelOf = label;
 		for (const button of $('body-base').querySelectorAll('button')) button.addEventListener('click', () => { this.values = m.defaults(button.dataset.base); this.changed(true); });
@@ -1283,9 +1346,10 @@ const bodyEditor = {
 		$('body-saved').replaceChildren(...(saved.length ? saved.map((t) => {
 			const b = el('button', { type: 'button', textContent: t.name });
 			b.addEventListener('click', () => { this.values = m.migrate(t.values); this.changed(true); });
-			b.addEventListener('contextmenu', (e) => { e.preventDefault(); if (confirm(`Delete "${t.name}"?`)) { localStorage.setItem('bodyTemplates', JSON.stringify(this.saved().filter((x) => x.name !== t.name))); this.refresh(); } });
-			return b;
-		}) : [el('span', { className: 'muted small', textContent: 'Saved bodies appear here. Long-press one to delete it.' })]));
+			const x = el('button', { type: 'button', className: 'chip-x', textContent: '×', ariaLabel: `Delete ${t.name}` });
+			x.addEventListener('click', () => { if (confirm(`Delete "${t.name}"?`)) { localStorage.setItem('bodyTemplates', JSON.stringify(this.saved().filter((s) => s.name !== t.name))); this.refresh(); } });
+			return el('span', { className: 'saved-chip' }, b, x);
+		}) : [el('span', { className: 'muted small', textContent: 'Saved bodies appear here.' })]));
 		this.viewer.update(this.values);
 	},
 
@@ -1301,7 +1365,7 @@ const bodyEditor = {
 			const preview = await this.viewer.snapshot(w, h, 0, 'shape');
 			const up = await uploadWithProgress(new File([depth], 'body-depth.png', { type: 'image/png' }), () => {});
 			chars.setShape(up.id, URL.createObjectURL(preview));
-			openPage('characters');
+			if (nav.stack.at(-1) === 'characters') goBack(); else openPage('characters');
 		} catch (err) { alert(`The body could not be prepared: ${err.message}`); }
 		finally { button.disabled = false; button.textContent = 'Use this body for pictures'; }
 	}
@@ -1469,6 +1533,11 @@ refreshChip();
 await refreshConversations();
 // Reopen where you left off: the address if it names a place, else the last chat or page used.
 const wanted = location.hash.slice(1) || localStorage.getItem('lastView') || '';
-if (pages[wanted]) { state.currentId = null; setView(wanted); }
+if (pages[wanted]) {
+	// Rebuild the history entries (and the page underneath a sub-page) so Back works as before.
+	state.currentId = null;
+	history.replaceState(null, '', location.pathname);
+	if (PARENT_PAGE[wanted]) { openPage(PARENT_PAGE[wanted]); openPage(wanted, { sub: true }); } else openPage(wanted);
+}
 else if (wanted && state.conversations.some((c) => c.id === wanted)) await openConversation(wanted);
 else showBlank();
