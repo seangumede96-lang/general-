@@ -287,13 +287,21 @@ test('generating far past its estimate stops the GPU', async () => {
 	await api('PUT', '/api/settings', { maxPodMinutes: '90', runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, videoWorkflowUrl: `${comfy.baseUrl}/workflow.json` });
 	comfy.state.pollsUntilDone = 1e9;
 	const started = await startJob(await newRequest({ runMinutes: 'until-done' }));
-	for (let i = 0; i < 200; i++) {
-		const job = (await api('GET', '/api/video')).body.jobs.find((j) => j.id === started.body.id);
-		if (job.status === 'generating') break;
-		await new Promise((r) => setTimeout(r, 5));
+	// Wait (generously, for slow phones) until it is generating; only then move the clock on.
+	let reached = false;
+	for (let i = 0; i < 2000 && !reached; i++) {
+		reached = (await api('GET', '/api/video')).body.jobs.find((j) => j.id === started.body.id).status === 'generating';
+		if (!reached) await new Promise((r) => setTimeout(r, 10));
 	}
+	assert.ok(reached, 'the job reached the generating step');
+	await new Promise((r) => setTimeout(r, 50)); // let the generating loop note its start time
 	now += 61 * 60000; // 5 s clip: limit is max(60, 5 x 2 x 4) = 60 minutes
-	const job = await finished(started.body.id);
+	let job;
+	for (let i = 0; i < 2000; i++) {
+		job = (await api('GET', '/api/video')).body.jobs.find((j) => j.id === started.body.id);
+		if (!job.active) break;
+		await new Promise((r) => setTimeout(r, 10));
+	}
 	assert.equal(job.status, 'failed');
 	assert.match(job.detail, /Generating took over 60 minutes/);
 	assert.deepEqual(await podGone(), ['pod1']);
