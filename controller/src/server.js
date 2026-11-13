@@ -555,6 +555,8 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			server.listen(port, host, () => resolve(server.address()));
 		}),
 		gpu, studio, images,
+		/** True while anything is running that a restart would interrupt or orphan. */
+		busy: () => live.size > 0 || db.listPods().some((p) => !p.ended_at) || studio.list().some((j) => j.active) || db.listGenerations().some((g) => g.status === 'running'),
 		async close() {
 			clearInterval(watchdog);
 			await studio.shutdown();

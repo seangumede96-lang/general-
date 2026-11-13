@@ -97,6 +97,10 @@ make the app come back by itself:
   answering. Run it from `~/.bashrc` so opening Termux starts the app, and from
   `~/.termux/boot/` (Termux:Boot app) so it starts when the phone does.
 
+To restart for an update without cutting anything off, create
+`~/.assistant-controller/restart-when-idle`: the app exits once no GPU, job or reply is
+running, and `keep-running.sh` starts the new version.
+
 If the engine is down anyway, the page shows "The assistant is not running" with an
 Open Termux button instead of a browser error, and reloads by itself when it is back.
 
