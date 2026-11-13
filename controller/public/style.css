@@ -214,6 +214,8 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 .opt.picked { outline: 1px solid #8b7cf6; }
 
 /* Characters */
+.setup-log { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #ffd8d2; max-height: 220px; overflow-y: auto; }
+details.sys-alert summary { cursor: pointer; }
 .card textarea, .card select { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: inherit; font-weight: 400; }
 .pick-row.three { grid-template-columns: repeat(3, 1fr); margin-bottom: 8px; }
 .pick.ref { min-height: 0; }

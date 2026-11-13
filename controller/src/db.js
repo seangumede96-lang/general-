@@ -19,7 +19,7 @@ export const SETTING_DEFAULTS = {
 	runpodGraphqlUrl: '',
 	// Optional cap on what this app may spend in total. Empty = limited only by the real RunPod balance.
 	budgetTotal: '',
-	maxPodMinutes: '60',
+	maxPodMinutes: '90',
 	idleMinutes: '10',
 	// The private brain: a GGUF model on Hugging Face, served by llama.cpp on a rented pod.
 	brainModel: 'unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M',
@@ -35,7 +35,8 @@ export const SETTING_DEFAULTS = {
 	b2AppKey: '',
 	b2Bucket: '',
 	b2ApiBase: '',
-	imageLoras: '[]'
+	imageLoras: '[]',
+	imageSetupLog: ''
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */

@@ -43,6 +43,8 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const lines = (await res.text()).trim().split('\n');
 			const step = lines.filter((l) => l.startsWith('STEP ')).at(-1);
 			if (step) progress.set(p.id, step.replace(/^STEP /, ''));
+			// Kept on the phone: once the pod is deleted its log is gone, and it is the only record of why setup stalled.
+			db.setSettings({ imageSetupLog: JSON.stringify({ podId: p.id, at: clock(), lines: lines.filter((l) => !/\[notice\]|Running pip as the 'root' user/.test(l)).slice(-12) }) });
 			if (lines.some((l) => l.startsWith('SETUP FAILED'))) {
 				const tail = lines.filter((l) => !l.startsWith('SETUP FAILED')).slice(-3).join(' | ').slice(-300);
 				await gpu.stop(p.id, `image engine setup failed: ${tail || 'no details'}`);
@@ -64,6 +66,18 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		} catch { /* shown when a session is started */ }
 	}
 
+	function savedLog(podId) {
+		try { const l = JSON.parse(db.getSettings().imageSetupLog || '{}'); return l.podId === podId ? l.lines : []; } catch { return []; }
+	}
+	/** Why the last session ended, when it never got as far as making pictures. */
+	function endExplanation(last) {
+		if (last.ready_at) return '';
+		if (last.end_reason?.startsWith('image engine setup failed')) return last.end_reason;
+		const lines = savedLog(last.id);
+		const step = lines.filter((l) => l.startsWith('STEP ')).at(-1)?.replace(/^STEP /, '');
+		return `the image engine never finished setting up (${last.end_reason || 'stopped'})${step ? `; it was at step ${step}` : lines.length ? '' : '; its progress log could not be reached, so the machine may not have started at all'}.`;
+	}
+
 	async function status() {
 		await listLoras();
 		let p = pod();
@@ -76,7 +90,8 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 				podId: p?.id || null,
 				secondsLeft: p ? Math.max(0, Math.round((p.deadline_at - clock()) / 1000)) : 0,
 				// Why the last session ended, when that is worth telling the user.
-				lastEnd: !p && last?.end_reason?.startsWith('image engine setup failed') ? last.end_reason : ''
+				lastEnd: !p && last ? endExplanation(last) : '',
+				setupLog: !p && last && !last.ready_at ? savedLog(last.id) : []
 			},
 			loras: savedLoras(), b2: b2Ready(), sizes: Object.keys(SIZES),
 			generations: db.listGenerations().map(view)
@@ -99,7 +114,9 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		} catch (err) { return { prompt: text, enhanced: false, why: `The prompt could not be written automatically (${err.message.slice(0, 120)}), so your own words were used.` }; }
 	}
 
-	const quote = (minutes) => gpu.quote({ minutes, minVram: MIN_VRAM.image, fastNetwork: true });
+	/** Setup is reserved on top of the minutes asked for, so a 30-minute session gives 30 minutes of pictures. */
+	const SETUP_MINUTES = 15;
+	const quote = async (minutes) => ({ ...(await gpu.quote({ minutes: Number(minutes) + SETUP_MINUTES, minVram: MIN_VRAM.image, fastNetwork: true })), useMinutes: Number(minutes), setupMinutes: SETUP_MINUTES });
 
 	async function start({ minutes, confirmEstimate }) {
 		const q = await quote(minutes);
@@ -112,7 +129,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const files = (await b2.list('loras/')).filter((f) => f.name.endsWith('.safetensors'));
 			loras = await Promise.all(files.map(async (f) => ({ name: f.name, size: f.size, url: await b2.link(f.name) })));
 		}
-		const started = await gpu.start({ minutes, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(loras) });
+		const started = await gpu.start({ minutes: Number(minutes) + SETUP_MINUTES, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(loras) });
 		db.setSettings({ imageLoras: JSON.stringify(loras.map(({ name, size }) => ({ name, size }))) });
 		return started.id;
 	}

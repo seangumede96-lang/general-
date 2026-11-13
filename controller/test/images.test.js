@@ -62,7 +62,7 @@ beforeEach(async () => {
 	Object.assign(comfy.state, { ready: true, pollsUntilDone: 1, outcome: 'ok', images: 2, uploads: [], prompts: [], historyChecks: 0, setupLog: 'STEP 2/3 Downloading models\n' });
 	app = createApp({ dataDir: join(root, `d${++n}`), clock: () => now, watchdogMs: 0, imagePollMs: 5 });
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
-	await api('PUT', '/api/settings', { runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, b2KeyId: 'kid', b2AppKey: 'secret-app-key', b2Bucket: 'mybucket', b2ApiBase: b2Url });
+	await api('PUT', '/api/settings', { maxPodMinutes: '90', runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, b2KeyId: 'kid', b2AppKey: 'secret-app-key', b2Bucket: 'mybucket', b2ApiBase: b2Url });
 });
 
 test('a session rents one pod set up with Krea 2, the same-face add-on and the LoRAs from Backblaze', async () => {
@@ -223,6 +223,22 @@ test('a casual request is written up into a detailed prompt; a refusal falls bac
 		assert.match(refused.params.note, /declined/);
 		assert.equal(comfy.state.prompts[1].prompt['5'].inputs.text, 'something the writer refuses');
 	} finally { await writer.close(); }
+});
+
+test('a session reserves setup time on top of the minutes asked for, and a stalled setup is explained afterwards', async () => {
+	const q = (await api('POST', '/api/images/quote', { minutes: 30 })).body;
+	assert.equal(q.minutes, 45);
+	assert.equal(q.useMinutes, 30);
+	comfy.state.ready = false;
+	comfy.state.setupLog = 'STEP 1/3 Installing the image engine\n[notice] A new release of pip is available\nSTEP 2/3 Downloading models (2 of 6 files, 9 GB)\n';
+	await api('POST', '/api/images/session', { minutes: 30, confirmEstimate: q.estimate });
+	await api('GET', '/api/images');
+	now += 46 * MIN;
+	await app.gpu.tick();
+	const s = (await api('GET', '/api/images')).body;
+	assert.equal(s.session.state, 'off');
+	assert.match(s.session.lastEnd, /never finished setting up \(.*\); it was at step 2\/3 Downloading models \(2 of 6 files, 9 GB\)/);
+	assert.deepEqual(s.session.setupLog, ['STEP 1/3 Installing the image engine', 'STEP 2/3 Downloading models (2 of 6 files, 9 GB)']);
 });
 
 test('without Backblaze the session still starts, with no LoRAs', async () => {

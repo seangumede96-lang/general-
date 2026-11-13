@@ -906,7 +906,8 @@ const chars = {
 				const out = el('div', { className: 'quote-out' });
 				get.addEventListener('click', () => this.quote(Number(minutes.value), out));
 				box.replaceChildren(
-					...(session.lastEnd ? [el('p', { className: 'sys-alert', textContent: `Last time: ${session.lastEnd}` })] : []),
+					...(session.lastEnd ? [el('details', { className: 'sys-alert' }, el('summary', { textContent: `Last time ${session.lastEnd}` }),
+						...(session.setupLog?.length ? [el('pre', { className: 'setup-log', textContent: session.setupLog.join('\n') })] : []))] : []),
 					el('p', { className: 'muted small', textContent: b2 ? 'Rents a GPU, installs Krea 2 and loads your LoRAs from Backblaze. Then you can make as many pictures as you like until it stops.' : 'Rents a GPU and installs Krea 2. Backblaze is not connected, so no style LoRAs will be loaded.' }),
 					el('div', { className: 'row' }, el('label', { className: 'inline' }, 'Minutes ', minutes), get), out);
 			}
@@ -960,7 +961,7 @@ const chars = {
 			go.disabled = true; go.textContent = 'Starting…';
 			try { await api('POST', '/api/images/session', { minutes, confirmEstimate: q.estimate }); this.refresh(); } catch (err) { fail(err.message); }
 		});
-		out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: q.summary }), el('span', { className: 'spacer' }), go));
+		out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: `${q.useMinutes} minutes of use, plus up to ${q.setupMinutes} for setup. ${q.summary}` }), el('span', { className: 'spacer' }), go));
 	},
 
 	/** Reference pictures per role: { face: [{ id, src }], body: [...], look: [...] }, at most 3 in total. */
