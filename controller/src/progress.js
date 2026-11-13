@@ -23,6 +23,23 @@ export const PLANS = {
 	]
 };
 
+/**
+ * The brain's steps for one particular model: its own name and download size, and a time that
+ * grows with the size. `model` is { label, sizeGb }.
+ */
+export function brainPlan(model) {
+	const gb = model?.sizeGb;
+	return [
+		{ label: `Starting the machine and downloading ${model?.label || 'the model'}${gb ? ` (${gb} GB)` : ''}`, est: Math.round(120 + (gb || 20) * 9) },
+		{ label: `Loading ${model?.label || 'the model'} into memory`, est: Math.round(30 + (gb || 20) * 2) }
+	];
+}
+
+/** The image plan with the download size of this session's actual files (models plus chosen LoRAs). */
+export function imagePlan(totalGb) {
+	return PLANS.image.map((s) => (s.totalGb && totalGb ? { ...s, totalGb, est: Math.round(60 + totalGb * 6) } : s));
+}
+
 /** Index of a setup-log step such as "2/3 Downloading models (1 of 5 files, 9 GB)", plus its detail. */
 export function parseStep(text) {
 	const m = /^(\d+)\/(\d+)\s*(.*)$/.exec(String(text || '').trim());
@@ -68,8 +85,7 @@ export function createTracker(clock = Date.now) {
  * The numbers the page shows. `state` is the tracker entry (or null while booting). All times in
  * milliseconds except the returned seconds.
  */
-export function computeProgress(kind, startedAt, state, now = Date.now()) {
-	const plan = PLANS[kind];
+export function computeProgress(kind, startedAt, state, now = Date.now(), plan = PLANS[kind]) {
 	const index = Math.min(state?.index ?? 0, plan.length - 1);
 	const stepSince = state?.stepSince ?? startedAt;
 	const changedAt = state?.changedAt ?? startedAt;

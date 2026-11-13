@@ -82,6 +82,7 @@ test('chat uses the everyday endpoint until the brain is ready, then switches to
 	pod.state.loading = true;
 	await startBrain(30);
 	assert.equal((await api('GET', '/api/system')).body.brain.state, 'starting');
+	assert.equal((await api('GET', '/api/brains')).body.private.progress.steps[1], 'Loading Qwen 3.6 35B into memory', 'progress names the model actually starting');
 	assert.equal((await chat('hi')).at(-1).content, 'from the everyday endpoint');
 
 	pod.state.loading = false;
@@ -106,6 +107,7 @@ test('the model picker data shows what is in use, and choosing "everyday" overri
 	assert.equal(b.using, 'private');
 	assert.equal(b.private.label, 'Gemma 4 26B');
 	assert.equal(b.private.podId, 'pod1');
+	assert.equal(b.private.state, 'ready');
 	assert.match(rp.state.created[0].args, /-hf unsloth\/gemma-4-26B-A4B-it-GGUF:Q4_K_M /);
 
 	// Selecting another preset while this one is awake does not change what is running.

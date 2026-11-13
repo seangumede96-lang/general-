@@ -39,3 +39,14 @@ test('per-file download rows: size, done, percentage source and speed', () => {
 	// 1.25 of 13.25 GB done, measured from the files themselves.
 	assert.ok(p.fraction > 0.05 && p.fraction < 0.5);
 });
+
+test('each brain model gets its own name, size and time estimate', async () => {
+	const { brainPlan } = await import('../src/progress.js');
+	const big = brainPlan({ label: 'Qwen 3.6 35B', sizeGb: 22 });
+	const small = brainPlan({ label: 'Mistral Small 3.2', sizeGb: 14 });
+	assert.equal(big[0].label, 'Starting the machine and downloading Qwen 3.6 35B (22 GB)');
+	assert.equal(small[1].label, 'Loading Mistral Small 3.2 into memory');
+	assert.ok(small[0].est < big[0].est);
+	const p = computeProgress('brain', 0, null, 30_000, small);
+	assert.equal(p.steps[0], small[0].label);
+});

@@ -9,7 +9,7 @@ import { openB2 } from './b2.js';
 import { imagePodSpec, buildImageGraph, SIZES, REFERENCE_ROLES, MAX_REFERENCES } from './image-recipe.js';
 import { COMFY_PORT, LOG_PORT } from './video-recipe.js';
 import { MIN_VRAM } from './gpu.js';
-import { createTracker, computeProgress, parseStep } from './progress.js';
+import { createTracker, computeProgress, parseStep, imagePlan } from './progress.js';
 
 export class ImageError extends Error {}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -88,6 +88,10 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		return `the image engine never finished setting up (${last.end_reason || 'stopped'})${step ? `; it was at step ${step}` : lines.length ? '' : '; its progress log could not be reached, so the machine may not have started at all'}.`;
 	}
 
+	/** Download size of a session: the Krea 2 files (measured 11 Nov 2026) plus the LoRAs it loads. */
+	const MODEL_GB = 13.14 + 13.2 + 8.88 + 0.25 + 0.2;
+	const sessionGb = () => Math.round(MODEL_GB + savedLoras().reduce((n, l) => n + (l.size || 0), 0) / 1e9);
+
 	async function status() {
 		await listLoras();
 		let p = pod();
@@ -97,7 +101,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			session: {
 				state: !p ? 'off' : p.ready_at ? 'ready' : 'starting',
 				detail: p ? progress.get(p.id) || '' : '',
-				progress: p && !p.ready_at ? computeProgress('image', p.created_at, tracker.get(p.id), clock()) : null,
+				progress: p && !p.ready_at ? computeProgress('image', p.created_at, tracker.get(p.id), clock(), imagePlan(sessionGb())) : null,
 				podId: p?.id || null,
 				secondsLeft: p ? Math.max(0, Math.round((p.deadline_at - clock()) / 1000)) : 0,
 				// Why the last session ended, when that is worth telling the user.

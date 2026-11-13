@@ -1298,27 +1298,6 @@ $('model-chip').addEventListener('click', async () => {
 $('models-close').addEventListener('click', () => picker.dialog.close());
 picker.dialog.addEventListener('click', (e) => { if (e.target === picker.dialog) picker.dialog.close(); });
 
-/* ---------- Window height ---------- */
-
-// Pin the layout to the area that is actually visible. Normally this equals the CSS height
-// already; it corrects phones where the installed app reports a taller page than it shows.
-function fitWindow() {
-	const vv = window.visualViewport;
-	if (!vv || vv.scale !== 1) return;
-	const h = `${Math.round(vv.height)}px`;
-	if (document.documentElement.style.getPropertyValue('--app-h') !== h) document.documentElement.style.setProperty('--app-h', h);
-}
-window.visualViewport?.addEventListener('resize', fitWindow);
-window.addEventListener('resize', fitWindow);
-window.addEventListener('orientationchange', fitWindow);
-// Closing the on-screen keyboard does not always announce itself: on one phone the page stayed
-// at keyboard height, leaving the bottom half blank. Re-measure after focus changes, and keep
-// checking once a second so it can never stay wrong.
-document.addEventListener('focusout', () => { for (const ms of [50, 300, 800]) setTimeout(fitWindow, ms); });
-document.addEventListener('focusin', () => { for (const ms of [300, 800]) setTimeout(fitWindow, ms); });
-setInterval(fitWindow, 1000);
-fitWindow();
-
 /* ---------- Offline page ---------- */
 
 // Lets the browser show a helpful page instead of an error when the engine is not running.

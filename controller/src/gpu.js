@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { createTracker, computeProgress } from './progress.js';
+import { createTracker, computeProgress, brainPlan } from './progress.js';
 // RunPod pod lifecycle with a spend ledger. Rules enforced here, in code:
 //   - the cheapest GPU that fits the job, in whichever cloud has it
 //   - one pod at a time, and only if its worst-case cost fits the remaining budget
@@ -372,7 +372,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 	}
 
 	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, brainStage: () => brainStage,
-		brainProgress: (p) => computeProgress('brain', p.created_at, brainTracker.get(p.id), clock()), activePod: () => db.listPods().find((p) => !p.ended_at) || null };
+		brainProgress: (p, model) => computeProgress('brain', p.created_at, brainTracker.get(p.id), clock(), brainPlan(model)), activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
 
 /**

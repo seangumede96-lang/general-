@@ -15,10 +15,12 @@
 html, body { height: 100%; margin: 0; }
 body {
 	display: flex;
-	/* Height comes from the window itself (100%), not from viewport units: installed as a
-	   home-screen app on Android 15, 100dvh measured the whole screen and pushed the
-	   composer off the bottom. --app-h is a measured fallback set in app.js. */
-	height: var(--app-h, 100%);
+	/* Pinned to the edges of the visible window instead of given a height. Heights measured
+	   with dvh or by script went stale on the owner's phone (cut-off composer, then a blank
+	   lower half after the keyboard closed); a fixed box with all four edges at 0 follows the
+	   window as the browser resizes it. */
+	position: fixed;
+	inset: 0;
 	background: var(--bg);
 	color: var(--text);
 	font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
