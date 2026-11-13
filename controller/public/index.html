@@ -27,6 +27,10 @@
 			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
 			Characters
 		</button>
+		<button id="open-mocap" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M12 7v6M12 9l-5 3M12 9l5-2M12 13l-4 7M12 13l4 7"/></svg>
+			Motion capture
+		</button>
 		<button id="open-video" class="side-btn">
 			<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>
 			Video
@@ -110,6 +114,10 @@
 				<label>API key
 					<input name="runpodApiKey" type="password" autocomplete="off" placeholder="Not set">
 					<small>Stored on this device only. Leave blank to keep the saved key.</small>
+				</label>
+				<label>Hugging Face token
+					<input name="hfToken" type="password" autocomplete="off" placeholder="Not set">
+					<small>For gated models (motion capture uses SAM 3 and SAM 3D Body). Stored on this device only; GPUs get one-hour download links, never the token.</small>
 				</label>
 				<div class="grid3">
 					<label>Spending cap (USD) <input name="budgetTotal" type="number" min="0" step="0.01" placeholder="None"></label>
@@ -236,6 +244,45 @@
 			</form>
 
 			<div id="img-gallery"></div>
+		</div>
+	</section>
+
+	<section id="mocap" hidden>
+		<div class="sys-wrap">
+			<div id="mc-active"></div>
+			<div id="mc-result"></div>
+			<form class="card" id="mc-form">
+				<div class="card-cap">Motion capture</div>
+				<p class="muted small">Turns how the people in a clip move into joint data (numbers) for animating 3D characters. The GPU works blind: it never makes a picture or video of the result. Only you see your clip, here, to mark who is who.</p>
+				<label class="pick" id="mc-pick" for="mc-video-input" role="button" tabindex="0"><span class="pick-cap">Your clip</span><span class="pick-body" id="mc-video-slot">Choose a video</span></label>
+				<input id="mc-video-input" class="file-hidden" type="file" accept="video/*" tabindex="-1">
+
+				<div id="mc-marker" hidden>
+					<div class="card-cap" style="margin-top:12px">Mark each person</div>
+					<div class="mc-stage"><video id="mc-video" playsinline muted preload="auto"></video><canvas id="mc-overlay"></canvas></div>
+					<div class="mc-scrub"><input id="mc-scrub" type="range" min="0" max="1" step="0.01" value="0" aria-label="Position in the clip"><span id="mc-time" class="muted small">0:00.0</span></div>
+					<div class="chips" id="mc-people"></div>
+					<div class="row" style="margin-top:8px">
+						<div class="seg" id="mc-mode"><button type="button" data-mode="1" class="on">This person</button><button type="button" data-mode="0">Not this person</button></div>
+						<span class="spacer"></span>
+						<button type="button" class="link" id="mc-undo">Undo</button>
+					</div>
+					<div id="mc-marks" class="muted small" style="margin-top:8px"></div>
+					<p class="muted small">Tap the chosen person on the clip (head, chest and hips work well). Where people overlap, switch to "Not this person" and tap the other one. If someone is lost later in the clip, move to that moment and tap them again.</p>
+				</div>
+
+				<label class="check"><input id="mc-auto" type="checkbox"> <span>Find people automatically instead (only when they are clearly apart)</span></label>
+				<label>How long the GPU may run
+					<select id="mc-run"><option value="auto">Automatic: estimated for this clip</option><option value="until-done">Until it is done (stops if nothing changes for 20 minutes)</option></select>
+				</label>
+				<label class="check"><input id="mc-rights" type="checkbox"> <span>This footage is mine or licensed to me, and everyone in it is an adult who agreed to it being used this way.</span></label>
+				<div class="row"><span id="mc-note" class="muted small"></span><span class="spacer"></span><button type="submit" class="btn-ghost">Get price</button></div>
+				<div id="mc-quote-out" class="quote-out"></div>
+			</form>
+			<div class="card">
+				<div class="card-cap">Earlier motion captures</div>
+				<div id="mc-history"></div>
+			</div>
 		</div>
 	</section>
 

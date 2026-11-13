@@ -142,7 +142,8 @@ test('deleting a conversation deletes its files', async () => {
 	await send(id, { text: 'x', attachments: [u.body.id] });
 	assert.ok(uploadsOnDisk().includes(u.body.id));
 	await api('DELETE', `/api/conversations/${id}`);
-	await new Promise((r) => setTimeout(r, 50));
+	// Files are removed in the background; give a slow phone up to 3 s.
+	for (let i = 0; i < 300 && uploadsOnDisk().includes(u.body.id); i++) await new Promise((r) => setTimeout(r, 10));
 	assert.ok(!uploadsOnDisk().includes(u.body.id));
 	assert.equal((await fetch(`${base}/api/uploads/${u.body.id}`)).status, 404);
 });

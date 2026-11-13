@@ -567,6 +567,7 @@ const pages = {
 	system: { title: 'System', show: () => { refreshSystem(true); sys.timer = setInterval(() => refreshSystem(false), 5000); }, hide: () => clearInterval(sys.timer) },
 	video: { title: 'Video', show: () => video.show(), hide: () => video.hide() },
 	characters: { title: 'Characters', show: () => chars.show(), hide: () => chars.hide() },
+	mocap: { title: 'Motion capture', show: () => mocap.show(), hide: () => mocap.hide() },
 	body: { title: 'Body', show: () => bodyEditor.show(), hide: () => {} }
 };
 // stack: pages underneath the one showing (a sub-page such as the body editor sits on Characters),
@@ -725,6 +726,8 @@ async function refreshSystem(fillForm) {
 		for (const name of ['budgetTotal', 'maxPodMinutes', 'idleMinutes']) sys.form.elements[name].value = settings[name];
 		sys.form.elements.runpodApiKey.value = '';
 		sys.form.elements.runpodApiKey.placeholder = settings.hasRunpodApiKey ? 'Saved (hidden)' : 'Not set';
+		sys.form.elements.hfToken.value = '';
+		sys.form.elements.hfToken.placeholder = settings.hasHfToken ? 'Saved (hidden)' : 'Not set';
 		sys.formStatus.textContent = '';
 		sys.quoteOut.replaceChildren();
 	}
@@ -769,6 +772,7 @@ sys.form.addEventListener('submit', async (e) => {
 
 $('open-system').addEventListener('click', () => { setDrawer(false); openPage('system'); });
 $('open-video').addEventListener('click', () => { setDrawer(false); openPage('video'); });
+$('open-mocap').addEventListener('click', () => { setDrawer(false); openPage('mocap'); });
 $('open-characters').addEventListener('click', () => { setDrawer(false); openPage('characters'); });
 
 /* ---------- Video Studio ---------- */
@@ -1273,6 +1277,243 @@ for (const input of document.querySelectorAll('.ref-input')) {
 for (const label of document.querySelectorAll('label[role="button"]')) {
 	label.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); label.click(); } });
 }
+
+/* ---------- Motion capture ---------- */
+
+const MC_COLOURS = ['#8b7cf6', '#f6a35b', '#5bd0f6', '#81c995', '#f66b8b', '#f6e35b'];
+const MC_STEPS = [['preparing', 'Passing your clip to the GPU'], ['starting', 'Starting the GPU'], ['loading', 'Setting up and downloading models'], ['tracking', 'Tracking the people and measuring their bodies'], ['checking', 'Checking the results'], ['saving', 'Bringing the joint data back']];
+const mmss = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+
+/**
+ * The owner's clip is shown here, on the phone, only so they can mark who is who; nothing of it
+ * is shown anywhere else. The GPU gets their marks as points relative to the frame.
+ */
+const mocap = {
+	timer: 0, clip: null, people: [], sel: 0, mode: 1, jobs: [], limits: null, dismissed: new Set(),
+
+	show() { this.refresh(); this.timer = setInterval(() => this.refresh(), 3000); if (!this.people.length) this.resetPeople(); },
+	hide() { clearInterval(this.timer); $('mc-video').pause(); },
+
+	resetPeople() { this.people = [{ name: 'Person A', marks: [] }, { name: 'Person B', marks: [] }]; this.sel = 0; this.renderPeople(); },
+
+	async refresh() {
+		let data;
+		try { data = await api('GET', '/api/mocap'); } catch { return; }
+		if (nav.page !== 'mocap') return;
+		this.jobs = data.jobs;
+		this.limits = data.limits;
+		this.render();
+	},
+
+	render() {
+		const active = this.jobs.find((j) => j.active);
+		$('mc-active').replaceChildren(...(active ? [this.activeCard(active)] : []));
+		const latest = this.jobs.find((j) => !j.active && !this.dismissed.has(j.id) && Date.now() - j.ended_at < 3600 * 1000);
+		$('mc-result').replaceChildren(...(!active && latest ? [this.resultCard(latest)] : []));
+		$('mc-form').hidden = Boolean(active);
+		const past = this.jobs.filter((j) => !j.active);
+		$('mc-history').replaceChildren(...(past.length ? past.map((j) => {
+			const when = new Date(j.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+			const right = j.result ? el('a', { href: `/api/uploads/${j.result}`, download: '', textContent: 'Joint data' }) : el('span', { className: 'muted', textContent: j.status === 'cancelled' ? 'Cancelled' : 'Failed' });
+			const what = j.status === 'done' ? (j.qc?.verdict || '') : j.status === 'failed' ? j.detail : '';
+			return el('div', { className: 'hist' }, el('span', {}, when, el('span', { className: 'muted', textContent: ` · ${j.params.seconds} s · ${(j.params.people || []).length || 'auto'} ${(j.params.people || []).length === 1 ? 'person' : 'people'}${what ? ` · ${what}` : ''}` })), right);
+		}) : [el('div', { className: 'muted', textContent: 'Nothing yet.' })]));
+		const l = this.limits;
+		$('mc-note').textContent = !l ? '' : !l.b2 ? 'Backblaze is needed (System page).' : !l.hfToken ? 'Add a Hugging Face token on the System page.' : this.clip?.meta ? `${this.clip.meta.seconds.toFixed(1)} s clip` : `Clips up to ${l.maxSeconds} s.`;
+	},
+
+	activeCard(job) {
+		const at = MC_STEPS.findIndex(([s]) => s === job.status);
+		const stop = el('button', { type: 'button', className: 'btn-danger', textContent: 'Cancel' });
+		stop.addEventListener('click', async () => {
+			if (!confirm('Cancel this motion capture? The GPU is shut down and time already used is still charged.')) return;
+			stop.disabled = true;
+			await api('POST', `/api/mocap/jobs/${job.id}/cancel`).catch(() => {});
+			this.refresh();
+		});
+		return el('div', { className: 'card' },
+			el('div', { className: 'card-cap', textContent: 'Working on your motion capture' }),
+			el('ul', { className: 'steps' }, ...MC_STEPS.map(([, label], i) => {
+				const text = el('span', {}, label);
+				if (i === at && job.detail && job.detail !== label) text.append(' ', el('small', { textContent: `· ${job.detail}` }));
+				return el('li', { className: i < at ? 'done' : i === at ? 'now' : '' }, text);
+			})),
+			el('div', { className: 'row' },
+				el('span', { className: 'muted small', textContent: `${job.params.run === 'until-done' ? 'Runs until done' : `GPU time left: ${job.gpuSecondsLeft == null ? `up to ${job.params.minutes} min` : clock(job.gpuSecondsLeft)}`}, at most ${money(job.params.estimate)}. You can leave this page.` }),
+				el('span', { className: 'spacer' }), stop));
+	},
+
+	/** The result in numbers only: the quality report and the joint data to download. */
+	resultCard(job) {
+		const dismiss = el('button', { type: 'button', className: 'btn-ghost', textContent: 'Make another' });
+		dismiss.addEventListener('click', () => { this.dismissed.add(job.id); this.render(); });
+		if (job.status !== 'done') {
+			return el('div', { className: 'card' }, el('div', { className: 'card-cap', textContent: job.status === 'cancelled' ? 'Cancelled' : 'That did not work' }),
+				el('p', { className: 'sys-alert', textContent: job.detail }), el('p', { className: 'muted small', textContent: 'The GPU has been shut down.' }), el('div', { className: 'row' }, el('span', { className: 'spacer' }), dismiss));
+		}
+		const qc = job.qc || {};
+		const lines = [qc.verdict || 'No quality report.', `${qc.frames ?? '?'} frames at ${qc.fps ?? '?'} fps`];
+		for (const [pid, r] of Object.entries(qc.people || {})) {
+			const name = (job.params.people || [])[Number(pid) - 1] || `Person ${pid}`;
+			lines.push(`${name}: in ${r.frames_present} frames, missing ${r.frames_missing}${r.jitter_median_cm != null ? `, jitter ${r.jitter_median_cm} cm` : ''}${r.jumps_over_15cm != null ? `, jumps ${r.jumps_over_15cm}` : ''}${r.bone_length_drift_pct_median != null ? `, bone drift ${r.bone_length_drift_pct_median}%` : ''}`);
+		}
+		if (qc.swaps?.length) lines.push(`Possible identity swaps at frames ${qc.swaps.slice(0, 10).map((x) => x.frame).join(', ')}${qc.swaps.length > 10 ? '…' : ''}`);
+		return el('div', { className: 'card' },
+			el('div', { className: 'card-cap', textContent: 'Motion capture done' }),
+			el('div', { className: 'mc-qc', textContent: lines.join('\n') }),
+			job.params.b2Path ? el('p', { className: 'muted small', textContent: `Also saved in Backblaze: ${job.params.b2Path}` }) : el('span'),
+			el('div', { className: 'row' }, dismiss, el('span', { className: 'spacer' }), el('a', { className: 'btn-primary', href: `/api/uploads/${job.result}`, download: '', textContent: 'Download joint data' })));
+	},
+
+	async choose(file) {
+		const slot = $('mc-video-slot');
+		const button = slot.parentElement;
+		$('mc-quote-out').replaceChildren();
+		const item = { file, id: null, meta: await video.metadata(file), url: URL.createObjectURL(file) };
+		if (!item.meta || !(item.meta.seconds > 0)) { slot.textContent = 'That video could not be read. Try another.'; return; }
+		this.clip = item;
+		this.resetPeople();
+		const status = el('span', { className: 'pick-cap pick-status', textContent: 'Uploading 0%' });
+		slot.textContent = file.name;
+		button.classList.add('filled');
+		button.querySelector('.pick-status')?.remove();
+		button.append(status);
+		const v = $('mc-video');
+		v.src = item.url;
+		$('mc-scrub').max = String(item.meta.seconds);
+		$('mc-scrub').value = '0';
+		$('mc-marker').hidden = false;
+		this.render();
+		try {
+			const up = await uploadWithProgress(file, (pct) => { status.textContent = `Uploading ${pct}%`; });
+			if (this.clip !== item) return;
+			item.id = up.id;
+			status.textContent = `${item.meta.seconds.toFixed(1)} s · ${item.meta.width}×${item.meta.height}`;
+		} catch (err) { if (this.clip === item) status.textContent = err.message; }
+	},
+
+	/** Where the picture sits inside the video element (it is letterboxed to fit). */
+	contentBox() {
+		const v = $('mc-video');
+		const w = v.clientWidth, h = v.clientHeight, vw = v.videoWidth || 1, vh = v.videoHeight || 1;
+		const k = Math.min(w / vw, h / vh);
+		return { x: (w - vw * k) / 2, y: (h - vh * k) / 2, w: vw * k, h: vh * k };
+	},
+
+	/** Marks within this many seconds of the shown moment count as on it (seeking is not frame-exact). */
+	near: 0.06,
+	markAt(t) { return this.people[this.sel].marks.find((m) => Math.abs(m.t - t) < this.near); },
+
+	tap(e) {
+		if (!this.clip) return;
+		const c = $('mc-overlay').getBoundingClientRect();
+		const b = this.contentBox();
+		const x = (e.clientX - c.left - b.x) / b.w, y = (e.clientY - c.top - b.y) / b.h;
+		if (x < 0 || x > 1 || y < 0 || y > 1) return;
+		const t = Math.round($('mc-video').currentTime * 100) / 100;
+		let mark = this.markAt(t);
+		if (!mark) { mark = { t, points: [] }; this.people[this.sel].marks.push(mark); }
+		mark.points.push([Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000, this.mode]);
+		$('mc-auto').checked = false;
+		this.renderPeople();
+	},
+
+	draw() {
+		const cv = $('mc-overlay');
+		const v = $('mc-video');
+		cv.width = v.clientWidth * devicePixelRatio;
+		cv.height = v.clientHeight * devicePixelRatio;
+		const g = cv.getContext('2d');
+		g.scale(devicePixelRatio, devicePixelRatio);
+		const b = this.contentBox();
+		const t = v.currentTime;
+		this.people.forEach((p, i) => {
+			for (const m of p.marks.filter((mm) => Math.abs(mm.t - t) < this.near)) {
+				for (const [x, y, l] of m.points) {
+					const px = b.x + x * b.w, py = b.y + y * b.h;
+					g.lineWidth = 3;
+					g.strokeStyle = '#000';
+					g.fillStyle = MC_COLOURS[i % MC_COLOURS.length];
+					if (l) { g.beginPath(); g.arc(px, py, 9, 0, Math.PI * 2); g.fill(); g.stroke(); }
+					else { g.strokeStyle = MC_COLOURS[i % MC_COLOURS.length]; g.lineWidth = 4; g.beginPath(); g.moveTo(px - 8, py - 8); g.lineTo(px + 8, py + 8); g.moveTo(px + 8, py - 8); g.lineTo(px - 8, py + 8); g.stroke(); }
+				}
+			}
+		});
+		$('mc-time').textContent = mmss(t);
+	},
+
+	renderPeople() {
+		$('mc-people').replaceChildren(...this.people.map((p, i) => {
+			const b = el('button', { type: 'button', textContent: p.name });
+			b.style.borderColor = MC_COLOURS[i % MC_COLOURS.length];
+			if (i === this.sel) { b.classList.add('on'); b.style.background = MC_COLOURS[i % MC_COLOURS.length]; }
+			b.addEventListener('click', () => { this.sel = i; this.renderPeople(); });
+			return b;
+		}), (() => {
+			const add = el('button', { type: 'button', textContent: '+ Person' });
+			add.addEventListener('click', () => { if (this.people.length >= 6) return; this.people.push({ name: `Person ${String.fromCharCode(65 + this.people.length)}`, marks: [] }); this.sel = this.people.length - 1; this.renderPeople(); });
+			return add;
+		})());
+		$('mc-marks').replaceChildren(...this.people.map((p, i) => {
+			const marks = p.marks.filter((m) => m.points.length);
+			return el('div', { textContent: `${p.name}: ${marks.length ? marks.map((m) => `${m.points.filter((x) => x[2]).length} tap${m.points.filter((x) => x[2]).length === 1 ? '' : 's'}${m.points.some((x) => !x[2]) ? ` + ${m.points.filter((x) => !x[2]).length} not` : ''} at ${mmss(m.t)}`).join('; ') : 'not marked yet'}`, style: `color:${MC_COLOURS[i % MC_COLOURS.length]}` });
+		}));
+		for (const b of $('mc-mode').querySelectorAll('button')) b.classList.toggle('on', Number(b.dataset.mode) === this.mode);
+		$('mc-quote-out').replaceChildren();
+		this.draw();
+	},
+
+	undo() {
+		const p = this.people[this.sel];
+		const m = p.marks.at(-1);
+		if (!m) return;
+		m.points.pop();
+		if (!m.points.length) p.marks.pop();
+		this.renderPeople();
+	},
+
+	request() {
+		return {
+			input: this.clip.id, seconds: this.clip.meta.seconds, automatic: $('mc-auto').checked, runMinutes: $('mc-run').value,
+			people: $('mc-auto').checked ? [] : this.people.filter((p) => p.marks.some((m) => m.points.some((x) => x[2]))).map((p) => ({ name: p.name, marks: p.marks }))
+		};
+	},
+
+	async quote() {
+		const out = $('mc-quote-out');
+		const fail = (message) => out.replaceChildren(el('div', { className: 'sys-alert', textContent: message }));
+		if (!this.clip) return fail('Choose a video first.');
+		if (!this.clip.id) return fail('Your clip is still uploading.');
+		if (!$('mc-rights').checked) return fail('Tick the box to confirm you may use this footage.');
+		out.replaceChildren(el('div', { className: 'muted small', textContent: 'Checking prices…' }));
+		let q;
+		try { q = await api('POST', '/api/mocap/quote', this.request()); } catch (err) { return fail(err.message); }
+		if (!q.allowed) return fail(q.reason);
+		const go = el('button', { type: 'button', className: 'btn-primary', textContent: `Process for up to ${money(q.estimate)}` });
+		go.addEventListener('click', async () => {
+			go.disabled = true;
+			go.textContent = 'Starting…';
+			try {
+				await api('POST', '/api/mocap/jobs', { ...this.request(), rightsConfirmed: true, confirmEstimate: q.estimate });
+				out.replaceChildren();
+				this.refresh();
+			} catch (err) { fail(err.message); go.disabled = false; go.textContent = `Process for up to ${money(q.estimate)}`; }
+		});
+		const who = this.request().people;
+		out.replaceChildren(
+			el('div', { className: 'small', textContent: `${q.seconds.toFixed(1)} s clip, ${who.length ? `${who.length} ${who.length === 1 ? 'person' : 'people'} marked` : 'people found automatically'}. Estimated about ${q.needed} minutes on a 48 GB GPU${q.run === 'until-done' ? '; it runs until done' : `, reserved for up to ${q.minutes} minutes`}. ${q.summary}` }),
+			el('div', { className: 'row', style: 'margin-top:10px' }, el('span', { className: 'muted small', textContent: 'You pay only for the minutes used.' }), el('span', { className: 'spacer' }), go));
+	}
+};
+$('mc-video-input').addEventListener('change', (e) => { if (e.target.files[0]) mocap.choose(e.target.files[0]); e.target.value = ''; });
+$('mc-scrub').addEventListener('input', () => { $('mc-video').currentTime = Number($('mc-scrub').value); });
+$('mc-video').addEventListener('seeked', () => mocap.draw());
+$('mc-video').addEventListener('loadeddata', () => { $('mc-video').currentTime = 0; mocap.draw(); });
+$('mc-overlay').addEventListener('pointerup', (e) => mocap.tap(e));
+$('mc-undo').addEventListener('click', () => mocap.undo());
+for (const b of $('mc-mode').querySelectorAll('button')) b.addEventListener('click', () => { mocap.mode = Number(b.dataset.mode); mocap.renderPeople(); });
+$('mc-form').addEventListener('submit', (e) => { e.preventDefault(); mocap.quote(); });
+new ResizeObserver(() => mocap.draw()).observe($('mc-video'));
 
 /* ---------- Picture viewer ---------- */
 

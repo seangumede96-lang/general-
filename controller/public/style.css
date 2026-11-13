@@ -250,6 +250,12 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 .vslider b { font-size: 13px; }
 .vslider span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .hslider { display: grid; grid-template-columns: 110px 1fr 52px; align-items: center; gap: 10px; padding: 4px 0; font-size: 14px; }
+.mc-stage { position: relative; background: #000; border-radius: 12px; overflow: hidden; }
+.mc-stage video { display: block; width: 100%; max-height: 55vh; object-fit: contain; }
+.mc-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.mc-scrub { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.mc-scrub input { flex: 1; }
+.mc-qc { white-space: pre-wrap; font-size: 13px; background: var(--surface-2); border-radius: 10px; padding: 10px; margin: 8px 0; font-variant-numeric: tabular-nums; }
 .hs-track { touch-action: pan-y; padding: 8px 0; cursor: pointer; }
 .hs-track input { pointer-events: none; display: block; }
 .saved-chip { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; }

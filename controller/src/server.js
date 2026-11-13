@@ -13,6 +13,7 @@ import { streamChat, listModels } from './model.js';
 import { createTools } from './tools.js';
 import { createVideoStudio, VideoError } from './video.js';
 import { createImageStudio, ImageError } from './images.js';
+import { createMocapStudio, MocapError } from './mocap.js';
 import { B2Error } from './b2.js';
 import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel, isUncensored } from './gpu.js';
 
@@ -56,13 +57,15 @@ const titleFrom = (text) => {
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
 	const gpu = createGpuManager({ db, clock });
 	const tools = createTools({ db, gpu, uploadsDir });
 	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs, stallMs: videoStallMs, generateFactor: videoGenerateFactor });
 	studio.recover().catch((err) => console.error('[video]', err.message));
+	const mocap = createMocapStudio({ db, gpu, uploadsDir, clock, pollMs: mocapPollMs, stallMs: mocapStallMs, hfBase });
+	mocap.recover().catch((err) => console.error('[mocap]', err.message));
 	// A plain question-and-answer call to the brain in use, for helpers such as the prompt writer.
 	const llm = async (messages) => (await complete({ messages, temperature: 0.7, signal: AbortSignal.timeout(60000) })).content.trim();
 	const images = createImageStudio({ db, gpu, uploadsDir, clock, pollMs: imagePollMs, llm });
@@ -70,7 +73,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 	const studioCall = async (fn) => {
 		try { return await fn(); }
 		catch (err) {
-			if (err instanceof VideoError || err instanceof ImageError) throw new HttpError(409, err.message);
+			if (err instanceof VideoError || err instanceof ImageError || err instanceof MocapError) throw new HttpError(409, err.message);
 			if (err instanceof B2Error) throw new HttpError(502, err.message);
 			if (err instanceof GpuError) throw new HttpError(err.code === 'not_configured' ? 400 : 502, err.message);
 			throw err;
@@ -419,6 +422,14 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			if (!job) throw new HttpError(404, 'Job not found');
 			return job;
 		}],
+		['GET', /^\/api\/mocap$/, () => ({ jobs: mocap.list(), limits: mocap.limits() })],
+		['POST', /^\/api\/mocap\/quote$/, async (req) => studioCall(async () => mocap.quote(await readJson(req)))],
+		['POST', /^\/api\/mocap\/jobs$/, async (req) => studioCall(async () => mocap.create(await readJson(req)))],
+		['POST', /^\/api\/mocap\/jobs\/([\w-]+)\/cancel$/, (_req, jobId) => {
+			const job = mocap.cancel(jobId);
+			if (!job) throw new HttpError(404, 'Job not found');
+			return job;
+		}],
 		// Everything the chat's model picker needs: what is in use, and what can be chosen.
 		['GET', /^\/api\/brains$/, async () => {
 			await gpu.probeBrain().catch(() => {});
@@ -556,10 +567,11 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		}),
 		gpu, studio, images,
 		/** True while anything is running that a restart would interrupt or orphan. */
-		busy: () => live.size > 0 || db.listPods().some((p) => !p.ended_at) || studio.list().some((j) => j.active) || db.listGenerations().some((g) => g.status === 'running'),
+		busy: () => live.size > 0 || db.listPods().some((p) => !p.ended_at) || studio.list().some((j) => j.active) || mocap.list().some((j) => j.active) || db.listGenerations().some((g) => g.status === 'running'),
 		async close() {
 			clearInterval(watchdog);
 			await studio.shutdown();
+			await mocap.shutdown();
 			for (const turn of live.values()) cancelTurn(turn);
 			for (const set of subscribers.values()) for (const res of set) res.end();
 			server.closeAllConnections?.();
