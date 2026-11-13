@@ -259,16 +259,22 @@ wide = {}
 for k in body_idx:
     x, y, z = bp[k]
     if arm_w.get(k, 0.0) > 0.5: continue
-    # Even widening from just below the waist up to the armpits, fading only at the two ends,
-    # so the sides stay straight instead of bulging out in the middle.
-    bump = smooth((y - (WAIST_Y - 0.9)) / 0.7) * smooth((ARMPIT_Y - y) / 0.6) * (1 - arm_w.get(k, 0.0))
+    # Straight-line fades only (no S-curves): full from the waist to the bottom of the ribcage,
+    # fading in a straight line to nothing at the armpits and at the top of the hips.
+    lin = lambda t: min(1.0, max(0.0, t))
+    bump = min(lin((y - (WAIST_Y - 0.9)) / 0.9), lin((ARMPIT_Y - y) / (ARMPIT_Y - CHEST_Y))) * (1 - arm_w.get(k, 0.0))
     if bump <= 1e-3: continue
     key = round(y / 0.08)
     if key not in mid_rows:
-        zs = [bp[j][2] for j in body_idx if abs(bp[j][1] - y) < 0.08 and abs(bp[j][0]) < 1.6 and arm_w.get(j, 0.0) < 0.5]
-        mid_rows[key] = sum(zs) / len(zs)
-    zc = mid_rows[key]
-    wide[k] = (0.16 * x * bump, 0.0, 0.08 * (z - zc) * bump)
+        xs = [abs(bp[j][0]) for j in body_idx if abs(bp[j][1] - y) < 0.08 and arm_w.get(j, 0.0) < 0.3 and abs(bp[j][0]) < 2.2]
+        mid_rows[key] = max(xs) if xs else 1.0
+    half = mid_rows[key]
+    # Only the sides move, outwards by an even amount; the chest, breasts and abs in the middle
+    # are not stretched, so they keep their shape.
+    side = smooth((abs(x) / half - 0.5) / 0.4)
+    if side <= 1e-3: continue
+    dx = 0.2 * side * bump
+    wide[k] = (dx if x > 0 else -dx, 0.0, 0.0)
 morphs['midsection-wide-up'] = wide
 morphs['midsection-wide-down'] = {k: tuple(-c * 0.8 for c in v) for k, v in wide.items()}
 morphs['navel-up'] = target('stomach/stomach-navel-up.target')
