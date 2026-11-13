@@ -257,3 +257,44 @@ test('unknown run lengths fall back to automatic, and the GPU time left is shown
 	assert.ok(seen > 3500 && seen <= 3600, `time left ${seen}`);
 	await finished(started.body.id);
 });
+
+test('a stuck job is stopped even with no time limit: setup with no progress, or generating far too long', async () => {
+	// setup that never changes
+	await app.close();
+	app = createApp({ dataDir: join(root, `d${++n}`), watchdogMs: 0, videoPollMs: 5, videoStallMs: 150, videoGenerateFactor: 4 });
+	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
+	await api('PUT', '/api/settings', { maxPodMinutes: '90', runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, videoWorkflowUrl: `${comfy.baseUrl}/workflow.json` });
+	comfy.state.ready = false;
+	const stuck = await finished((await startJob(await newRequest({ runMinutes: 'until-done' }))).body.id);
+	assert.equal(stuck.status, 'failed');
+	assert.match(stuck.detail, /made no progress/);
+	assert.deepEqual(await podGone(), ['pod1'], 'the GPU is deleted');
+
+	// setup that keeps changing is not stuck
+	comfy.state.ready = false;
+	let steps = 0;
+	const timer = setInterval(() => { comfy.state.setupLog = `STEP 3/4 Downloading models ${++steps}\n`; if (steps > 12) comfy.state.ready = true; }, 40);
+	const moving = await finished((await startJob(await newRequest({ runMinutes: 'until-done' }))).body.id);
+	clearInterval(timer);
+	assert.equal(moving.status, 'done', moving.detail);
+});
+
+test('generating far past its estimate stops the GPU', async () => {
+	let now = Date.now();
+	await app.close();
+	app = createApp({ dataDir: join(root, `d${++n}`), clock: () => now, watchdogMs: 0, videoPollMs: 5 });
+	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
+	await api('PUT', '/api/settings', { maxPodMinutes: '90', runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, videoWorkflowUrl: `${comfy.baseUrl}/workflow.json` });
+	comfy.state.pollsUntilDone = 1e9;
+	const started = await startJob(await newRequest({ runMinutes: 'until-done' }));
+	for (let i = 0; i < 200; i++) {
+		const job = (await api('GET', '/api/video')).body.jobs.find((j) => j.id === started.body.id);
+		if (job.status === 'generating') break;
+		await new Promise((r) => setTimeout(r, 5));
+	}
+	now += 61 * 60000; // 5 s clip: limit is max(60, 5 x 2 x 4) = 60 minutes
+	const job = await finished(started.body.id);
+	assert.equal(job.status, 'failed');
+	assert.match(job.detail, /Generating took over 60 minutes/);
+	assert.deepEqual(await podGone(), ['pod1']);
+});

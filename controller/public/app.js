@@ -957,7 +957,7 @@ const video = {
 		});
 		out.replaceChildren(
 			el('div', { className: 'small', textContent: q.run === 'until-done'
-				? `${q.seconds} seconds of video, estimated at about ${q.needed} minutes. The GPU runs until the video is done, with no time limit; it stops by itself after ${Math.round(q.minutes / 6) / 10} hours only if this phone goes offline and cannot stop it. ${q.summary}`
+				? `${q.seconds} seconds of video, estimated at about ${q.needed} minutes. The GPU runs until the video is done, with no time limit; it is also stopped if setup shows no progress for 20 minutes or generating takes far longer than expected, and after ${Math.round(q.minutes / 6) / 10} hours if this phone goes offline. Worst case: ${q.summary}`
 				: `${q.seconds} seconds of video, estimated at about ${q.needed} minutes. The GPU may run for up to ${q.minutes} minutes. ${q.summary}` }),
 			...(q.warning ? [el('div', { className: 'sys-alert', style: 'margin-top:8px', textContent: q.warning })] : []),
 			el('div', { className: 'row', style: 'margin-top:10px' }, el('span', { className: 'muted small', textContent: 'You pay only for the minutes used.' }), el('span', { className: 'spacer' }), go));

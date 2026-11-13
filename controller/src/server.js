@@ -56,12 +56,12 @@ const titleFrom = (text) => {
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000 }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
 	const gpu = createGpuManager({ db, clock });
 	const tools = createTools({ db, gpu, uploadsDir });
-	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs });
+	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs, stallMs: videoStallMs, generateFactor: videoGenerateFactor });
 	studio.recover().catch((err) => console.error('[video]', err.message));
 	// A plain question-and-answer call to the brain in use, for helpers such as the prompt writer.
 	const llm = async (messages) => (await complete({ messages, temperature: 0.7, signal: AbortSignal.timeout(60000) })).content.trim();

@@ -19,7 +19,15 @@ export class VideoError extends Error {}
 const ACTIVE = new Set(['starting', 'loading', 'uploading', 'generating', 'saving']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 5000 }) {
+/**
+ * Stuck-job guards, so a job with a long or unlimited run length cannot keep a GPU running
+ * while making no progress: setup that shows no change for this long fails the job, and so
+ * does generating for more than GENERATE_FACTOR times its estimate (at least an hour).
+ */
+const STALL_MS = 20 * 60000;
+const GENERATE_FACTOR = 4;
+
+export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 5000, stallMs = STALL_MS, generateFactor = GENERATE_FACTOR }) {
 	const cancelled = new Set();
 	const tracker = createTracker(clock);
 	const running = new Map(); // job id -> promise of its run
@@ -168,16 +176,23 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const comfy = createComfyClient(gpu.proxyUrl(podId, COMFY_PORT));
 
 			setStep(id, 'loading', 'Starting the GPU');
+			let lastSign = '';
+			let lastFiles = '';
+			let lastChange = clock();
 			for (;;) {
 				check();
 				if (await comfy.ready()) break;
 				const p = await setupProgress(podId);
+				// Any change in the setup log (or download progress, below) counts as progress.
+				const sign = `${p.step || ''}|${p.tail || ''}`;
+				if (sign !== lastSign) { lastSign = sign; lastChange = clock(); }
 				if (p.failed) throw new VideoError(`Setting up the video engine failed: ${p.tail || 'no details available'}`);
 				if (p.step) { const parsed = parseStep(p.step); if (parsed) tracker.report(id, parsed.index, p.step); }
 				if (/Downloading/.test(p.step || '')) {
 					const f = await fetch(`${gpu.proxyUrl(podId, LOG_PORT)}/files.txt`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
-					if (f?.ok) tracker.files(id, await f.text());
+					if (f?.ok) { const text = await f.text(); tracker.files(id, text); if (text !== lastFiles) { lastFiles = text; lastChange = clock(); } }
 				}
+				if (clock() - lastChange > stallMs) throw new VideoError(`Setting up the video engine made no progress for ${Math.round(stallMs / 60000)} minutes, so the GPU was shut down to stop charges. Try again; a different GPU is usually picked.`);
 				if (p.step && p.step !== db.getJob(id).detail) db.updateJob(id, { detail: p.step });
 				await sleep(pollMs);
 			}
@@ -194,9 +209,12 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const prompt = job.prompt || 'a person, natural lighting, detailed, realistic';
 			const promptId = await comfy.queue(buildWorkflow(template, { video, image, prompt, seed: Math.floor(Math.random() * 2 ** 31), ...params }), id);
 			let files;
+			const genStarted = clock();
+			const genLimit = Math.max(60, params.seconds * MINUTES_PER_CLIP_SECOND * generateFactor) * 60000;
 			for (;;) {
 				await sleep(pollMs);
 				check();
+				if (clock() - genStarted > genLimit) throw new VideoError(`Generating took over ${Math.round(genLimit / 60000)} minutes, far longer than expected, so the GPU was shut down to stop charges.`);
 				const r = await comfy.result(promptId);
 				if (r.done) { files = r.files; break; }
 			}
