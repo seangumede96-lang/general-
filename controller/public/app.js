@@ -43,6 +43,57 @@ async function api(method, path, body) {
 // Any element with data-since shows the minutes and seconds since that moment, ticking once a second.
 const sinceText = (ms) => { const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
 setInterval(() => { for (const n of document.querySelectorAll('[data-since]')) n.textContent = sinceText(Number(n.dataset.since)); }, 1000);
+// While a machine starts, a word rotates above its progress bar so it is plain that work is going on.
+const BOOT_WORDS = {
+	0: ['Booting…', 'Waking the GPU…', 'Warming up…', 'Spinning up…', 'Powering on…'],
+	1: ['Unpacking…', 'Installing…', 'Assembling…', 'Tightening bolts…', 'Setting the table…'],
+	download: ['Fetching gigabytes…', 'Downloading…', 'Hauling weights…', 'Pulling models…', 'Filling the tank…'],
+	load: ['Cogitating…', 'Loading neurons…', 'Percolating…', 'Brewing…', 'Simmering…'],
+	gen: ['Cooking…', 'Rendering…', 'Painting frames…', 'Conjuring…', 'Crafting…']
+};
+let bootTick = 0;
+setInterval(() => {
+	bootTick++;
+	for (const n of document.querySelectorAll('.boot-word')) {
+		const list = BOOT_WORDS[n.dataset.words] || BOOT_WORDS[0];
+		n.textContent = list[bootTick % list.length];
+	}
+	for (const n of document.querySelectorAll('[data-eta-until]')) n.textContent = etaText(Number(n.dataset.etaUntil));
+}, 1000);
+const clockText = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, Math.floor(sec % 60))).padStart(2, '0')}`;
+const etaText = (until) => { const sec = Math.round((until - Date.now()) / 1000); return sec > 0 ? `about ${clockText(sec)} left` : 'any moment now'; };
+
+/** Bar, elapsed time, estimated time left and a rotating status word for a machine that is starting. */
+function progressNode(p, extra = '') {
+	if (!p) return el('div');
+	const label = p.steps[p.index] || '';
+	const words = /download/i.test(label) ? 'download' : /loading the model/i.test(label) ? 'load' : /replacing|render/i.test(label) ? 'gen' : p.index === 0 ? 0 : 1;
+	const word = el('span', { className: 'boot-word', textContent: BOOT_WORDS[words][bootTick % BOOT_WORDS[words].length] });
+	word.dataset.words = String(words);
+	const eta = el('span', { className: 'boot-eta', textContent: etaText(Date.now() + p.etaSeconds * 1000) });
+	eta.dataset.etaUntil = String(Date.now() + p.etaSeconds * 1000);
+	const meta = el('div', { className: 'boot-meta' },
+		p.steps.length > 1 ? `Step ${p.index + 1} of ${p.steps.length} · ` : '', label, p.detail ? ` (${p.detail})` : '', ' · ', sinceNode(Date.now() - p.elapsedSeconds * 1000), ' so far', extra);
+	const node = el('div', { className: 'boot' },
+		el('div', { className: 'boot-top' }, el('span', { className: 'spin', textContent: '✻', ariaHidden: 'true' }), word, eta),
+		el('div', { className: 'bar', role: 'progressbar', ariaValueNow: Math.round(p.fraction * 100), ariaValueMin: 0, ariaValueMax: 100 }, el('div', { style: `width:${Math.round(p.fraction * 100)}%` })),
+		meta);
+	// During the download step: one row per file with its size, progress and speed.
+	if (p.files?.length) {
+		const gb = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
+		node.append(el('div', { className: 'dl-files' }, ...p.files.map((f) => {
+			const pct = f.total ? Math.min(100, Math.floor(f.done / f.total * 100)) : 0;
+			const done = f.total > 0 && f.done >= f.total;
+			const right = done ? `${gb(f.total)} · done` : f.total ? `${gb(f.done)} of ${gb(f.total)} · ${pct}%${f.speed > 0 ? ` · ${(f.speed / 1e6).toFixed(f.speed < 1e7 ? 1 : 0)} MB/s` : ''}` : `${gb(f.done)} so far`;
+			return el('div', { className: `dl-row${done ? ' done' : ''}` },
+				el('div', { className: 'dl-top' }, el('span', { className: 'dl-name', textContent: f.name.replace(/\.safetensors$/, '') }), el('span', { textContent: right })),
+				el('div', { className: 'bar' }, el('div', { style: `width:${done ? 100 : pct}%` })));
+		})));
+	}
+	if (p.quietSeconds > p.quietLimitSeconds) node.append(el('div', { className: 'boot-quiet', textContent: `No news from the machine for ${clockText(p.quietSeconds)}. Still waiting; if it never gets ready it is shut down by itself and stops charging.` }));
+	return node;
+}
+
 function sinceNode(ms) { const n = document.createElement('span'); n.dataset.since = String(ms); n.textContent = sinceText(ms); return n; }
 
 /* ---------- Sidebar ---------- */
@@ -731,7 +782,6 @@ const video = {
 
 	activeCard(job) {
 		const at = VIDEO_STEPS.findIndex(([s]) => s === job.status);
-		const mins = Math.max(0, Math.floor((Date.now() - job.created_at) / 60000));
 		const stop = el('button', { type: 'button', className: 'btn-danger', textContent: 'Cancel' });
 		stop.addEventListener('click', async () => {
 			if (!confirm('Cancel this video? The GPU is shut down and time already used is still charged.')) return;
@@ -746,8 +796,9 @@ const video = {
 				if (i === at && job.detail && job.detail !== label) text.append(' ', el('small', { textContent: `· ${job.detail}` }));
 				return el('li', { className: i < at ? 'done' : i === at ? 'now' : '' }, text);
 			})),
+			progressNode(job.progress),
 			el('div', { className: 'row' },
-				el('span', { className: 'muted small', textContent: `${mins} min so far. Reserved up to ${job.params.minutes} min, at most ${money(job.params.estimate)}. You can leave this page.` }),
+				el('span', { className: 'muted small', textContent: `Reserved up to ${job.params.minutes} min, at most ${money(job.params.estimate)}. You can leave this page.` }),
 				el('span', { className: 'spacer' }), stop));
 	},
 
@@ -897,7 +948,8 @@ const chars = {
 	renderSession() {
 		const { session, loras, b2 } = this.data;
 		const text = { off: 'Off. Nothing is being charged.', starting: `Starting up${session.detail ? `: ${session.detail}` : ''}. About 6 minutes.`, ready: `Ready. ${clock(session.secondsLeft)} left; it also stops after 10 quiet minutes.` };
-		Object.assign($('img-state'), { className: `brain-state ${session.state}`, textContent: text[session.state] });
+		Object.assign($('img-state'), { className: `brain-state ${session.state}`, textContent: session.state === 'starting' ? 'Starting up' : text[session.state] });
+		if (session.state === 'starting') $('img-state').append(progressNode(session.progress));
 		const box = $('img-session');
 		if (session.state === 'off') {
 			if (!box.querySelector('#img-minutes')) {
@@ -1092,7 +1144,9 @@ async function refreshChip() {
 		picker.name.textContent = `${b.private.label} · private`;
 		picker.dot.className = 'dot private';
 	} else if (waking) {
-		picker.name.replaceChildren(`Turning on ${b.private.label} · `, sinceNode(b.private.startedAt || Date.now()));
+		const eta = el('span');
+		if (b.private.progress) { eta.dataset.etaUntil = String(Date.now() + b.private.progress.etaSeconds * 1000); eta.textContent = etaText(Number(eta.dataset.etaUntil)); }
+		picker.name.replaceChildren(`Turning on ${b.private.label} · `, sinceNode(b.private.startedAt || Date.now()), ...(b.private.progress ? [' · ', eta] : []));
 		picker.dot.className = 'dot waking';
 	} else {
 		picker.name.textContent = b.everyday.model || (b.everyday.hasKey ? 'Everyday model' : 'Choose a model');
@@ -1144,7 +1198,7 @@ async function renderPicker() {
 	const stateNote = el('div', { className: 'opt-note' });
 	if (p.state === 'off') stateNote.textContent = 'Off. Nothing is being charged.';
 	else if (p.state === 'ready') stateNote.append(`On for `, sinceNode(p.startedAt), ` · ${p.gpu} at ${money(p.rate)}/h. Chat is using it.`);
-	else stateNote.append('Turning on · ', sinceNode(p.startedAt), ` · ${stages[p.stage] || stages.downloading} You can close this; the chip shows progress.`);
+	else stateNote.append(progressNode(p.progress), el('div', { className: 'boot-meta', textContent: 'You can close this; the chip in the message box shows progress too.' }));
 	const wakeBox = el('div');
 	const chosen = p.presets.find((x) => x.id === (p.state === 'off' ? p.selected : p.model)) || p.presets[0];
 	const sw = el('button', { type: 'button', className: `switch${p.state === 'starting' ? ' waking' : ''}`, role: 'switch', ariaLabel: 'Private brain' });

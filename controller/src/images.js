@@ -9,6 +9,7 @@ import { openB2 } from './b2.js';
 import { imagePodSpec, buildImageGraph, SIZES, REFERENCE_ROLES, MAX_REFERENCES } from './image-recipe.js';
 import { COMFY_PORT, LOG_PORT } from './video-recipe.js';
 import { MIN_VRAM } from './gpu.js';
+import { createTracker, computeProgress, parseStep } from './progress.js';
 
 export class ImageError extends Error {}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,6 +29,7 @@ Rules:
 
 export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000, llm = null }) {
 	const progress = new Map(); // podId -> latest setup step
+	const tracker = createTracker(clock);
 	const pod = () => db.listPods().find((p) => !p.ended_at && p.kind === 'image') || null;
 	const comfyFor = (p) => createComfyClient(gpu.proxyUrl(p.id, COMFY_PORT));
 	const b2Config = () => { const s = db.getSettings(); return { keyId: s.b2KeyId, appKey: s.b2AppKey, bucket: s.b2Bucket, apiBase: s.b2ApiBase || undefined }; };
@@ -42,7 +44,15 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			if (!res.ok) return;
 			const lines = (await res.text()).trim().split('\n');
 			const step = lines.filter((l) => l.startsWith('STEP ')).at(-1);
-			if (step) progress.set(p.id, step.replace(/^STEP /, ''));
+			if (step) {
+				progress.set(p.id, step.replace(/^STEP /, ''));
+				const parsed = parseStep(step.replace(/^STEP /, ''));
+				if (parsed) tracker.report(p.id, parsed.index, step);
+				if (/Downloading/.test(step)) {
+					const f = await fetch(`${gpu.proxyUrl(p.id, LOG_PORT)}/files.txt`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+					if (f?.ok) tracker.files(p.id, await f.text());
+				}
+			}
 			// Kept on the phone: once the pod is deleted its log is gone, and it is the only record of why setup stalled.
 			db.setSettings({ imageSetupLog: JSON.stringify({ podId: p.id, at: clock(), lines: lines.filter((l) => !/\[notice\]|Running pip as the 'root' user/.test(l)).slice(-12) }) });
 			if (lines.some((l) => l.startsWith('SETUP FAILED'))) {
@@ -87,6 +97,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			session: {
 				state: !p ? 'off' : p.ready_at ? 'ready' : 'starting',
 				detail: p ? progress.get(p.id) || '' : '',
+				progress: p && !p.ready_at ? computeProgress('image', p.created_at, tracker.get(p.id), clock()) : null,
 				podId: p?.id || null,
 				secondsLeft: p ? Math.max(0, Math.round((p.deadline_at - clock()) / 1000)) : 0,
 				// Why the last session ended, when that is worth telling the user.

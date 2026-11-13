@@ -203,6 +203,30 @@ body.view-system #menu { display: none; }
 a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 .hist .muted { overflow-wrap: anywhere; }
 
+/* Start-up progress */
+.boot { margin: 6px 0 4px; }
+.boot-top { display: flex; align-items: center; gap: 10px; font-size: 14.5px; }
+.spin { display: inline-block; color: #c4a2ff; font-size: 18px; line-height: 1; animation: spin 2.4s linear infinite, glow 1.6s ease-in-out infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes glow { 50% { color: #8ab4f8; } }
+.boot-word { font-weight: 600; flex: 1; min-width: 0; background: linear-gradient(90deg, #ececec 30%, #8b7cf6 50%, #ececec 70%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2s linear infinite; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.boot-eta { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13.5px; white-space: nowrap; }
+.bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 8px 0 6px; position: relative; }
+.bar > div { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #8b7cf6, #5b9cf6); transition: width .8s ease; position: relative; overflow: hidden; }
+.bar > div::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: sweep 1.6s ease-in-out infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.boot-meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.dl-files { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.dl-row { font-size: 12.5px; }
+.dl-top { display: flex; gap: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.dl-row .bar { height: 4px; margin: 3px 0 0; }
+.dl-row.done .bar > div { background: #81c995; }
+.dl-row.done .bar > div::after { display: none; }
+.boot-quiet { font-size: 13px; color: #f2c66d; margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) { .spin, .boot-word, .bar > div::after { animation: none; } .boot-word { color: var(--text); background: none; } }
+
 /* On/off switch */
 .switch-row { display: flex; align-items: center; gap: 12px; padding: 12px 8px 6px; }
 .switch-row .opt-main { flex: 1; }

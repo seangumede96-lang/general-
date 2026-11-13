@@ -23,14 +23,20 @@ const HF = 'https://huggingface.co';
  */
 export function downloadLines(files, root, step) {
 	const q = (u) => `'${u.replace(/'/g, '')}'`;
+	const paths = files.map(([, d]) => `"${root}/${d}"`).join(' ');
 	return [
 		`echo "STEP ${step} Downloading models"`,
 		'(apt-get install -y -qq aria2 >/dev/null 2>&1 || true)',
 		`mkdir -p ${[...new Set(files.map(([, d]) => `${root}/${d.split('/').slice(0, -1).join('/')}`))].join(' ')}`,
-		'get() { if command -v aria2c >/dev/null; then aria2c -q -x 16 -s 16 -k 1M --retry-wait 3 -m 5 --allow-overwrite=true -d "$(dirname "$2")" -o "$(basename "$2")" "$1" && touch "$2.done"; else curl -fsSL --retry 5 --connect-timeout 20 -o "$2" "$1" && touch "$2.done"; fi; }',
+		// Each file's full size is asked for first, so the app can show how far along each one is.
+		'size() { curl -sIL --connect-timeout 20 "$1" | tr -d "\\r" | awk \'tolower($1)=="content-length:"{n=$2} END{print n+0}\'; }',
+		'get() { size "$1" > "$2.total"; if command -v aria2c >/dev/null; then aria2c -q -x 16 -s 16 -k 1M --file-allocation=none --retry-wait 3 -m 5 --allow-overwrite=true -d "$(dirname "$2")" -o "$(basename "$2")" "$1" && touch "$2.done"; else curl -fsSL --retry 5 --connect-timeout 20 -o "$2" "$1" && touch "$2.done"; fi; }',
+		// One line per file for the app: name, bytes so far, total bytes.
+		`files() { for f in ${paths}; do echo "$(basename "$f") $(stat -c %s "$f" 2>/dev/null || echo 0) $(cat "$f.total" 2>/dev/null || echo 0)"; done > /srv/log/files.tmp && mv /srv/log/files.tmp /srv/log/files.txt; }`,
 		...files.map(([url, dest]) => `get ${q(url)} "${root}/${dest}" &`),
-		`while [ "$(ls ${root}/*/*.done 2>/dev/null | wc -l)" -lt ${files.length} ] && [ -n "$(jobs -r)" ]; do sleep 15; echo "STEP ${step} Downloading models ($(ls ${root}/*/*.done 2>/dev/null | wc -l) of ${files.length} files, $(du -sBG ${root} | cut -f1 | tr -d G) GB)"; done`,
+		`while [ "$(ls ${root}/*/*.done 2>/dev/null | wc -l)" -lt ${files.length} ] && [ -n "$(jobs -r)" ]; do sleep 5; files; echo "STEP ${step} Downloading models ($(ls ${root}/*/*.done 2>/dev/null | wc -l) of ${files.length} files, $(du -sBG ${root} | cut -f1 | tr -d G) GB)"; done`,
 		'wait',
+		'files',
 		...files.map(([, dest]) => `test -s "${root}/${dest}" || { echo "MISSING ${dest}"; false; }`)
 	];
 }

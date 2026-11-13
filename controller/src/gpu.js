@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { createTracker, computeProgress } from './progress.js';
 // RunPod pod lifecycle with a spend ledger. Rules enforced here, in code:
 //   - the cheapest GPU that fits the job, in whichever cloud has it
 //   - one pod at a time, and only if its worst-case cost fits the remaining budget
@@ -253,6 +254,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 	}
 
 	let brainStage = 'downloading';
+	const brainTracker = createTracker(clock);
 	/** Ask the brain pod whether its model has finished loading; remember the first yes. */
 	async function probeBrain() {
 		const pod = brainPod();
@@ -264,6 +266,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 			// that the machine is still booting or downloading and nothing answers on the port.
 			brainStage = res.ok ? 'ready' : res.status === 503 ? 'loading' : 'downloading';
 		} catch { brainStage = 'downloading'; }
+		if (brainStage !== 'ready') brainTracker.report(pod.id, brainStage === 'loading' ? 1 : 0, brainStage);
 		return brainPod();
 	}
 
@@ -368,7 +371,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return out;
 	}
 
-	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, brainStage: () => brainStage, activePod: () => db.listPods().find((p) => !p.ended_at) || null };
+	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, brainStage: () => brainStage,
+		brainProgress: (p) => computeProgress('brain', p.created_at, brainTracker.get(p.id), clock()), activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
 
 /**

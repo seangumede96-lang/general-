@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { createComfyClient, ComfyError } from './comfy.js';
 import { comfyPodSpec, buildWorkflow, minutesFor, outputSize, WORKFLOW_URL, COMFY_PORT, LOG_PORT } from './video-recipe.js';
 import { GpuError, MIN_VRAM } from './gpu.js';
+import { createTracker, computeProgress, parseStep } from './progress.js';
+import { MINUTES_PER_CLIP_SECOND } from './video-recipe.js';
 
 export class VideoError extends Error {}
 const ACTIVE = new Set(['starting', 'loading', 'uploading', 'generating', 'saving']);
@@ -14,12 +16,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 5000 }) {
 	const cancelled = new Set();
+	const tracker = createTracker(clock);
 	const running = new Map(); // job id -> promise of its run
 	let workflowTemplate = null;
 
 	const limits = () => ({ maxClipSeconds: Math.max(1, Number.parseInt(db.getSettings().maxClipSeconds, 10) || 10) });
 
+	/** Setup progress while the machine starts; a plain estimate while the clip is generated. */
+	function progressOf(j) {
+		const params = JSON.parse(j.params || '{}');
+		if (j.status === 'starting' || j.status === 'loading') {
+			const pod = j.pod_id && db.getPod(j.pod_id);
+			return computeProgress('video', pod?.created_at || j.created_at, tracker.get(j.id), clock());
+		}
+		if (j.status === 'generating') {
+			const est = Math.max(60, (params.seconds || 5) * MINUTES_PER_CLIP_SECOND * 60);
+			const inStep = (clock() - j.step_started_at) / 1000;
+			return { steps: ['Replacing the character'], index: 0, detail: '', fraction: Math.min(0.95, inStep / est), elapsedSeconds: Math.round(inStep), etaSeconds: Math.round(Math.max(est - inStep, 30)), quietSeconds: 0, quietLimitSeconds: 1e9 };
+		}
+		return null;
+	}
+
 	const view = (j) => ({
+		progress: ACTIVE.has(j.status) ? progressOf(j) : null,
 		id: j.id, kind: j.kind, status: j.status, detail: j.detail, prompt: j.prompt, params: JSON.parse(j.params || '{}'),
 		input: j.input_upload, reference: j.ref_upload, result: j.result_upload || null,
 		created_at: j.created_at, step_started_at: j.step_started_at, ended_at: j.ended_at, active: ACTIVE.has(j.status)
@@ -123,6 +142,11 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 				if (await comfy.ready()) break;
 				const p = await setupProgress(podId);
 				if (p.failed) throw new VideoError(`Setting up the video engine failed: ${p.tail || 'no details available'}`);
+				if (p.step) { const parsed = parseStep(p.step); if (parsed) tracker.report(id, parsed.index, p.step); }
+				if (/Downloading/.test(p.step || '')) {
+					const f = await fetch(`${gpu.proxyUrl(podId, LOG_PORT)}/files.txt`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+					if (f?.ok) tracker.files(id, await f.text());
+				}
 				if (p.step && p.step !== db.getJob(id).detail) db.updateJob(id, { detail: p.step });
 				await sleep(pollMs);
 			}

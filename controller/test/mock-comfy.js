@@ -31,6 +31,7 @@ export async function startMockComfy(opts = {}) {
 		const body = Buffer.concat(chunks);
 
 		if (url.pathname === '/workflow.json') return json(res, 200, state.template);
+		if (url.pathname === '/files.txt') { if (!state.files) { res.writeHead(404); return res.end(); } res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end(state.files); }
 		if (url.pathname === '/setup.log') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end(state.setupLog); }
 		if (url.pathname === '/system_stats') return state.ready ? json(res, 200, { system: {} }) : json(res, 502, {});
 		if (url.pathname === '/upload/image' && req.method === 'POST') {
