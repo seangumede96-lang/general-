@@ -996,6 +996,21 @@ const chars = {
 		// Rebuild the gallery only when something changed, so pictures do not flicker every poll.
 		const sig = JSON.stringify(d.generations.map((g) => [g.id, g.status]));
 		if (sig !== this.sig) { this.sig = sig; this.renderGallery(); }
+		this.renderLive();
+	},
+
+	/** Live progress of running pictures, updated every poll without rebuilding the gallery. */
+	renderLive() {
+		for (const g of this.data.generations.filter((x) => x.status === 'running' && x.progress)) {
+			const box = document.querySelector(`.gen-live[data-id="${g.id}"]`);
+			if (!box) continue;
+			const p = g.progress;
+			const elapsed = Math.max(0, Math.round((Date.now() - g.created_at) / 1000));
+			const fraction = p.steps ? 0.15 + 0.75 * (p.step / p.steps) : p.stage === 'Finishing the pictures' || p.stage === 'Saving' ? 0.95 : 0.08;
+			box.querySelector('.bar > div').style.width = `${Math.round(fraction * 100)}%`;
+			const quiet = Math.round((Date.now() - p.at) / 1000);
+			box.querySelector('.boot-meta').textContent = `${p.steps ? `Drawing: step ${p.step} of ${p.steps}` : p.stage} · ${clock(elapsed)} so far${quiet > 90 ? ` · no update for ${clock(quiet)}` : ''}`;
+		}
 	},
 
 	renderSession() {
@@ -1183,7 +1198,12 @@ const chars = {
 			if (g.params.asked && g.params.asked !== g.prompt) card.append(el('div', { className: 'small', style: 'margin-bottom:4px', textContent: `You asked: ${g.params.asked}` }));
 			card.append(el('div', { className: 'gen-prompt', textContent: g.prompt }));
 			if (g.params.note) card.append(el('div', { className: 'approval-note', style: 'padding:0 0 8px', textContent: g.params.note }));
-			if (g.status === 'running') card.append(el('div', { className: 'brain-state starting', textContent: `Making ${g.params.count} picture${g.params.count > 1 ? 's' : ''}${g.params.quality === 'max' ? ' at max quality' : ''}… usually under ${g.params.quality === 'max' ? 'two minutes' : 'a minute'}.` }));
+			if (g.status === 'running') {
+				card.append(el('div', { className: 'brain-state starting', textContent: `Making ${g.params.count} picture${g.params.count > 1 ? 's' : ''}${g.params.quality === 'max' ? ' at max quality' : ''}… ${g.params.quality === 'max' ? 'this can take a few minutes' : 'usually under a minute'}.` }));
+				const live = el('div', { className: 'gen-live' }, el('div', { className: 'bar' }, el('div', { style: 'width:4%' })), el('div', { className: 'boot-meta' }));
+				live.dataset.id = g.id;
+				card.append(live);
+			}
 			if (g.status === 'failed') card.append(el('p', { className: 'sys-alert', textContent: g.detail }));
 			if (g.images.length) card.append(el('div', { className: 'shots' }, ...g.images.map((id) => {
 				const src = `/api/uploads/${id}`;
@@ -1221,7 +1241,9 @@ function qualityChanged() {
 	const max = $('img-quality').value === 'max';
 	localStorage.setItem('imgQuality', $('img-quality').value);
 	$('img-count').max = max ? '2' : '4';
-	if (max && Number($('img-count').value) > 2) $('img-count').value = '2';
+	// Max 2K is heavy: start at one picture each time it is chosen (two stays possible).
+	if (max && (Number($('img-count').value) > 2 || qualityChanged.last !== 'max')) $('img-count').value = '1';
+	qualityChanged.last = $('img-quality').value;
 	const sizes = max ? { portrait: '1664 × 2496', square: '2048 × 2048', landscape: '2496 × 1664' } : { portrait: '1024 × 1536', square: '1024 × 1024', landscape: '1536 × 1024' };
 	$('img-quality-note').textContent = `${sizes[$('img-size').value] || sizes.portrait} pixels.${max ? ' The model\'s largest size; each picture takes longer.' : ''}`;
 }

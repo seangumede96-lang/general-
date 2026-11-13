@@ -66,7 +66,9 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 	}
 	gpu.registerProbe('image', probe);
 
-	const view = (g) => ({ id: g.id, status: g.status, detail: g.detail, prompt: g.prompt, params: JSON.parse(g.params), images: JSON.parse(g.images), created_at: g.created_at });
+	/** Live progress of running pictures, from the engine's messages: { stage, step, steps, at }. */
+	const live = new Map();
+	const view = (g) => ({ id: g.id, status: g.status, detail: g.detail, prompt: g.prompt, params: JSON.parse(g.params), images: JSON.parse(g.images), created_at: g.created_at, progress: g.status === 'running' ? live.get(g.id) || { stage: 'Starting', at: g.created_at } : null });
 
 	let lorasListedAt = 0;
 	/** Show what is in the Backblaze loras/ folder even before a session, refreshed at most every 5 minutes. */
@@ -204,6 +206,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 	async function run(id, p, v) {
 		const saved = [];
+		let stopWatch = () => {};
 		try {
 			const comfy = comfyFor(p);
 			gpu.touch(p.id);
@@ -220,6 +223,14 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const shapeFile = v.shape ? await comfy.upload(v.shape.path, `shape-${v.shape.id}.png`, v.shape.type) : null;
 			const depthFile = v.depth ? await comfy.upload(v.depth.path, `depth-${v.depth.id}.png`, v.depth.type) : null;
 			const graph = buildImageGraph({ ...v, refs, shape: shapeFile, depth: depthFile, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
+			// What each part of the graph does, in words, for the live progress line.
+			const STAGES = { UNETLoader: 'Loading the model', CLIPLoader: 'Loading the model', VAELoader: 'Loading the model', LoraLoaderModelOnly: 'Loading your LoRAs', CLIPTextEncode: 'Reading the description', TextEncodeKrea2OstrisEdit: 'Studying the reference pictures', LoadImage: 'Preparing the pictures', ImageScaleToTotalPixels: 'Preparing the pictures', Krea2ControlImageEncode: 'Reading the body shape', KSampler: 'Drawing', VAEDecode: 'Finishing the pictures', SaveImage: 'Saving' };
+			live.set(id, { stage: 'Waiting for the engine', at: clock() });
+			stopWatch = comfy.watch(id, (m) => {
+				const d = m.data || {};
+				if (m.type === 'executing' && d.node && graph[d.node]) live.set(id, { stage: STAGES[graph[d.node].class_type] || 'Working', at: clock() });
+				else if (m.type === 'progress' && d.max > 0) live.set(id, { stage: 'Drawing', step: d.value, steps: d.max, at: clock() });
+			});
 			const promptId = await comfy.queue(graph, id);
 			let files;
 			// A job the engine has lost, or one far past any normal time, must not keep the GPU
@@ -254,6 +265,9 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const known = err instanceof ImageError || err instanceof ComfyError;
 			if (!known) console.error('[images]', err);
 			db.updateGeneration(id, { status: 'failed', detail: known ? err.message : 'Something unexpected went wrong.', images: JSON.stringify(saved), ended_at: clock() });
+		} finally {
+			stopWatch();
+			live.delete(id);
 		}
 	}
 

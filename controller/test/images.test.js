@@ -330,3 +330,30 @@ test('a picture the engine lost, or one far past normal time, fails instead of k
 	assert.equal(g.status, 'failed');
 	assert.match(g.detail, /over 10 minutes/);
 });
+
+test('live progress from the engine is shown while a picture is drawn', async () => {
+	// Node has a WebSocket client but no server, so the engine's socket is a stub here.
+	const { createComfyClient } = await import('../src/comfy.js');
+	const sent = [];
+	const Real = globalThis.WebSocket;
+	globalThis.WebSocket = class { constructor(url) { sent.push(url); queueMicrotask(() => { this.onmessage?.({ data: JSON.stringify({ type: 'executing', data: { node: '8' } }) }); this.onmessage?.({ data: JSON.stringify({ type: 'progress', data: { value: 3, max: 8 } }) }); this.onmessage?.({ data: 'not json' }); this.onmessage?.({ data: new ArrayBuffer(4) }); }); } close() { this.closed = true; } };
+	try {
+		const got = [];
+		const stop = createComfyClient('https://pod-8188.proxy.runpod.net').watch('gen-1', (m) => got.push(m.type));
+		await new Promise((r) => setTimeout(r, 10));
+		stop();
+		assert.deepEqual(sent, ['wss://pod-8188.proxy.runpod.net/ws?clientId=gen-1']);
+		assert.deepEqual(got, ['executing', 'progress']);
+	} finally { globalThis.WebSocket = Real; }
+	// a running generation reports a stage
+	await startSession();
+	await api('GET', '/api/images');
+	comfy.state.pollsUntilDone = 1e9;
+	const r = await api('POST', '/api/images/generate', { prompt: 'a woman', size: 'portrait', count: 1 });
+	await new Promise((res) => setTimeout(res, 50));
+	const g = (await api('GET', '/api/images')).body.generations.find((x) => x.id === r.body.id);
+	assert.equal(g.status, 'running');
+	assert.ok(g.progress?.stage, JSON.stringify(g.progress));
+	now += 11 * 60000; // let it end
+	for (let i = 0; i < 300 && (await api('GET', '/api/images')).body.generations.find((x) => x.id === r.body.id).status === 'running'; i++) await new Promise((res) => setTimeout(res, 10));
+});

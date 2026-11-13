@@ -70,6 +70,25 @@ export function createComfyClient(baseUrl, { retryDelaysMs = RETRY_DELAYS_MS } =
 			return { done: true, files };
 		},
 
+		/**
+		 * Listen to the engine's live messages for one client (which node is running, sampler
+		 * steps). Best effort: if the socket cannot open or drops, progress simply stops updating;
+		 * the job itself is still followed through the history. Returns a function that stops.
+		 */
+		watch(clientId, onMessage) {
+			let ws;
+			let closed = false;
+			const open = () => {
+				if (closed || typeof WebSocket !== 'function') return;
+				try { ws = new WebSocket(`${base.replace(/^http/, 'ws')}/ws?clientId=${encodeURIComponent(clientId)}`); } catch { return; }
+				ws.onmessage = (e) => { if (typeof e.data !== 'string') return; try { onMessage(JSON.parse(e.data)); } catch { /* not ours */ } };
+				ws.onerror = () => {};
+				ws.onclose = () => { if (!closed) setTimeout(open, 3000); }; // reconnect through dropouts
+			};
+			open();
+			return () => { closed = true; try { ws?.close(); } catch { /* already closed */ } };
+		},
+
 		/** Whether the engine still holds this job: running or waiting in its queue. */
 		async inQueue(promptId) {
 			const res = await call('/queue');
