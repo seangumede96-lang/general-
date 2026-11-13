@@ -39,8 +39,9 @@ export const SETTING_DEFAULTS = {
 	imageSetupLog: '',
 	// The ready-made image engine (empty = install on the stock PyTorch image each time).
 	imageEngineImage: 'ghcr.io/seangumede96-lang/assistant-image-engine:latest',
-	// Empty until the ready-made video engine is confirmed public; then its address goes here.
-	videoEngineImage: ''
+	// The ready-made video engine (controller/engine-video): ComfyUI and the add-ons preinstalled
+	// on RunPod's PyTorch image, about 1.5 GB on top of it instead of a 14.6 GB third-party image.
+	videoEngineImage: 'ghcr.io/seangumede96-lang/assistant-video-engine:latest'
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */

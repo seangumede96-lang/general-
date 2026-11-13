@@ -54,7 +54,7 @@ test('a job runs end to end: rent, set up, upload, generate, save, delete the po
 	assert.equal(job.status, 'done');
 
 	const pod = rp.state.created[0];
-	assert.equal(pod.image, 'wlsdml1114/multitalk-base:1.7');
+	assert.equal(pod.image, 'ghcr.io/seangumede96-lang/assistant-video-engine:latest', 'the ready-made engine');
 	assert.deepEqual(pod.ports, ['8188/http', '8189/http']);
 	assert.match(JSON.parse(pod.args).cmd[0], /^\(sleep 2640; .*\) & mkdir -p \/srv\/log/);
 	assert.equal(pod.cloud, 'COMMUNITY', 'this test pins Community Cloud');
@@ -348,4 +348,12 @@ test('the ready-made engine skips installing, and the attention the GPU reports 
 	const fast = await finished((await startJob(await newRequest())).body.id);
 	assert.equal(fast.status, 'done');
 	assert.equal(comfy.state.prompts[1].prompt['22'].inputs.attention_mode, 'sageattn');
+});
+
+test('video GPUs use the ready-made video engine by default', async () => {
+	const { READY_VIDEO_ENGINE } = await import('../src/video-recipe.js');
+	assert.equal((await api('GET', '/api/settings')).body.videoEngineImage, READY_VIDEO_ENGINE);
+	const job = await finished((await startJob(await newRequest())).body.id);
+	assert.equal(job.status, 'done');
+	assert.equal(rp.state.created[0].image, READY_VIDEO_ENGINE);
 });
