@@ -41,23 +41,25 @@ export const SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: 
 
 /** What each kind of reference picture is for, and how large the model gets to see it. */
 export const REFERENCE_ROLES = {
-	// The face is shown very small: enough for identity, too small to copy clothes or background.
-	face: { megapixels: 0.140625, hint: (which) => `Keep the face of the person in ${which}.` },
-	body: { megapixels: 0.5, hint: (which) => `Use the body shape and proportions of the person in ${which}.` },
-	look: { megapixels: 0.5, hint: (which) => `Use the outfit, makeup and styling shown in ${which}.` }
+	// The face is shown small: enough for identity, too small to copy clothes or background.
+	face: { megapixels: 0.140625, one: 'Keep the face of the person in', many: (n) => `shows ${n} pictures of the same person's face; keep that face` },
+	body: { megapixels: 0.5, one: 'Use the body shape and proportions of the person in', many: (n) => `shows ${n} pictures of the same body; use that body shape and proportions` },
+	look: { megapixels: 0.5, one: 'Use the outfit, makeup and styling shown in', many: (n) => `shows ${n} pictures of the outfit, makeup and styling to use` }
 };
-/** The edit nodes take at most three pictures per generation, across all roles. */
+/** The edit nodes take at most three pictures per generation: one per role. Several pictures for a role arrive as one sheet. */
 export const MAX_REFERENCES = 3;
+export const MAX_PER_ROLE = 3;
 
-/** One sentence per role saying which numbered pictures it covers, e.g. "images 1 and 2". */
+/** One sentence per reference, saying what it is for and, for a sheet, how many pictures it holds. */
 function referenceHints(refs) {
-	return Object.keys(REFERENCE_ROLES).map((role) => {
-		const n = refs.map((r, i) => (r.role === role ? i + 1 : 0)).filter(Boolean);
-		if (!n.length) return '';
-		const which = n.length === 1 ? `image ${n[0]}` : `images ${n.slice(0, -1).join(', ')} and ${n.at(-1)}`;
-		return REFERENCE_ROLES[role].hint(which);
-	}).filter(Boolean).join(' ');
+	return refs.map((r, i) => {
+		const role = REFERENCE_ROLES[r.role];
+		return (r.count || 1) > 1 ? `Image ${i + 1} ${role.many(r.count)}.` : `${role.one} image ${i + 1}.`;
+	}).join(' ');
 }
+
+/** A sheet of several pictures keeps each picture at the size a single one would have. */
+export const referenceMegapixels = (r) => REFERENCE_ROLES[r.role].megapixels * Math.min(MAX_PER_ROLE, r.count || 1);
 
 /**
  * The ComfyUI graph for one request. `refs` is up to three reference pictures already in
@@ -93,7 +95,7 @@ export function buildImageGraph({ prompt, negative = '', width, height, count, s
 		const images = {};
 		refs.forEach((r, i) => {
 			g[20 + i * 2] = { class_type: 'LoadImage', inputs: { image: r.file } };
-			g[21 + i * 2] = { class_type: 'ImageScaleToTotalPixels', inputs: { image: [String(20 + i * 2), 0], upscale_method: 'area', megapixels: REFERENCE_ROLES[r.role].megapixels, resolution_steps: 16 } };
+			g[21 + i * 2] = { class_type: 'ImageScaleToTotalPixels', inputs: { image: [String(20 + i * 2), 0], upscale_method: 'area', megapixels: referenceMegapixels(r), resolution_steps: 16 } };
 			images[`image${i + 1}`] = [String(21 + i * 2), 0];
 		});
 		g[31] = { class_type: 'Krea2OstrisEditModelPatch', inputs: { model, kv_cache: true } };

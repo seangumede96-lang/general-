@@ -129,9 +129,9 @@ test('face, body and look references can be combined, with several LoRAs stacked
 	assert.deepEqual([g['21'].inputs.megapixels, g['23'].inputs.megapixels, g['25'].inputs.megapixels], [0.140625, 0.5, 0.5]);
 	assert.deepEqual([g['5'].inputs.image1, g['5'].inputs.image2, g['5'].inputs.image3], [['21', 0], ['23', 0], ['25', 0]]);
 	assert.equal(g['5'].inputs.prompt, 'A woman on a beach. Keep the face of the person in image 1. Use the body shape and proportions of the person in image 2. Use the outfit, makeup and styling shown in image 3.');
-	const twoFaces = buildImageGraph({ prompt: 'A woman.', width: 1024, height: 1024, count: 1, seed: 1, prefix: 'p', refs: [{ role: 'face', file: 'a.png' }, { role: 'face', file: 'b.png' }, { role: 'look', file: 'c.png' }] });
-	assert.equal(twoFaces['5'].inputs.prompt, 'A woman. Keep the face of the person in images 1 and 2. Use the outfit, makeup and styling shown in image 3.');
-	assert.deepEqual([twoFaces['21'].inputs.megapixels, twoFaces['23'].inputs.megapixels], [0.140625, 0.140625]);
+	const sheets = buildImageGraph({ prompt: 'A woman.', width: 1024, height: 1024, count: 1, seed: 1, prefix: 'p', refs: [{ role: 'face', file: 'a.png', count: 3 }, { role: 'body', file: 'b.png', count: 2 }, { role: 'look', file: 'c.png' }] });
+	assert.equal(sheets['5'].inputs.prompt, "A woman. Image 1 shows 3 pictures of the same person's face; keep that face. Image 2 shows 2 pictures of the same body; use that body shape and proportions. Use the outfit, makeup and styling shown in image 3.");
+	assert.deepEqual([sheets['21'].inputs.megapixels, sheets['23'].inputs.megapixels, sheets['25'].inputs.megapixels], [0.421875, 1, 0.5], 'each picture in a sheet keeps the size of a single one');
 	assert.deepEqual([g['4'].inputs.model, g['4a'].inputs.model, g['31'].inputs.model], [['30', 0], ['4', 0], ['4a', 0]]);
 	assert.equal(g['4a'].inputs.strength_model, 0.6);
 

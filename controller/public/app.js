@@ -1036,23 +1036,49 @@ const chars = {
 		out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: `${q.useMinutes} minutes of use, plus up to ${q.setupMinutes} for setup. ${q.summary}` }), el('span', { className: 'spacer' }), go));
 	},
 
-	/** Reference pictures per role: { face: [{ id, src }], body: [...], look: [...] }, at most 3 in total. */
+	/** Reference pictures per role: { face: [{ id, src }], body: [...], look: [...] }, up to 3 in each box. */
 	refCount() { return Object.values(this.refs).reduce((n, list) => n + list.length, 0); },
 
 	addRef(role, id, src) {
-		if (this.refCount() >= 3) return false;
-		(this.refs[role] ||= []).push({ id, src });
+		const list = (this.refs[role] ||= []);
+		if (list.length >= 3) return false;
+		list.push({ id, src });
 		this.renderRefs();
 		return true;
+	},
+
+	/**
+	 * The image engine takes one picture per box, so two or three pictures in a box are joined
+	 * side by side into one sheet, made here on the phone and uploaded. Returns the upload id.
+	 */
+	async sheetFor(list) {
+		if (list.length === 1) return list[0].id;
+		const images = await Promise.all(list.map((r) => new Promise((resolve, reject) => {
+			const img = new Image();
+			img.onload = () => resolve(img);
+			img.onerror = () => reject(new Error('A reference picture could not be read.'));
+			img.src = r.src;
+		})));
+		const h = 768;
+		const widths = images.map((img) => Math.round(img.naturalWidth * h / img.naturalHeight));
+		const canvas = Object.assign(document.createElement('canvas'), { width: widths.reduce((a, b) => a + b, 0) + 16 * (images.length - 1), height: h });
+		const ctx = canvas.getContext('2d');
+		ctx.fillStyle = '#fff';
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+		let x = 0;
+		images.forEach((img, i) => { ctx.drawImage(img, x, 0, widths[i], h); x += widths[i] + 16; });
+		const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+		const up = await uploadWithProgress(new File([blob], 'reference-sheet.jpg', { type: 'image/jpeg' }), () => {});
+		return up.id;
 	},
 
 	/** Each box shows its pictures, each with ×, and a "+ Add" tile while fewer than 3 are chosen in total. */
 	renderRefs() {
 		const count = this.refCount();
-		const full = count >= 3;
 		for (const box of document.querySelectorAll('.pick.ref')) {
 			const { role } = box.dataset;
 			const list = this.refs[role] || [];
+			const full = list.length >= 3;
 			const thumbs = list.map((r, i) => {
 				const x = el('button', { type: 'button', className: 'pend-x', ariaLabel: 'Remove this picture' });
 				x.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
@@ -1061,12 +1087,12 @@ const chars = {
 			});
 			// The tile is a label for the box's file input: tapping it opens the phone's picker directly.
 			const add = full
-				? el('div', { className: 'ref-add off' }, el('b', { textContent: '+' }), 'Limit of 3')
+				? el('div', { className: 'ref-add off' }, el('b', { textContent: '3' }), 'Box full')
 				: el('label', { className: 'ref-add', htmlFor: `img-ref-${role}` }, el('b', { textContent: '+' }), list.length ? 'Add another' : 'Add');
 			box.querySelector('.pick-body').replaceChildren(...thumbs, add);
 			box.classList.toggle('filled', list.length > 0);
 		}
-		$('img-ref-note').textContent = `${count} of 3 pictures chosen. Tap + to add (you can pick several at once), × to remove. Crop face pictures to the face only, or their clothes leak in. Use made-up characters, or real adults who agreed.`;
+		$('img-ref-note').textContent = `${count} of 9 pictures chosen, up to 3 in each box. Tap + to add (you can pick several at once), × to remove. Two or three pictures in a box are joined into one sheet for the image engine. Crop face pictures to the face only, or their clothes leak in. Use made-up characters, or real adults who agreed.`;
 	},
 
 	async generate() {
@@ -1081,11 +1107,22 @@ const chars = {
 		if (state === 'starting') return say('The image engine is still starting up. The top of this page shows which step it is on; Generate works as soon as it says Ready.');
 		if (!$('img-prompt').value.trim()) return say('Type what you want a picture of first.');
 		out.replaceChildren(el('div', { className: 'muted small', textContent: 'Sending…' }));
+		// Boxes with several pictures are sent as one sheet each.
+		const refs = {};
+		const refCounts = {};
+		try {
+			for (const [role, list] of Object.entries(this.refs)) {
+				if (!list.length) continue;
+				if (list.length > 1) out.replaceChildren(el('div', { className: 'muted small', textContent: `Joining the ${role === 'look' ? 'outfit' : role} pictures…` }));
+				refs[role] = [await this.sheetFor(list)];
+				refCounts[role] = list.length;
+			}
+		} catch (err) { return say(err.message); }
 		const loras = this.chosenLoras();
 		// Remember the strengths used, so next time each LoRA starts where you left it.
 		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
 		try {
-			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs: Object.fromEntries(Object.entries(this.refs).map(([role, list]) => [role, list.map((r) => r.id)])) });
+			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs, refCounts });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -1104,7 +1141,7 @@ const chars = {
 				const useAs = (role, label) => {
 					const btn = el('button', { type: 'button', textContent: label });
 					btn.addEventListener('click', () => {
-						if (!this.addRef(role, id, src)) return alert('There are already 3 reference pictures. Remove one first.');
+						if (!this.addRef(role, id, src)) return alert('That box already has 3 pictures. Remove one first.');
 						$('img-form').scrollIntoView({ behavior: 'smooth' });
 					});
 					return btn;
@@ -1130,8 +1167,8 @@ $('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.gene
 chars.renderRefs();
 for (const input of document.querySelectorAll('.ref-input')) {
 	input.addEventListener('change', async (e) => {
-		const files = [...e.target.files].slice(0, 3 - chars.refCount());
 		const { role } = input.dataset;
+		const files = [...e.target.files].slice(0, 3 - (chars.refs[role] || []).length);
 		e.target.value = '';
 		const note = $('img-out');
 		for (const file of files) {

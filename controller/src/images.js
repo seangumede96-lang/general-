@@ -165,7 +165,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			for (const uploadId of (Array.isArray(given) ? given : given ? [given] : [])) {
 				const upload = db.getUpload(String(uploadId));
 				if (!upload || !upload.type.startsWith('image/')) throw new ImageError(`One of the ${role === 'look' ? 'outfit' : role} pictures is missing.`);
-				refs.push({ role, upload });
+				refs.push({ role, upload, count: Math.min(3, Math.max(1, Number.parseInt(req.refCounts?.[role], 10) || 1)) });
 			}
 		}
 		if (refs.length > MAX_REFERENCES) throw new ImageError(`At most ${MAX_REFERENCES} reference pictures in total can be used at once.`);
@@ -200,7 +200,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			// LoRA trigger words go first, outside the written prompt, so they are never reworded.
 			if (v.prefix && !v.prompt.includes(v.prefix)) v.prompt = `${v.prefix} ${v.prompt}`;
 			const refs = [];
-			for (const r of v.refs) refs.push({ role: r.role, file: await comfy.upload(r.upload.path, `${r.role}-${r.upload.id}-${r.upload.name}`, r.upload.type) });
+			for (const r of v.refs) refs.push({ role: r.role, count: r.count, file: await comfy.upload(r.upload.path, `${r.role}-${r.upload.id}-${r.upload.name}`, r.upload.type) });
 			const graph = buildImageGraph({ ...v, refs, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
 			const promptId = await comfy.queue(graph, id);
 			let files;
