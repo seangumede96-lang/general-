@@ -96,11 +96,14 @@ await touchDrag(view.x + view.width * 0.3, view.y + view.height / 2, view.x + vi
 if ((await figure()) === before) fail('dragging sideways on the figure did not turn it');
 if ((await scrollY()) !== y0) fail('dragging sideways on the figure scrolled the page');
 await tap(page.locator('.body-views button', { hasText: 'Front' }));
-y0 = await scrollY();
+// the figure stays in view: the page itself does not scroll in the creator layout
 await touchDrag(view.x + view.width / 2, view.y + view.height * 0.8, view.x + view.width / 2, view.y + view.height * 0.2);
-if ((await scrollY()) === y0) fail('swiping up on the figure did not scroll the page (could get stuck)');
+const v2 = await page.locator('#body-view').boundingBox();
+if (Math.abs(v2.y - view.y) > 1) fail('the figure moved out of place after a vertical swipe');
+const showTab = async (name) => { await tap(page.locator(`#body-tabs [data-tab=${name}]`)); if (await page.locator(`#body .creator-pane[data-pane=${name}]`).isHidden()) fail(`tab ${name} did not open`); };
 
 // ---- base, presets, head shapes, reset
+await showTab('shape');
 for (const base of ['male', 'female']) {
 	before = await figure();
 	await tap(page.locator(`#body-base button[data-base=${base}]`));
@@ -115,10 +118,12 @@ for (const base of ['male', 'female']) {
 		if ((await values()).base !== base) fail(`preset ${p} changed the base`);
 	}
 }
+await showTab('head');
 for (const shape of await page.locator('#body-heads button').allTextContents()) {
 	await tap(page.locator('#body-heads button', { hasText: shape }));
 	if ((await values()).headShape !== shape.toLowerCase()) fail(`head shape ${shape} not applied`);
 }
+await showTab('shape');
 await tap(page.locator('#body-reset'));
 const reset = await values();
 if (Object.entries(reset).some(([k, v]) => typeof v === 'number' && k !== 'height' && k !== 'version' && v !== 0)) fail(`Reset left values: ${JSON.stringify(reset)}`);
@@ -150,12 +155,22 @@ async function dragSlider(input, vertical, forward) {
 	if (label2 === label) fail(`${key}: value text did not update (${label2})`);
 	if ((await figure()) === before) fail(`${key}: figure did not change`);
 	if (Math.abs((await scrollY()) - sy) > 2) fail(`${key}: dragging the slider scrolled the page by ${(await scrollY()) - sy}px`);
+	const fig = await page.locator('#body-view').boundingBox();
+	if (fig.y < 0 || fig.y > 200) fail(`${key}: the figure is out of view while using the slider`);
 }
+await showTab('lengths');
 for (const input of await page.locator('#body-vsliders input').all()) { await dragSlider(input, true, true); await dragSlider(input, true, false); }
-for (const input of await page.locator('#body-hsliders input').all()) { await dragSlider(input, false, true); await dragSlider(input, false, false); }
+for (const tab of ['shape', 'upper', 'lower', 'head']) {
+	await showTab(tab);
+	for (const input of await page.locator(`#body-group-${tab} input`).all()) {
+		if ((await input.getAttribute('data-key')) === 'armPose') { await dragSlider(input, false, true); await dragSlider(input, false, false); continue; }
+		await dragSlider(input, false, true); await dragSlider(input, false, false);
+	}
+}
+await showTab('upper');
 // a tap on a horizontal slider's track sets the value there
 {
-	const input = page.locator('#body-hsliders input').first();
+	const input = page.locator('#body-group-upper input').first();
 	await input.scrollIntoViewIfNeeded();
 	const b = await input.boundingBox();
 	await page.touchscreen.tap(b.x + b.width * 0.9, b.y + b.height / 2);
@@ -165,22 +180,25 @@ for (const input of await page.locator('#body-hsliders input').all()) { await dr
 }
 
 // ---- scrolling the page with a finger that lands on a horizontal slider must scroll, not change it
-const hs = page.locator('#body-hsliders input').nth(3);
+const hs = page.locator('#body-group-upper input').nth(3);
 await hs.scrollIntoViewIfNeeded();
 const hb = await hs.boundingBox();
 const hv = await hs.evaluate((i) => i.value);
 y0 = await scrollY();
 await touchDrag(hb.x + hb.width * 0.3, hb.y + hb.height / 2, hb.x + hb.width * 0.3, hb.y - 250);
-if ((await scrollY()) === y0) fail('swiping up over a slider did not scroll the page');
 if ((await hs.evaluate((i) => i.value)) !== hv) fail('swiping up over a slider changed its value');
 
 // ---- saved bodies: save, load, delete
+await showTab('shape');
 await tap(page.locator('#body-presets button').first());
+await showTab('saved');
 await page.locator('#body-name').fill('Test body');
 await tap(page.locator('#body-save'));
 if (!(await page.locator('#body-saved button', { hasText: 'Test body' }).count())) fail('saved body did not appear');
 const savedValues = await values();
+await showTab('shape');
 await tap(page.locator('#body-reset'));
+await showTab('saved');
 await tap(page.locator('#body-saved button', { hasText: 'Test body' }));
 const loaded = await values();
 if (JSON.stringify(loaded) !== JSON.stringify(savedValues)) fail(`loading the saved body gave ${JSON.stringify(loaded)}`);
@@ -213,11 +231,12 @@ await tap(page.locator('#menu, #open-drawer, [aria-label="Menu"]').first());
 await tap(page.locator('#open-characters'));
 await tap(page.locator('#img-shape-open'));
 await wait(1500);
-const targets = ['.body-views button', '#body-base button', '#body-presets button', '#body-heads button', '#body-reset'];
+const targets = ['.body-views button', '#body-base button', '#body-tabs button', '#body-presets button:visible', '#body-heads button:visible', '#body-reset:visible'];
 let seed = 7;
 const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
 for (let i = 0; i < 60; i++) {
 	const all = await page.locator(targets[rnd(targets.length)]).all();
+	if (!all.length) continue;
 	const t = all[rnd(all.length)];
 	const b = await t.boundingBox();
 	if (b) { await t.scrollIntoViewIfNeeded(); const bb = await t.boundingBox(); await page.touchscreen.tap(bb.x + bb.width / 2, bb.y + bb.height / 2); }

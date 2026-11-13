@@ -240,10 +240,6 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 .opt.picked { outline: 1px solid #8b7cf6; }
 
 /* Body editor */
-.body-wrap { max-width: 768px; margin: 0 auto; padding: 8px 16px 32px; display: flex; flex-direction: column; gap: 12px; }
-.body-view { height: min(52vh, 460px); border-radius: 16px; overflow: hidden; background: #f4f4f4; }
-.body-view canvas { width: 100%; height: 100%; display: block; }
-.body-views { display: flex; gap: 8px; align-items: center; }
 .chip-btn, .chips button, .seg button { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); font-size: 14px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips button.on, .seg button.on { background: var(--accent); color: #000; border-color: var(--accent); }
@@ -435,3 +431,35 @@ dialog.photo-view[open] { display: flex; flex-direction: column; }
 .photo-nav.prev { left: 6px; } .photo-nav.next { right: 6px; }
 .photo-nav[hidden] { display: none; }
 .photo-hint { text-align: center; padding: 8px 0 calc(10px + env(safe-area-inset-bottom)); }
+
+/* Body editor: character-creator layout. The figure fills the left, the controls scroll on the right. */
+main > section#body { overflow: hidden; }
+.creator { display: flex; height: 100%; min-height: 0; }
+.creator-stage { position: relative; flex: 0 0 44%; min-width: 0; background: radial-gradient(ellipse at 50% 35%, #9a9ea6 0%, #6c7079 45%, #3e4148 100%); }
+.body-view { position: absolute; inset: 0; }
+.body-view canvas { width: 100%; height: 100%; display: block; }
+.stage-top { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: flex; z-index: 2; background: rgba(20, 20, 22, .55); border-radius: 999px; padding: 2px; }
+.stage-top button { padding: 5px 11px; font-size: 13px; border: 0; }
+.stage-bottom { position: absolute; bottom: 8px; left: 0; right: 0; display: flex; justify-content: center; gap: 4px; z-index: 2; }
+.stage-bottom .chip-btn { padding: 5px 9px; font-size: 12.5px; background: rgba(20, 20, 22, .55); color: #fff; border-color: transparent; }
+.creator-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface); }
+.creator-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
+.creator-tabs button { padding: 7px 2px; border-radius: 9px; font-size: 13px; border: 1px solid var(--border); }
+.creator-tabs button.on { background: var(--accent); color: #000; border-color: var(--accent); }
+.creator-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 12px 16px; }
+.creator-pane { display: flex; flex-direction: column; gap: 10px; }
+.creator-pane[hidden] { display: none; }
+.creator-pane .chips { gap: 6px; }
+.creator-pane .chips button, .creator-pane .saved-chip button { padding: 6px 11px; font-size: 13px; }
+.creator .hslider { grid-template-columns: 1fr auto; gap: 2px 8px; padding: 4px 0; font-size: 13px; }
+.creator .hslider b { font-weight: 600; }
+.creator .hslider .hs-track { grid-column: 1 / -1; grid-row: 2; }
+.creator .hslider span { grid-column: 2; grid-row: 1; }
+.creator .vsliders { gap: 2px; padding-top: 4px; }
+.creator .vslider input { height: 190px; }
+.creator .vslider b { font-size: 11.5px; }
+.save-row { display: flex; gap: 6px; }
+.save-row input { flex: 1; min-width: 0; margin: 0; }
+.creator-foot { padding: 8px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+.creator-foot button { width: 100%; }
+@media (min-width: 760px) { .creator-stage { flex: 1 1 auto; } .creator-panel { flex: 0 0 380px; } }

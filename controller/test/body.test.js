@@ -24,7 +24,7 @@ test('every slider, preset and head shape drives morph targets that exist in the
 	for (const v of [all, { ...all, base: 'male' }, ...Object.keys(body.HEAD_SHAPES).map((headShape) => ({ ...body.defaults(), headShape }))]) {
 		for (const name of Object.keys(body.weights(v))) assert.ok(human.morphs[name], `missing morph ${name}`);
 	}
-	for (const s of body.SLIDERS) if (s.key !== 'height') {
+	for (const s of body.SLIDERS) if (s.key !== 'height' && s.key !== 'armPose') {
 		const lo = body.weights({ ...body.defaults(), [s.key]: s.min });
 		const hi = body.weights({ ...body.defaults(), [s.key]: s.max });
 		assert.notDeepEqual(lo, hi, `${s.key} changes nothing`);
@@ -57,4 +57,18 @@ test('saves from the first mannequin are converted onto the new sliders', () => 
 	for (const s of body.SLIDERS) assert.ok(v[s.key] >= s.min && v[s.key] <= s.max);
 	assert.deepEqual(body.migrate(v), v);
 	assert.deepEqual(body.migrate(null), body.defaults());
+});
+
+test('the arms hang at the sides by default and rise with "Arms out"; male and female differ', () => {
+	const marker = (p, [start, count]) => { let x = 0, y = 0; for (let i = start; i < start + count; i++) { x += p[i * 3]; y += p[i * 3 + 1]; } return [x / count, y / count]; };
+	const angle = (p) => { const u = marker(p, human.markers['upperarm01.L']), w = marker(p, human.markers['wrist.L']); return (Math.atan2(Math.abs(w[0] - u[0]), u[1] - w[1]) * 180) / Math.PI; };
+	const down = angle(body.shapeBody(body.defaults()));
+	const out = angle(body.shapeBody({ ...body.defaults(), armPose: 1 }));
+	assert.ok(down > 4 && down < 15, `arms down at ${down} degrees`);
+	assert.ok(out > 35, `arms out at ${out} degrees`);
+	assert.ok(human.morphs.female.idx.length > 1000 && human.morphs.male.idx.length > 1000, 'gender shapes are present');
+	const f = body.shapeBody(body.defaults('female')), m = body.shapeBody(body.defaults('male'));
+	let diff = 0;
+	for (let i = 0; i < f.length; i++) diff = Math.max(diff, Math.abs(f[i] - m[i]));
+	assert.ok(diff > 2, 'male and female bodies differ');
 });

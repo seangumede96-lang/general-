@@ -27,9 +27,17 @@ for line in open(data / '3dobjs' / 'base.obj'):
     elif line.startswith('f ') and group in ('joint-l-eye', 'joint-r-eye'):
         eyes[group].update(int(p.split('/')[0]) - 1 for p in line.split()[1:])
 used = sorted({i for f in faces for i in f})
-# The eye joint markers are kept (not drawn) so the viewer can place eyeballs that follow the morphs.
+# Marker points are kept (not drawn) so the viewer can find places that move with the morphs:
+# the eye joints (for eyeballs) and the arm joints (to pose the arms).
 eye_start = len(used)
 used += sorted(eyes['joint-l-eye']) + sorted(eyes['joint-r-eye'])
+skel = json.load(open(data / 'rigs' / 'default.mhskel'))
+markers = {}
+for side in 'LR':
+    for joint in ('shoulder01', 'upperarm01', 'wrist'):
+        idx = skel['joints'][f'{joint}.{side}____head']
+        markers[f'{joint}.{side}'] = [len(used), len(idx)]
+        used += idx
 remap = {old: new for new, old in enumerate(used)}
 tris = []
 for f in faces:
@@ -56,8 +64,11 @@ def diff(a, b):
 M = 'macrodetails/universal-{g}-young-{m}muscle-{w}weight.target'
 morphs = {}
 for g in ('female', 'male'):
+    # The gender shape lives in the ethnic targets (the average-build universal target is empty);
+    # MakeHuman's default mixes the three equally, so do the same.
+    eth = [target(f'macrodetails/{e}-{g}-young.target') for e in ('african', 'asian', 'caucasian')]
+    morphs[g] = {k: tuple(sum(t.get(k, (0, 0, 0))[c] for t in eth) / 3 for c in range(3)) for k in set().union(*eth)}
     avg = target(M.format(g=g, m='average', w='average'))
-    morphs[g] = avg
     morphs[f'{g}-weight-up'] = diff(target(M.format(g=g, m='average', w='max')), avg)
     morphs[f'{g}-weight-down'] = diff(target(M.format(g=g, m='average', w='min')), avg)
     morphs[f'{g}-muscle-up'] = diff(target(M.format(g=g, m='max', w='average')), avg)
@@ -110,7 +121,7 @@ for shape in ['oval', 'round', 'square', 'rectangular', 'triangular', 'invertedt
 # --- binary: positions (float32), indices (uint16/uint32), then per morph: count, indices (uint16), offsets (float32 x3)
 n = len(used)
 blob = bytearray()
-layout = {'vertices': n, 'triangles': len(tris) // 3, 'eyes': [[eye_start, len(eyes['joint-l-eye'])], [eye_start + len(eyes['joint-l-eye']), len(eyes['joint-r-eye'])]]}
+layout = {'vertices': n, 'triangles': len(tris) // 3, 'markers': markers, 'eyes': [[eye_start, len(eyes['joint-l-eye'])], [eye_start + len(eyes['joint-l-eye']), len(eyes['joint-r-eye'])]]}
 layout['positions'] = len(blob); blob += struct.pack(f'<{n * 3}f', *[c for i in used for c in verts[i]])
 big = n > 65535
 layout['indexType'] = 'uint32' if big else 'uint16'
@@ -126,6 +137,31 @@ for name, d in morphs.items():
     entry['offsets'] = len(blob)
     blob += struct.pack(f'<{len(keys) * 3}f', *[c for k in keys for c in d[k]])
     layout['morphs'].append(entry)
+# Skin weights for posing the arms (MakeHuman's default rig, CC0): per side, how much each vertex
+# follows the shoulder bone itself, and how much it follows the whole arm below it.
+weights = json.load(open(data / 'rigs' / 'default_weights.mhw'))['weights']
+bones = skel['bones']
+def below(name):
+    return [b for b in bones if any(a == name for a in ancestors(b))]
+def ancestors(b):
+    while b:
+        yield b
+        b = bones[b]['parent']
+layout['skin'] = {}
+for side in 'LR':
+    for part, names in (('shoulder', [f'shoulder01.{side}']), ('arm', below(f'upperarm01.{side}'))):
+        w = {}
+        for name in names:
+            for i, x in weights.get(name, []):
+                if i in remap and remap[i] < eye_start: w[remap[i]] = w.get(remap[i], 0) + x
+        keys = sorted(w)
+        while len(blob) % 4: blob += b'\0'
+        entry = {'count': len(keys), 'indices': len(blob)}
+        blob += struct.pack(f"<{len(keys)}{'I' if big else 'H'}", *keys)
+        while len(blob) % 4: blob += b'\0'
+        entry['weights'] = len(blob)
+        blob += struct.pack(f'<{len(keys)}f', *[min(1.0, w[k]) for k in keys])
+        layout['skin'][f'{part}.{side}'] = entry
 (out / 'human.bin').write_bytes(bytes(blob))
 (out / 'human.json').write_text(json.dumps(layout))
 print(f'{n} vertices, {len(tris) // 3} triangles, {len(morphs)} morphs, {len(blob) / 1e6:.1f} MB')

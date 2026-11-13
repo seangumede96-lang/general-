@@ -128,38 +128,47 @@
 	</section>
 
 	<section id="body" hidden>
-		<div class="body-wrap">
-			<div id="body-view" class="body-view"></div>
-			<div class="body-views">
-				<button type="button" class="chip-btn" data-angle="0">Front</button>
-				<button type="button" class="chip-btn" data-angle="1.5708">Side</button>
-				<button type="button" class="chip-btn" data-angle="3.1416">Back</button>
-				<span class="spacer"></span>
-				<span class="muted small">Drag to turn</span>
-			</div>
-			<div class="card">
-				<div class="row">
-					<div class="seg" id="body-base"><button type="button" data-base="female">Female</button><button type="button" data-base="male">Male</button></div>
-					<span class="spacer"></span>
-					<button type="button" class="link" id="body-reset">Reset</button>
+		<!-- Character-creator layout: the figure stays in view beside the controls, which scroll on their own. -->
+		<div class="creator">
+			<div class="creator-stage">
+				<div id="body-view" class="body-view"></div>
+				<div class="stage-top seg" id="body-base"><button type="button" data-base="female">Female</button><button type="button" data-base="male">Male</button></div>
+				<div class="stage-bottom body-views">
+					<button type="button" class="chip-btn" data-angle="0">Front</button>
+					<button type="button" class="chip-btn" data-angle="1.5708">Side</button>
+					<button type="button" class="chip-btn" data-angle="3.1416">Back</button>
 				</div>
-				<div class="card-cap" style="margin-top:12px">Body types</div>
-				<div class="chips" id="body-presets"></div>
-				<div class="card-cap" style="margin-top:12px">Head shape</div>
-				<div class="chips" id="body-heads"></div>
-				<div class="card-cap" style="margin-top:12px">Lengths</div>
-				<div class="vsliders" id="body-vsliders"></div>
-				<div class="card-cap" style="margin-top:12px">Widths and volume</div>
-				<div id="body-hsliders"></div>
 			</div>
-			<div class="card">
-				<div class="card-cap">My bodies</div>
-				<div class="chips" id="body-saved"></div>
-				<div class="row" style="margin-top:10px"><input id="body-name" type="text" placeholder="Name this body" maxlength="40"><button type="button" class="btn-ghost" id="body-save">Save</button></div>
-			</div>
-			<div class="card">
-				<button type="button" class="btn-primary" id="body-use" style="width:100%">Use this body for pictures</button>
-				<p class="muted small" style="margin:10px 0 0">Your pictures follow this body's 3D shape and pose, using a depth map of it. The model follows it closely, not exactly: tighter keeps the shape, looser looks more natural.</p>
+			<div class="creator-panel">
+				<div class="creator-tabs" id="body-tabs" role="tablist">
+					<button type="button" data-tab="shape" class="on">Body</button>
+					<button type="button" data-tab="lengths">Lengths</button>
+					<button type="button" data-tab="upper">Upper</button>
+					<button type="button" data-tab="lower">Lower</button>
+					<button type="button" data-tab="head">Head</button>
+					<button type="button" data-tab="saved">Saved</button>
+				</div>
+				<div class="creator-scroll" id="body-scroll">
+					<div class="creator-pane" data-pane="shape">
+						<div class="row"><span class="card-cap">Body types</span><span class="spacer"></span><button type="button" class="link" id="body-reset">Reset</button></div>
+						<div class="chips" id="body-presets"></div>
+						<div id="body-group-shape" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="lengths" hidden><div class="vsliders" id="body-vsliders"></div></div>
+					<div class="creator-pane" data-pane="upper" hidden><div id="body-group-upper" class="hsliders"></div></div>
+					<div class="creator-pane" data-pane="lower" hidden><div id="body-group-lower" class="hsliders"></div></div>
+					<div class="creator-pane" data-pane="head" hidden>
+						<div class="card-cap">Head shape</div>
+						<div class="chips" id="body-heads"></div>
+						<div id="body-group-head" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="saved" hidden>
+						<div class="chips" id="body-saved"></div>
+						<div class="save-row"><input id="body-name" type="text" placeholder="Name this body" maxlength="40"><button type="button" class="btn-ghost" id="body-save">Save</button></div>
+						<p class="muted small">Your pictures follow this body's 3D shape and pose, using a depth map of it. The model follows it closely, not exactly: tighter keeps the shape, looser looks more natural.</p>
+					</div>
+				</div>
+				<div class="creator-foot"><button type="button" class="btn-primary" id="body-use">Use this body</button></div>
 			</div>
 		</div>
 	</section>

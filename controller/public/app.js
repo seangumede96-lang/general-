@@ -1373,12 +1373,21 @@ const bodyEditor = {
 			const c = slider(sl); this.controls.push(c);
 			return el('div', { className: 'vslider' }, c.out, c.input, el('b', { textContent: sl.label }));
 		}));
-		$('body-hsliders').replaceChildren(...m.SLIDERS.filter((x) => !x.vertical).map((sl) => {
+		for (const group of ['shape', 'upper', 'lower', 'head']) $(`body-group-${group}`).replaceChildren(...m.SLIDERS.filter((x) => !x.vertical && x.group === group).map((sl) => {
 			const c = slider(sl); this.controls.push(c);
 			const track = el('div', { className: 'hs-track' }, c.input);
 			scrollFriendlySlider(track, c.input);
 			return el('div', { className: 'hslider' }, el('b', { textContent: sl.label }), track, c.out);
 		}));
+		// Tabs, as in a character creator: the figure stays in view while you switch groups.
+		const tab = (name) => {
+			for (const b of $('body-tabs').querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === name);
+			for (const p of document.querySelectorAll('#body .creator-pane')) p.hidden = p.dataset.pane !== name;
+			$('body-scroll').scrollTop = 0;
+			localStorage.setItem('bodyTab', name);
+		};
+		for (const b of $('body-tabs').querySelectorAll('button')) b.addEventListener('click', () => tab(b.dataset.tab));
+		tab(localStorage.getItem('bodyTab') || 'shape');
 		this.labelOf = label;
 		for (const button of $('body-base').querySelectorAll('button')) button.addEventListener('click', () => { this.values = m.defaults(button.dataset.base); this.changed(true); });
 		$('body-reset').addEventListener('click', () => { this.values = m.defaults(this.values.base); this.changed(true); });

@@ -11,28 +11,42 @@ const VERSION = 2;
  * a little past either end for exaggerated figures. Vertical ones are lengths.
  */
 export const SLIDERS = [
-	{ key: 'height', label: 'Height', min: 140, max: 205, step: 1, unit: 'cm', vertical: true },
-	{ key: 'neckLength', label: 'Neck', min: -1.3, max: 1.3, step: 0.01, vertical: true },
-	{ key: 'torsoLength', label: 'Torso', min: -1.3, max: 1.3, step: 0.01, vertical: true },
-	{ key: 'legLength', label: 'Legs', min: -1.3, max: 1.3, step: 0.01, vertical: true },
-	{ key: 'armLength', label: 'Arms', min: -1.3, max: 1.3, step: 0.01, vertical: true },
-	{ key: 'weight', label: 'Weight', min: -1, max: 1, step: 0.01 },
-	{ key: 'muscle', label: 'Muscle', min: -1, max: 1, step: 0.01 },
-	{ key: 'headSize', label: 'Head size', min: -1, max: 1, step: 0.01 },
-	{ key: 'neckWidth', label: 'Neck width', min: -1.2, max: 1.2, step: 0.01 },
-	{ key: 'shoulders', label: 'Shoulders', min: -1.2, max: 1.2, step: 0.01 },
-	{ key: 'chest', label: 'Chest', min: -1.2, max: 1.2, step: 0.01 },
-	{ key: 'bust', label: 'Bust', min: -1, max: 1.5, step: 0.01 },
-	{ key: 'waist', label: 'Waist', min: -1.2, max: 1.3, step: 0.01 },
-	{ key: 'hips', label: 'Hips', min: -1.2, max: 1.5, step: 0.01 },
-	{ key: 'glutes', label: 'Glutes', min: -1, max: 1.5, step: 0.01 },
-	{ key: 'belly', label: 'Belly', min: -1, max: 1, step: 0.01 },
-	{ key: 'thighs', label: 'Thighs', min: -1.2, max: 1.5, step: 0.01 },
-	{ key: 'thighGap', label: 'Thigh gap', min: -1, max: 1.3, step: 0.01 },
-	{ key: 'bowLegs', label: 'Bow legs', min: -1.3, max: 1.5, step: 0.01 },
-	{ key: 'calves', label: 'Calves', min: -1.2, max: 1.3, step: 0.01 },
-	{ key: 'arms', label: 'Arm thickness', min: -1.2, max: 1.4, step: 0.01 }
+	{ key: 'height', label: 'Height', group: 'lengths', min: 140, max: 205, step: 1, unit: 'cm', vertical: true },
+	{ key: 'neckLength', label: 'Neck', group: 'lengths', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'torsoLength', label: 'Torso', group: 'lengths', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'legLength', label: 'Legs', group: 'lengths', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'armLength', label: 'Arms', group: 'lengths', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'armPose', label: 'Arms out', group: 'shape', min: 0, max: 1, step: 0.01 },
+	{ key: 'weight', label: 'Weight', group: 'shape', min: -1, max: 1, step: 0.01 },
+	{ key: 'muscle', label: 'Muscle', group: 'shape', min: -1, max: 1, step: 0.01 },
+	{ key: 'headSize', label: 'Head size', group: 'head', min: -1, max: 1, step: 0.01 },
+	{ key: 'neckWidth', label: 'Neck width', group: 'head', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'shoulders', label: 'Shoulders', group: 'upper', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'chest', label: 'Chest', group: 'upper', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'bust', label: 'Bust', group: 'upper', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'waist', label: 'Waist', group: 'upper', min: -1.2, max: 1.3, step: 0.01 },
+	{ key: 'hips', label: 'Hips', group: 'lower', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'glutes', label: 'Glutes', group: 'lower', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'belly', label: 'Belly', group: 'upper', min: -1, max: 1, step: 0.01 },
+	{ key: 'thighs', label: 'Thighs', group: 'lower', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'thighGap', label: 'Thigh gap', group: 'lower', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'bowLegs', label: 'Bow legs', group: 'lower', min: -1.3, max: 1.5, step: 0.01 },
+	{ key: 'calves', label: 'Calves', group: 'lower', min: -1.2, max: 1.3, step: 0.01 },
+	{ key: 'arms', label: 'Arm thickness', group: 'upper', min: -1.2, max: 1.4, step: 0.01 }
 ];
+
+/** The tabs the sliders are grouped under, in order. */
+export const GROUPS = [['shape', 'Body'], ['lengths', 'Lengths'], ['upper', 'Upper'], ['lower', 'Lower'], ['head', 'Head']];
+
+/**
+ * The look of the starting figures, added under the sliders (so 0 still means "as the base"):
+ * a toned, fit build like the clay figures of character creators, rather than MakeHuman's
+ * plain average body.
+ */
+const BASE_TUNE = {
+	female: { muscle: 0.45, weight: -0.15, bust: 0.35, waist: -0.25, hips: 0.2, glutes: 0.25, legLength: 0.2, thighGap: 0.15 },
+	male: { muscle: 0.75, weight: -0.25, shoulders: 0.35, chest: 0.3, waist: -0.2, legLength: 0.15, neckWidth: 0.2 }
+};
 
 /** Which morph targets each slider drives, and how strongly. */
 const DRIVES = {
@@ -43,7 +57,7 @@ const DRIVES = {
 	headSize: [['head-height', 1], ['head-width', 1]],
 	neckWidth: [['neck-circ', 1]],
 	shoulders: [['shoulder-dist', 1]],
-	chest: [['frontchest-dist', 1], ['bust-circ', 0.6], ['torso-depth', 0.4]],
+	chest: [['frontchest-dist', 1], ['torso-depth', 0.5]],
 	bust: [['cup', 1]],
 	waist: [['waist-circ', 1]],
 	hips: [['hips-circ', 1], ['hip-depth', 0.4]],
@@ -130,6 +144,8 @@ export async function loadHuman(url = new URL('./vendor/makehuman/', import.meta
 		base: new Float32Array(bin, layout.positions, layout.vertices * 3),
 		index: new Index(bin, layout.indices, layout.triangles * 3),
 		eyes: layout.eyes,
+		markers: layout.markers || {},
+		skin: Object.fromEntries(Object.entries(layout.skin || {}).map(([k, e]) => [k, { idx: new Index(bin, e.indices, e.count), w: new Float32Array(bin, e.weights, e.count) }])),
 		morphs
 	};
 	return meshData;
@@ -141,10 +157,12 @@ export function weights(v) {
 	const add = (name, x) => { if (x) w[name] = (w[name] || 0) + x; };
 	const two = (name, x) => { if (x > 0) add(`${name}-up`, x); else if (x < 0) add(`${name}-down`, -x); };
 	const g = v.base === 'male' ? 'male' : 'female';
+	const tune = BASE_TUNE[g];
+	const at = (key) => (v[key] || 0) + (tune[key] || 0);
 	add(g, 1);
-	two(`${g}-weight`, v.weight || 0);
-	two(`${g}-muscle`, v.muscle || 0);
-	for (const [key, drives] of Object.entries(DRIVES)) for (const [name, k] of drives) two(name, (v[key] || 0) * k);
+	two(`${g}-weight`, at('weight'));
+	two(`${g}-muscle`, at('muscle'));
+	for (const [key, drives] of Object.entries(DRIVES)) for (const [name, k] of drives) two(name, at(key) * k);
 	if (HEAD_SHAPES[v.headShape]) add(HEAD_SHAPES[v.headShape], HEAD_AMOUNT);
 	return w;
 }
@@ -164,6 +182,7 @@ export function shapeBody(v, out) {
 			p[j + 2] += m.off[i * 3 + 2] * k;
 		}
 	}
+	poseArms(p, v.armPose || 0);
 	// Measure the drawn skin only (the eye markers sit inside the head), then scale to the height.
 	const skin = d.eyes[0][0];
 	let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
@@ -213,6 +232,60 @@ function depthMaterial(near, far) {
 	});
 }
 
+/** Arms hang this many degrees out from straight down when "Arms out" is 0. */
+const ARMS_DOWN_DEGREES = 9;
+
+function marker(p, [start, count]) {
+	let x = 0, y = 0, z = 0;
+	for (let i = start; i < start + count; i++) { x += p[i * 3]; y += p[i * 3 + 1]; z += p[i * 3 + 2]; }
+	return [x / count, y / count, z / count];
+}
+
+/**
+ * Pose the arms in the body's front plane. MakeHuman's mesh is modelled with the arms raised
+ * about 45 degrees; amount 0 lowers them to the sides like a standing figure, 1 leaves them as
+ * modelled. Linear blend skinning with MakeHuman's own weights: the shoulder bone turns a
+ * fifth of the way, the whole arm below it the rest, each about its own joint.
+ */
+function poseArms(p, amount) {
+	const d = meshData;
+	if (amount >= 1 || !d.skin['arm.L'] || !d.markers['upperarm01.L']) return;
+	for (const side of ['L', 'R']) {
+		const shoulder = marker(p, d.markers[`shoulder01.${side}`]);
+		const upper = marker(p, d.markers[`upperarm01.${side}`]);
+		const wrist = marker(p, d.markers[`wrist.${side}`]);
+		const out = Math.sign(wrist[0] - upper[0]) || 1;
+		const now = Math.atan2(Math.abs(wrist[0] - upper[0]), upper[1] - wrist[1]);
+		const down = (ARMS_DOWN_DEGREES * Math.PI) / 180;
+		const turn = (now - (down + amount * (now - down))) * out; // lower the arm towards the body
+		if (Math.abs(turn) < 1e-4) continue;
+		const rot = (angle, [px, py]) => { const c = Math.cos(angle), s = Math.sin(angle); return (x, y) => [px + (x - px) * c + (y - py) * s, py - (x - px) * s + (y - py) * c]; };
+		const rs = rot(turn * 0.2, shoulder);
+		const ru = rot(turn * 0.8, upper);
+		const sw = new Map();
+		const sk = d.skin[`shoulder.${side}`];
+		for (let i = 0; i < sk.idx.length; i++) sw.set(sk.idx[i], sk.w[i]);
+		const arm = d.skin[`arm.${side}`];
+		const armW = new Map();
+		for (let i = 0; i < arm.idx.length; i++) armW.set(arm.idx[i], arm.w[i]);
+		const moved = new Set([...sw.keys(), ...armW.keys()]);
+		for (const i of moved) {
+			const x = p[i * 3], y = p[i * 3 + 1];
+			const ws = sw.get(i) || 0, wa = armW.get(i) || 0;
+			const [sx, sy] = rs(x, y);
+			const [ux, uy] = ru(x, y);
+			const [ax, ay] = rs(ux, uy);
+			const keep = Math.max(0, 1 - ws - wa);
+			p[i * 3] = keep * x + ws * sx + wa * ax;
+			p[i * 3 + 1] = keep * y + ws * sy + wa * ay;
+		}
+		// Move the joint markers too, so they stay where the posed arm is.
+		const move = ([start, count], f) => { for (let i = start; i < start + count; i++) { const [x, y] = f(p[i * 3], p[i * 3 + 1]); p[i * 3] = x; p[i * 3 + 1] = y; } };
+		move(d.markers[`upperarm01.${side}`], rs);
+		move(d.markers[`wrist.${side}`], (x, y) => rs(...ru(x, y)));
+	}
+}
+
 function eyeCentre(p, [start, count]) {
 	const c = new THREE.Vector3();
 	for (let i = start; i < start + count; i++) c.add(new THREE.Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]));
@@ -226,33 +299,44 @@ function eyeCentre(p, [start, count]) {
  * it; `snapshot(w, h, angle, mode)` renders a plain picture of it for the image engine.
  */
 export function createViewer(container) {
-	const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+	// Transparent, so the studio backdrop behind it (in CSS) shows through.
+	const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+	renderer.toneMapping = THREE.ACESFilmicToneMapping;
+	renderer.toneMappingExposure = 1.05;
 	renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 	container.append(renderer.domElement);
 	const scene = new THREE.Scene();
-	scene.background = new THREE.Color('#f2f2f2');
-	scene.add(new THREE.HemisphereLight('#ffffff', '#7d7d7d', 1.5));
-	const key = new THREE.DirectionalLight('#ffffff', 1.7);
-	key.position.set(90, 170, 150);
+	scene.background = null;
+	// Studio lighting for a clay figure: soft sky fill, a key light from the upper left, a fill
+	// from the right and a rim from behind, so muscle and curves read clearly.
+	scene.add(new THREE.HemisphereLight('#ffffff', '#5c6068', 1.25));
+	const key = new THREE.DirectionalLight('#ffffff', 2.4);
+	key.position.set(-120, 220, 160);
 	scene.add(key);
-	const rim = new THREE.DirectionalLight('#ffffff', 0.6);
-	rim.position.set(-130, 90, -110);
+	const fill = new THREE.DirectionalLight('#eef2ff', 0.7);
+	fill.position.set(150, 80, 120);
+	scene.add(fill);
+	const rim = new THREE.DirectionalLight('#ffffff', 1.1);
+	rim.position.set(60, 160, -180);
 	scene.add(rim);
-	// A matte, light-wood mannequin finish.
-	const material = new THREE.MeshStandardMaterial({ color: '#d8c3a5', roughness: 0.82, metalness: 0 });
+	// A smooth, light-grey clay finish.
+	const material = new THREE.MeshStandardMaterial({ color: '#e4e2df', roughness: 0.58, metalness: 0 });
 	const group = new THREE.Group();
 	scene.add(group);
 	const camera = new THREE.PerspectiveCamera(22, 1, 1, 5000);
 	let yaw = 0;
 	let height = 170;
+	let reach = 40;
 	let geometry = null;
 	const eyes = [];
 	let ready = null;
 	let current = null;
 
 	function frame(cam, aspect) {
-		const fill = 0.86;
-		const distance = (height / fill / 2) / Math.tan((cam.fov * Math.PI) / 360) + 20;
+		// Fit the figure's height and its widest reach (whichever turn it is at), so it fills
+		// a narrow column as well as a wide one.
+		const t = Math.tan((cam.fov * Math.PI) / 360);
+		const distance = Math.max((height / 0.88 / 2) / t, (reach / 0.92) / (t * aspect)) + 20;
 		cam.aspect = aspect;
 		cam.position.set(0, height * 0.5, distance);
 		cam.lookAt(0, height * 0.49, 0);
@@ -308,6 +392,9 @@ export function createViewer(container) {
 		geometry.computeBoundingBox();
 		geometry.computeBoundingSphere();
 		height = values.height || 170;
+		reach = 0;
+		const arr = pos.array;
+		for (let i = 0; i < meshData.eyes[0][0]; i++) reach = Math.max(reach, Math.hypot(arr[i * 3], arr[i * 3 + 2]));
 		const r = height * 0.0068;
 		meshData.eyes.forEach((e, i) => {
 			eyes[i].position.copy(eyeCentre(pos.array, e));
@@ -355,7 +442,10 @@ export function createViewer(container) {
 				const [near, far] = depthRange(geometry.attributes.position.array, meshData.eyes[0][0], angle, cam.position.z);
 				scene.overrideMaterial = depthMaterial(near, far);
 			}
+			const tone = renderer.toneMapping;
+			if (mode === 'depth') renderer.toneMapping = THREE.NoToneMapping;
 			renderer.render(scene, cam);
+			renderer.toneMapping = tone;
 			const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));
 			scene.overrideMaterial = null;
 			scene.background = prevBg;
