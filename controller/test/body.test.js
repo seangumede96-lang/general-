@@ -24,7 +24,7 @@ test('every slider, preset and head shape drives morph targets that exist in the
 	for (const v of [all, { ...all, base: 'male' }, ...Object.keys(body.HEAD_SHAPES).map((headShape) => ({ ...body.defaults(), headShape }))]) {
 		for (const name of Object.keys(body.weights(v))) assert.ok(human.morphs[name], `missing morph ${name}`);
 	}
-	for (const s of body.SLIDERS) if (s.key !== 'height' && s.key !== 'armPose') {
+	for (const s of body.SLIDERS) if (!['height', 'armPose', 'stance'].includes(s.key)) {
 		const lo = body.weights({ ...body.defaults(), [s.key]: s.min });
 		const hi = body.weights({ ...body.defaults(), [s.key]: s.max });
 		assert.notDeepEqual(lo, hi, `${s.key} changes nothing`);
@@ -71,4 +71,12 @@ test('the arms hang at the sides by default and rise with "Arms out"; male and f
 	let diff = 0;
 	for (let i = 0; i < f.length; i++) diff = Math.max(diff, Math.abs(f[i] - m[i]));
 	assert.ok(diff > 2, 'male and female bodies differ');
+});
+
+test('feet stand close together by default and spread with "Feet apart"', () => {
+	const marker = (p, [start, count]) => { let x = 0; for (let i = start; i < start + count; i++) x += p[i * 3]; return x / count; };
+	const spread = (v) => { const p = body.shapeBody(v); return marker(p, human.markers['foot.L']) - marker(p, human.markers['foot.R']); };
+	const together = Math.abs(spread(body.defaults())), apart = Math.abs(spread({ ...body.defaults(), stance: 1 }));
+	assert.ok(together < apart * 0.75, `feet ${together} vs ${apart}`);
+	assert.ok(together > 5, 'the feet do not cross');
 });

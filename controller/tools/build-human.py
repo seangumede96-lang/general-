@@ -8,7 +8,7 @@ sparse morph offsets) for public/body.js. Only the skin of the body is kept; eye
 helper geometry and joint markers are dropped, so it reads as a smooth mannequin.
 MakeHuman assets are CC0 1.0 (see LICENSE.ASSETS.md in the MakeHuman repository).
 """
-import json, struct, sys
+import json, math, struct, sys
 from pathlib import Path
 
 data = Path(sys.argv[1]); out = Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
@@ -34,7 +34,7 @@ used += sorted(eyes['joint-l-eye']) + sorted(eyes['joint-r-eye'])
 skel = json.load(open(data / 'rigs' / 'default.mhskel'))
 markers = {}
 for side in 'LR':
-    for joint in ('shoulder01', 'upperarm01', 'wrist'):
+    for joint in ('shoulder01', 'upperarm01', 'wrist', 'upperleg01', 'foot'):
         idx = skel['joints'][f'{joint}.{side}____head']
         markers[f'{joint}.{side}'] = [len(used), len(idx)]
         used += idx
@@ -158,7 +158,65 @@ morphs['glute-width-up'] = glute(lambda k, m, p: ((WIDE if p[0] > 0 else -WIDE) 
 morphs['glute-width-down'] = glute(lambda k, m, p: ((-WIDE if p[0] > 0 else WIDE) * 0.7 * m, 0.0, 0.0))
 def top(p): return smooth((p[1] - lo_y) / (hi_y - lo_y))
 morphs['glute-top-up'] = glute(lambda k, m, p: (0.0, 0.0, -OUT * m * top(p)))  # fuller at the top
+# Separation between the cheeks: a cleft down the middle (its own region: the buttock mask is
+# weakest exactly there), a crease under each cheek, and rounder cheek centres, so the two
+# cheeks read as distinct shapes, as the breasts do.
+cleft_rows = [k for k in range(eye_start) if lo_y - 0.25 <= verts[used[k]][1] <= hi_y and abs(verts[used[k]][0]) < 1.6]
+split = {}
+for k in cleft_rows:
+    x, y, z = verts[used[k]]
+    zs = [verts[used[j]][2] for j in cleft_rows if abs(verts[used[j]][1] - y) < 0.06]
+    zc = (min(zs) + max(zs)) / 2
+    if z > zc: continue  # back half of the body only
+    behind = smooth((zc - z) / 0.5)
+    t = (y - lo_y) / (hi_y - lo_y)
+    along = smooth((t + 0.15) / 0.3) * smooth((0.72 - t) / 0.3)  # fades in at the bottom, out where the cheeks end
+    cleft = math.exp(-(x / 0.2) ** 2) * along * behind
+    dz = 0.45 * cleft
+    m = mask.get(k, 0.0)
+    centre = math.exp(-((abs(x) - 0.6) / 0.32) ** 2) * m
+    under = math.exp(-((y - lo_y) / 0.18) ** 2) * smooth((abs(x) - 0.1) / 0.3) * behind
+    dz += 0.06 * under - 0.2 * centre
+    dy = 0.04 * under
+    if abs(dz) > 1e-4 or abs(dy) > 1e-4: split[k] = (0.0, dy, dz)
+morphs['glute-split-up'] = split
+morphs['glute-split-down'] = {k: tuple(-c * 0.7 for c in v) for k, v in split.items()}
 morphs['glute-top-down'] = glute(lambda k, m, p: (0.0, -0.05 * m * (1 - top(p)), -OUT * m * (1 - top(p))))  # fuller at the bottom
+
+# Hip dips and lower belly (FUPA), measured from the base body around the crotch level.
+body_idx = [k for k in range(eye_start)]
+bp = {k: verts[used[k]] for k in body_idx}
+def band(y0, y1, xmax):
+    return [k for k in body_idx if y0 <= bp[k][1] <= y1 and abs(bp[k][0]) < xmax]
+# Hip dips: the outer side of the hips, between the hip bone and the top of the thigh, sinks in.
+DIP_Y, DIP_H = CROTCH + 0.55, 0.45
+hip_band = band(DIP_Y - 1.2, DIP_Y + 1.2, 2.3)
+dips = {}
+for k in hip_band:
+    x, y, z = bp[k]
+    side = [abs(bp[j][0]) for j in hip_band if abs(bp[j][1] - y) < 0.08]
+    wmax = max(side)
+    outer = smooth((abs(x) / wmax - 0.72) / 0.28)
+    zs = [bp[j][2] for j in hip_band if abs(bp[j][1] - y) < 0.08]
+    zc = sum(zs) / len(zs)
+    lateral = smooth(1 - abs(z - zc) / 0.9)
+    w = outer * lateral * math.exp(-((y - DIP_Y) / DIP_H) ** 2)
+    if w > 1e-3: dips[k] = (-(0.2 * w) if x > 0 else 0.2 * w, 0.0, 0.0)
+morphs['hip-dips-up'] = dips
+morphs['hip-dips-down'] = {k: (-v[0] * 0.8, 0.0, 0.0) for k, v in dips.items()}
+# Lower belly (FUPA): a soft mound above the pubic bone, on the front only.
+FUPA_Y = CROTCH + 0.65
+fupa = {}
+for k in band(CROTCH - 0.2, CROTCH + 1.4, 1.4):
+    x, y, z = bp[k]
+    zs = [bp[j][2] for j in body_idx if abs(bp[j][1] - y) < 0.08 and abs(bp[j][0]) < 1.4]
+    zc = sum(zs) / len(zs)
+    if z <= zc: continue
+    front = smooth((z - zc) / 0.6)
+    w = front * math.exp(-((y - FUPA_Y) / 0.38) ** 2) * math.exp(-(x / 0.75) ** 2)
+    if w > 1e-3: fupa[k] = (0.0, -0.02 * w, 0.17 * w)
+morphs['fupa-up'] = fupa
+morphs['fupa-down'] = {k: (0.0, 0.0, -v[2] * 0.6) for k, v in fupa.items()}
 
 # --- binary: positions (float32), indices (uint16/uint32), then per morph: count, indices (uint16), offsets (float32 x3)
 n = len(used)
@@ -191,7 +249,9 @@ def ancestors(b):
         b = bones[b]['parent']
 layout['skin'] = {}
 for side in 'LR':
-    for part, names in (('shoulder', [f'shoulder01.{side}']), ('arm', below(f'upperarm01.{side}'))):
+    foot = below(f'foot.{side}')
+    leg = [b for b in below(f'upperleg01.{side}') if b not in foot]
+    for part, names in (('shoulder', [f'shoulder01.{side}']), ('arm', below(f'upperarm01.{side}')), ('leg', leg), ('foot', foot)):
         w = {}
         for name in names:
             for i, x in weights.get(name, []):

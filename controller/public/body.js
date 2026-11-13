@@ -26,6 +26,7 @@ export const SLIDERS = [
 	{ key: 'vshape', label: 'V-shape', group: 'torso', min: -1, max: 1.3, step: 0.01 },
 	{ key: 'waist', label: 'Waist', group: 'torso', min: -1.2, max: 1.3, step: 0.01 },
 	{ key: 'belly', label: 'Belly', group: 'torso', min: -1, max: 1, step: 0.01 },
+	{ key: 'fupa', label: 'Lower belly (FUPA)', group: 'torso', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'abs', label: 'Abs tone', group: 'torso', min: -1, max: 1.3, step: 0.01 },
 	{ key: 'arms', label: 'Arm thickness', group: 'torso', min: -1.2, max: 1.4, step: 0.01 },
 	{ key: 'bust', label: 'Breast size', group: 'chest', min: -1, max: 1.6, step: 0.01 },
@@ -38,8 +39,11 @@ export const SLIDERS = [
 	{ key: 'glutes', label: 'Butt size', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'buttLift', label: 'Butt height (lower ↔ lift)', group: 'butt', min: -1, max: 1, step: 0.01 },
 	{ key: 'buttOut', label: 'Sticks out', group: 'butt', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'buttSplit', label: 'Cheek separation', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'hipDips', label: 'Hip dips', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'buttWidth', label: 'Butt width', group: 'butt', min: -1, max: 1.2, step: 0.01 },
 	{ key: 'buttFullness', label: 'Fullness: bottom ↔ top', group: 'butt', min: -1, max: 1, step: 0.01 },
+	{ key: 'stance', label: 'Feet apart', group: 'legs', min: 0, max: 1, step: 0.01 },
 	{ key: 'thighs', label: 'Thighs', group: 'legs', min: -1.2, max: 1.5, step: 0.01 },
 	{ key: 'thighGap', label: 'Thigh gap', group: 'legs', min: -1, max: 1.3, step: 0.01 },
 	{ key: 'bowLegs', label: 'Bow legs', group: 'legs', min: -1.3, max: 1.5, step: 0.01 },
@@ -57,8 +61,8 @@ export const GROUPS = [['shape', 'Body'], ['lengths', 'Lengths'], ['torso', 'Tor
  * plain average body.
  */
 const BASE_TUNE = {
-	female: { muscle: 0.45, weight: -0.15, bust: 0.35, waist: -0.25, hips: 0.2, glutes: 0.25, legLength: 0.2, thighGap: 0.15 },
-	male: { muscle: 0.75, weight: -0.25, shoulders: 0.35, chest: 0.3, waist: -0.2, legLength: 0.15, neckWidth: 0.2 }
+	female: { muscle: 0.45, weight: -0.15, bust: 0.35, waist: -0.25, hips: 0.2, glutes: 0.25, legLength: 0.2, thighGap: 0.15, buttSplit: 1 },
+	male: { muscle: 0.75, weight: -0.25, shoulders: 0.35, chest: 0.3, waist: -0.2, legLength: 0.15, neckWidth: 0.2, buttSplit: 0.4 }
 };
 
 /** Which morph targets each slider drives, and how strongly. */
@@ -90,6 +94,9 @@ const DRIVES = {
 	buttLift: [['glute-lift', 1], ['hip-height', 0.35]],
 	buttOut: [['glute-out', 1]],
 	buttWidth: [['glute-width', 1]],
+	buttSplit: [['glute-split', 1]],
+	hipDips: [['hip-dips', 1]],
+	fupa: [['fupa', 1]],
 	buttFullness: [['glute-top', 1]],
 	bowLegs: [['bowlegs', 1]],
 	calves: [['calf-circ', 1]],
@@ -272,6 +279,7 @@ export function shapeBody(v, out) {
 		}
 	}
 	poseArms(p, v.armPose || 0);
+	poseLegs(p, v.stance || 0);
 	// Measure the drawn skin only (the eye markers sit inside the head), then scale to the height.
 	const skin = d.eyes[0][0];
 	let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
@@ -412,6 +420,43 @@ function normalize(n) {
 	for (let i = 0; i < n.length; i += 3) {
 		const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1;
 		n[i] /= l; n[i + 1] /= l; n[i + 2] /= l;
+	}
+}
+
+/**
+ * Bring the feet together, as character creators stand their figures: MakeHuman's mesh stands
+ * with the feet wide apart. Each leg turns in at the hip; the foot turns back the same amount
+ * about the ankle so the soles stay flat. "Feet apart" 1 keeps the modelled stance.
+ */
+const FEET_TOGETHER = 0.6; // ankles end at this fraction of the hip joints' spread
+
+function poseLegs(p, amount) {
+	const d = meshData;
+	if (amount >= 1 || !d.skin['leg.L'] || !d.markers['upperleg01.L']) return;
+	for (const side of ['L', 'R']) {
+		const hip = marker(p, d.markers[`upperleg01.${side}`]);
+		const ankle = marker(p, d.markers[`foot.${side}`]);
+		const drop = hip[1] - ankle[1];
+		const now = Math.atan2(ankle[0] - hip[0], drop);
+		const targetX = hip[0] * FEET_TOGETHER + amount * (ankle[0] - hip[0] * FEET_TOGETHER);
+		const turn = now - Math.atan2(targetX - hip[0], drop);
+		if (Math.abs(turn) < 1e-4) continue;
+		const rot = (angle, [px, py]) => { const c = Math.cos(angle), s = Math.sin(angle); return (x, y) => [px + (x - px) * c + (y - py) * s, py - (x - px) * s + (y - py) * c]; };
+		const rh = rot(turn, hip);
+		const ra = rot(-turn, ankle);
+		const weightsOf = (name) => { const m = new Map(), e = d.skin[name]; for (let i = 0; i < e.idx.length; i++) m.set(e.idx[i], e.w[i]); return m; };
+		const wl = weightsOf(`leg.${side}`), wf = weightsOf(`foot.${side}`);
+		for (const i of new Set([...wl.keys(), ...wf.keys()])) {
+			const x = p[i * 3], y = p[i * 3 + 1];
+			const l = wl.get(i) || 0, f = wf.get(i) || 0;
+			const [lx, ly] = rh(x, y);
+			const [fx, fy] = rh(...ra(x, y));
+			const keep = Math.max(0, 1 - l - f);
+			p[i * 3] = keep * x + l * lx + f * fx;
+			p[i * 3 + 1] = keep * y + l * ly + f * fy;
+		}
+		const move = ([start, count], fn) => { for (let i = start; i < start + count; i++) { const [x, y] = fn(p[i * 3], p[i * 3 + 1]); p[i * 3] = x; p[i * 3 + 1] = y; } };
+		move(d.markers[`foot.${side}`], rh);
 	}
 }
 
