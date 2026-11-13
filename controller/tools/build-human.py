@@ -61,6 +61,10 @@ def diff(a, b):
     keys = set(a) | set(b)
     return {k: tuple(p - q for p, q in zip(a.get(k, (0, 0, 0)), b.get(k, (0, 0, 0)))) for k in keys}
 
+def smooth(t):
+    t = min(1.0, max(0.0, t))
+    return t * t * (3 - 2 * t)
+
 M = 'macrodetails/universal-{g}-young-{m}muscle-{w}weight.target'
 morphs = {}
 for g in ('female', 'male'):
@@ -95,9 +99,6 @@ morphs['bowlegs-down'] = both(target('armslegs/l-leg-valgus-incr.target'), targe
 
 # Thigh gap: MakeHuman has no target for it, so it is made here. The inner side of each thigh,
 # from just below the crotch down towards the knee, moves outwards (or inwards for "less").
-def smooth(t):
-    t = min(1.0, max(0.0, t))
-    return t * t * (3 - 2 * t)
 CROTCH, KNEE, LIMIT, AMOUNT = -0.35, -4.2, 2.6, 0.17  # MakeHuman units are decimetres
 legs = [(new, verts[old]) for old, new in remap.items() if new < eye_start and KNEE - 0.3 < verts[old][1] < CROTCH and abs(verts[old][0]) < LIMIT]
 gap = {}
@@ -117,6 +118,47 @@ morphs['breast-up'] = target('breast/breast-trans-up.target')
 morphs['breast-down'] = target('breast/breast-trans-down.target')
 for shape in ['oval', 'round', 'square', 'rectangular', 'triangular', 'invertedtriangular', 'diamond']:
     morphs[f'head-{shape}'] = target(f'head/head-{shape}.target')
+
+# Breasts: MakeHuman's own breast controls (firmness at an average cup, position on the chest,
+# upper/lower fullness, how pointed). Cup size is 'cup' above, spacing is 'breast-dist'.
+FB = 'breast/female-young-averagemuscle-averageweight-averagecup-{f}firmness.target'
+morphs['firmness-up'] = target(FB.format(f='max'))
+morphs['firmness-down'] = target(FB.format(f='min'))
+morphs['breast-point-up'] = target('breast/breast-point-incr.target')
+morphs['breast-point-down'] = target('breast/breast-point-decr.target')
+morphs['breast-fullness-up'] = target('breast/breast-volume-vert-up.target')
+morphs['breast-fullness-down'] = target('breast/breast-volume-vert-down.target')
+# Torso detail, after Daz's chest/back/waist dials.
+for a, b in [('torso/torso-muscle-pectoral', 'pecs'), ('torso/torso-muscle-dorsi', 'lats'), ('torso/torso-vshape', 'vshape'), ('stomach/stomach-tone', 'abs'), ('hip/hip-scale-horiz', 'hip-width')]:
+    morphs[f'{b}-up'] = target(f'{a}-incr.target')
+    morphs[f'{b}-down'] = target(f'{a}-decr.target')
+morphs['hip-height-up'] = target('hip/hip-trans-up.target')
+morphs['hip-height-down'] = target('hip/hip-trans-down.target')
+
+# Buttocks: MakeHuman only has a volume control, so the shape controls are made here. Its
+# volume target marks where the buttocks are (how far each vertex moves is used as a soft
+# mask), and the region is then lifted, pushed out, widened, or filled at the top or bottom.
+vol = target('buttocks/buttocks-volume-incr.target')
+peak = max((sum(c * c for c in v) ** 0.5 for v in vol.values()), default=1)
+mask = {}
+for k, v in vol.items():
+    m = (sum(c * c for c in v) ** 0.5) / peak
+    if m > 0.01 and k < eye_start: mask[k] = smooth(m) ** 0.8  # soft edges, no ridge where the region ends
+pos = {k: verts[used[k]] for k in mask}
+ys = [pos[k][1] for k in mask]
+lo_y, hi_y = min(ys), max(ys)
+def glute(fn):
+    return {k: fn(k, m, pos[k]) for k, m in mask.items()}
+LIFT, OUT, WIDE = 0.26, 0.34, 0.2  # decimetres at full strength
+morphs['glute-lift-up'] = glute(lambda k, m, p: (0.0, LIFT * m, 0.0))
+morphs['glute-lift-down'] = glute(lambda k, m, p: (0.0, -LIFT * m, 0.0))
+morphs['glute-out-up'] = glute(lambda k, m, p: (0.0, 0.0, -OUT * m))
+morphs['glute-out-down'] = glute(lambda k, m, p: (0.0, 0.0, OUT * 0.6 * m))
+morphs['glute-width-up'] = glute(lambda k, m, p: ((WIDE if p[0] > 0 else -WIDE) * m, 0.0, 0.0))
+morphs['glute-width-down'] = glute(lambda k, m, p: ((-WIDE if p[0] > 0 else WIDE) * 0.7 * m, 0.0, 0.0))
+def top(p): return smooth((p[1] - lo_y) / (hi_y - lo_y))
+morphs['glute-top-up'] = glute(lambda k, m, p: (0.0, 0.0, -OUT * m * top(p)))  # fuller at the top
+morphs['glute-top-down'] = glute(lambda k, m, p: (0.0, -0.05 * m * (1 - top(p)), -OUT * m * (1 - top(p))))  # fuller at the bottom
 
 # --- binary: positions (float32), indices (uint16/uint32), then per morph: count, indices (uint16), offsets (float32 x3)
 n = len(used)
@@ -162,6 +204,77 @@ for side in 'LR':
         entry['weights'] = len(blob)
         blob += struct.pack(f'<{len(keys)}f', *[min(1.0, w[k]) for k in keys])
         layout['skin'][f'{part}.{side}'] = entry
+# Smoothing: one level of Catmull-Clark subdivision, stored as fixed weights over the base
+# vertices. The phone shapes and poses the base mesh, then applies these weights to draw a
+# four-times finer, smoother surface (the same idea as a subdivision modifier in Blender).
+body_faces = [[remap[i] for i in f] for f in faces]
+nv = eye_start
+edges = {}
+vert_faces = [[] for _ in range(nv)]
+for fi, f in enumerate(body_faces):
+    for k in range(len(f)):
+        a, b = f[k], f[(k + 1) % len(f)]
+        edges.setdefault((min(a, b), max(a, b)), []).append(fi)
+        vert_faces[a].append(fi)
+vert_edges = [[] for _ in range(nv)]
+for (a, b) in edges:
+    vert_edges[a].append(b); vert_edges[b].append(a)
+def face_point(fi):
+    f = body_faces[fi]
+    return {v: 1 / len(f) for v in f}
+def add_to(acc, row, k):
+    for v, w in row.items(): acc[v] = acc.get(v, 0) + w * k
+rows = []
+for v in range(nv):  # vertex points
+    acc = {}
+    bnd = [u for u in vert_edges[v] if len(edges[(min(u, v), max(u, v))]) == 1]
+    if bnd:
+        acc[v] = 0.75
+        for u in bnd[:2]: acc[u] = acc.get(u, 0) + 0.125
+    elif vert_faces[v]:
+        n = len(vert_edges[v])
+        for fi in vert_faces[v]: add_to(acc, face_point(fi), 1 / len(vert_faces[v]) / n)
+        for u in vert_edges[v]: add_to(acc, {v: 0.5, u: 0.5}, 2 / len(vert_edges[v]) / n)
+        acc[v] = acc.get(v, 0) + (n - 3) / n
+    else:
+        acc[v] = 1.0
+    rows.append(acc)
+edge_index = {}
+for e, fl in edges.items():  # edge points
+    a, b = e
+    acc = {a: 0.5, b: 0.5}
+    if len(fl) == 2:
+        acc = {a: 0.25, b: 0.25}
+        for fi in fl: add_to(acc, face_point(fi), 0.25)
+    edge_index[e] = len(rows)
+    rows.append(acc)
+face_index = []
+for fi in range(len(body_faces)):  # face points
+    face_index.append(len(rows))
+    rows.append(face_point(fi))
+sub_tris = []
+for fi, f in enumerate(body_faces):
+    n = len(f)
+    for k in range(n):
+        prev, cur, nxt = f[k - 1], f[k], f[(k + 1) % n]
+        q = [cur, edge_index[(min(cur, nxt), max(cur, nxt))], face_index[fi], edge_index[(min(prev, cur), max(prev, cur))]]
+        sub_tris += [q[0], q[1], q[2], q[0], q[2], q[3]]
+nnz = sum(len(r) for r in rows)
+sub_big = len(rows) > 65535
+while len(blob) % 4: blob += b'\0'
+layout['subdiv'] = {'vertices': len(rows), 'triangles': len(sub_tris) // 3, 'indexType': 'uint32' if sub_big else 'uint16', 'nnz': nnz}
+layout['subdiv']['starts'] = len(blob); acc = 0; starts = []
+for r in rows: starts.append(acc); acc += len(r)
+starts.append(acc)
+blob += struct.pack(f'<{len(starts)}I', *starts)
+layout['subdiv']['cols'] = len(blob)
+blob += struct.pack(f"<{nnz}{'I' if big else 'H'}", *[v for r in rows for v in r])
+while len(blob) % 4: blob += b'\0'
+layout['subdiv']['weights'] = len(blob)
+blob += struct.pack(f'<{nnz}f', *[w for r in rows for w in r.values()])
+layout['subdiv']['indices'] = len(blob)
+blob += struct.pack(f"<{len(sub_tris)}{'I' if sub_big else 'H'}", *sub_tris)
+print(f'subdivided: {len(rows)} vertices, {len(sub_tris) // 3} triangles, {nnz} weights')
 (out / 'human.bin').write_bytes(bytes(blob))
 (out / 'human.json').write_text(json.dumps(layout))
-print(f'{n} vertices, {len(tris) // 3} triangles, {len(morphs)} morphs, {len(blob) / 1e6:.1f} MB')
+print(f"{layout['vertices']} vertices, {len(tris) // 3} triangles, {len(morphs)} morphs, {len(blob) / 1e6:.1f} MB")

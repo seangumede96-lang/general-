@@ -1373,7 +1373,7 @@ const bodyEditor = {
 			const c = slider(sl); this.controls.push(c);
 			return el('div', { className: 'vslider' }, c.out, c.input, el('b', { textContent: sl.label }));
 		}));
-		for (const group of ['shape', 'upper', 'lower', 'head']) $(`body-group-${group}`).replaceChildren(...m.SLIDERS.filter((x) => !x.vertical && x.group === group).map((sl) => {
+		for (const [group] of m.GROUPS.filter(([g]) => g !== 'lengths')) $(`body-group-${group}`).replaceChildren(...m.SLIDERS.filter((x) => !x.vertical && x.group === group).map((sl) => {
 			const c = slider(sl); this.controls.push(c);
 			const track = el('div', { className: 'hs-track' }, c.input);
 			scrollFriendlySlider(track, c.input);
@@ -1387,7 +1387,16 @@ const bodyEditor = {
 			localStorage.setItem('bodyTab', name);
 		};
 		for (const b of $('body-tabs').querySelectorAll('button')) b.addEventListener('click', () => tab(b.dataset.tab));
-		tab(localStorage.getItem('bodyTab') || 'shape');
+		const saved = localStorage.getItem('bodyTab');
+		tab($('body-tabs').querySelector(`[data-tab="${saved}"]`) ? saved : 'shape');
+		// Breast and butt types set the detail sliders for that area in one tap.
+		for (const [kind, types] of [['breast', m.BREAST_TYPES], ['butt', m.BUTT_TYPES]]) {
+			$(`body-${kind}-types`).replaceChildren(...Object.keys(types).map((name) => {
+				const b = el('button', { type: 'button', textContent: name });
+				b.addEventListener('click', () => { this.values = m.applyType(this.values, kind, name); this.changed(true); });
+				return b;
+			}));
+		}
 		this.labelOf = label;
 		for (const button of $('body-base').querySelectorAll('button')) button.addEventListener('click', () => { this.values = m.defaults(button.dataset.base); this.changed(true); });
 		$('body-reset').addEventListener('click', () => { this.values = m.defaults(this.values.base); this.changed(true); });

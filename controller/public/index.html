@@ -143,8 +143,10 @@
 				<div class="creator-tabs" id="body-tabs" role="tablist">
 					<button type="button" data-tab="shape" class="on">Body</button>
 					<button type="button" data-tab="lengths">Lengths</button>
-					<button type="button" data-tab="upper">Upper</button>
-					<button type="button" data-tab="lower">Lower</button>
+					<button type="button" data-tab="torso">Torso</button>
+					<button type="button" data-tab="chest">Chest</button>
+					<button type="button" data-tab="butt">Butt</button>
+					<button type="button" data-tab="legs">Legs</button>
 					<button type="button" data-tab="head">Head</button>
 					<button type="button" data-tab="saved">Saved</button>
 				</div>
@@ -155,8 +157,18 @@
 						<div id="body-group-shape" class="hsliders"></div>
 					</div>
 					<div class="creator-pane" data-pane="lengths" hidden><div class="vsliders" id="body-vsliders"></div></div>
-					<div class="creator-pane" data-pane="upper" hidden><div id="body-group-upper" class="hsliders"></div></div>
-					<div class="creator-pane" data-pane="lower" hidden><div id="body-group-lower" class="hsliders"></div></div>
+					<div class="creator-pane" data-pane="torso" hidden><div id="body-group-torso" class="hsliders"></div></div>
+					<div class="creator-pane" data-pane="chest" hidden>
+						<div class="card-cap">Breast type</div>
+						<div class="chips" id="body-breast-types"></div>
+						<div id="body-group-chest" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="butt" hidden>
+						<div class="card-cap">Butt type</div>
+						<div class="chips" id="body-butt-types"></div>
+						<div id="body-group-butt" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="legs" hidden><div id="body-group-legs" class="hsliders"></div></div>
 					<div class="creator-pane" data-pane="head" hidden>
 						<div class="card-cap">Head shape</div>
 						<div class="chips" id="body-heads"></div>

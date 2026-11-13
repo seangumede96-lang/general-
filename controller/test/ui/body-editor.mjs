@@ -160,17 +160,26 @@ async function dragSlider(input, vertical, forward) {
 }
 await showTab('lengths');
 for (const input of await page.locator('#body-vsliders input').all()) { await dragSlider(input, true, true); await dragSlider(input, true, false); }
-for (const tab of ['shape', 'upper', 'lower', 'head']) {
+for (const tab of ['shape', 'torso', 'chest', 'butt', 'legs', 'head']) {
 	await showTab(tab);
 	for (const input of await page.locator(`#body-group-${tab} input`).all()) {
 		if ((await input.getAttribute('data-key')) === 'armPose') { await dragSlider(input, false, true); await dragSlider(input, false, false); continue; }
 		await dragSlider(input, false, true); await dragSlider(input, false, false);
 	}
 }
-await showTab('upper');
+// breast and butt types each change the figure and set their sliders
+for (const [tab, box] of [['chest', 'body-breast-types'], ['butt', 'body-butt-types']]) {
+	await showTab(tab);
+	for (const name of await page.locator(`#${box} button`).allTextContents()) {
+		before = await figure();
+		await tap(page.locator(`#${box} button`, { hasText: name }));
+		if ((await figure()) === before) fail(`${tab} type ${name} did not change the figure`);
+	}
+}
+await showTab('torso');
 // a tap on a horizontal slider's track sets the value there
 {
-	const input = page.locator('#body-group-upper input').first();
+	const input = page.locator('#body-group-torso input').first();
 	await input.scrollIntoViewIfNeeded();
 	const b = await input.boundingBox();
 	await page.touchscreen.tap(b.x + b.width * 0.9, b.y + b.height / 2);
@@ -180,7 +189,7 @@ await showTab('upper');
 }
 
 // ---- scrolling the page with a finger that lands on a horizontal slider must scroll, not change it
-const hs = page.locator('#body-group-upper input').nth(3);
+const hs = page.locator('#body-group-torso input').nth(3);
 await hs.scrollIntoViewIfNeeded();
 const hb = await hs.boundingBox();
 const hv = await hs.evaluate((i) => i.value);

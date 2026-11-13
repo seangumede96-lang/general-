@@ -19,24 +19,37 @@ export const SLIDERS = [
 	{ key: 'armPose', label: 'Arms out', group: 'shape', min: 0, max: 1, step: 0.01 },
 	{ key: 'weight', label: 'Weight', group: 'shape', min: -1, max: 1, step: 0.01 },
 	{ key: 'muscle', label: 'Muscle', group: 'shape', min: -1, max: 1, step: 0.01 },
+	{ key: 'shoulders', label: 'Shoulders', group: 'torso', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'chest', label: 'Ribcage', group: 'torso', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'pecs', label: 'Pectorals', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'lats', label: 'Back (lats)', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'vshape', label: 'V-shape', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'waist', label: 'Waist', group: 'torso', min: -1.2, max: 1.3, step: 0.01 },
+	{ key: 'belly', label: 'Belly', group: 'torso', min: -1, max: 1, step: 0.01 },
+	{ key: 'abs', label: 'Abs tone', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'arms', label: 'Arm thickness', group: 'torso', min: -1.2, max: 1.4, step: 0.01 },
+	{ key: 'bust', label: 'Breast size', group: 'chest', min: -1, max: 1.6, step: 0.01 },
+	{ key: 'breastFirm', label: 'Firmness (lift)', group: 'chest', min: -1, max: 1, step: 0.01 },
+	{ key: 'breastHeight', label: 'Height on chest', group: 'chest', min: -1, max: 1, step: 0.01 },
+	{ key: 'breastSpacing', label: 'Spacing', group: 'chest', min: -1, max: 1.2, step: 0.01 },
+	{ key: 'breastFullness', label: 'Fullness: bottom ↔ top', group: 'chest', min: -1, max: 1, step: 0.01 },
+	{ key: 'breastPoint', label: 'Projection', group: 'chest', min: -1, max: 1, step: 0.01 },
+	{ key: 'hips', label: 'Hips', group: 'butt', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'glutes', label: 'Butt size', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'buttLift', label: 'Butt height (lower ↔ lift)', group: 'butt', min: -1, max: 1, step: 0.01 },
+	{ key: 'buttOut', label: 'Sticks out', group: 'butt', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'buttWidth', label: 'Butt width', group: 'butt', min: -1, max: 1.2, step: 0.01 },
+	{ key: 'buttFullness', label: 'Fullness: bottom ↔ top', group: 'butt', min: -1, max: 1, step: 0.01 },
+	{ key: 'thighs', label: 'Thighs', group: 'legs', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'thighGap', label: 'Thigh gap', group: 'legs', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'bowLegs', label: 'Bow legs', group: 'legs', min: -1.3, max: 1.5, step: 0.01 },
+	{ key: 'calves', label: 'Calves', group: 'legs', min: -1.2, max: 1.3, step: 0.01 },
 	{ key: 'headSize', label: 'Head size', group: 'head', min: -1, max: 1, step: 0.01 },
-	{ key: 'neckWidth', label: 'Neck width', group: 'head', min: -1.2, max: 1.2, step: 0.01 },
-	{ key: 'shoulders', label: 'Shoulders', group: 'upper', min: -1.2, max: 1.2, step: 0.01 },
-	{ key: 'chest', label: 'Chest', group: 'upper', min: -1.2, max: 1.2, step: 0.01 },
-	{ key: 'bust', label: 'Bust', group: 'upper', min: -1, max: 1.5, step: 0.01 },
-	{ key: 'waist', label: 'Waist', group: 'upper', min: -1.2, max: 1.3, step: 0.01 },
-	{ key: 'hips', label: 'Hips', group: 'lower', min: -1.2, max: 1.5, step: 0.01 },
-	{ key: 'glutes', label: 'Glutes', group: 'lower', min: -1, max: 1.5, step: 0.01 },
-	{ key: 'belly', label: 'Belly', group: 'upper', min: -1, max: 1, step: 0.01 },
-	{ key: 'thighs', label: 'Thighs', group: 'lower', min: -1.2, max: 1.5, step: 0.01 },
-	{ key: 'thighGap', label: 'Thigh gap', group: 'lower', min: -1, max: 1.3, step: 0.01 },
-	{ key: 'bowLegs', label: 'Bow legs', group: 'lower', min: -1.3, max: 1.5, step: 0.01 },
-	{ key: 'calves', label: 'Calves', group: 'lower', min: -1.2, max: 1.3, step: 0.01 },
-	{ key: 'arms', label: 'Arm thickness', group: 'upper', min: -1.2, max: 1.4, step: 0.01 }
+	{ key: 'neckWidth', label: 'Neck width', group: 'head', min: -1.2, max: 1.2, step: 0.01 }
 ];
 
 /** The tabs the sliders are grouped under, in order. */
-export const GROUPS = [['shape', 'Body'], ['lengths', 'Lengths'], ['upper', 'Upper'], ['lower', 'Lower'], ['head', 'Head']];
+export const GROUPS = [['shape', 'Body'], ['lengths', 'Lengths'], ['torso', 'Torso'], ['chest', 'Chest'], ['butt', 'Butt'], ['legs', 'Legs'], ['head', 'Head']];
 
 /**
  * The look of the starting figures, added under the sliders (so 0 still means "as the base"):
@@ -65,6 +78,19 @@ const DRIVES = {
 	belly: [['belly', 1]],
 	thighs: [['thigh-circ', 1]],
 	thighGap: [['thigh-gap', 1]],
+	pecs: [['pecs', 1]],
+	lats: [['lats', 1]],
+	vshape: [['vshape', 1]],
+	abs: [['abs', 1]],
+	breastFirm: [['firmness', 1]],
+	breastHeight: [['breast', 1]],
+	breastSpacing: [['breast-dist', 1]],
+	breastFullness: [['breast-fullness', 1]],
+	breastPoint: [['breast-point', 1]],
+	buttLift: [['glute-lift', 1], ['hip-height', 0.35]],
+	buttOut: [['glute-out', 1]],
+	buttWidth: [['glute-width', 1]],
+	buttFullness: [['glute-top', 1]],
 	bowLegs: [['bowlegs', 1]],
 	calves: [['calf-circ', 1]],
 	arms: [['upperarm-circ', 1], ['wrist-circ', 0.4]]
@@ -107,23 +133,79 @@ export function migrate(values) {
 
 function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
 
-/** Whole-body presets on top of a base. */
+/**
+ * Whole-body templates on top of a base. Names and ideas follow the full-body dials of Daz's
+ * Genesis 9 Body Shapes (Emaciated, Thin, Lithe, Fitness, Muscular, Heavy, Pear, Voluptuous,
+ * Portly, Stocky), rebuilt from this body's own sliders.
+ */
 export const PRESETS = {
 	female: {
-		Slim: { weight: -0.6, waist: -0.4, hips: -0.3, thighs: -0.4, bust: -0.4, glutes: -0.4 },
-		Athletic: { muscle: 0.6, weight: -0.2, shoulders: 0.3, waist: -0.2, thighs: 0.2, glutes: 0.3 },
-		Hourglass: { waist: -0.8, hips: 0.8, bust: 0.9, glutes: 0.8, thighs: 0.4 },
-		Pear: { shoulders: -0.3, bust: -0.3, waist: -0.2, hips: 1, glutes: 1, thighs: 0.9 },
-		Curvy: { weight: 0.45, hips: 1, bust: 1.2, glutes: 1.1, thighs: 0.8, waist: 0.1 }
+		Emaciated: { weight: -1, muscle: -0.6, bust: -0.6, glutes: -0.7, hips: -0.5, thighs: -0.8, calves: -0.6, arms: -0.8, thighGap: 0.8, breastFirm: -0.3 },
+		Thin: { weight: -0.65, muscle: -0.2, bust: -0.3, glutes: -0.4, hips: -0.3, thighs: -0.5, arms: -0.4, thighGap: 0.5 },
+		Lithe: { weight: -0.4, muscle: 0.2, waist: -0.3, legLength: 0.3, bust: -0.2, thighs: -0.2, thighGap: 0.4, abs: 0.4 },
+		Fitness: { muscle: 0.7, weight: -0.35, abs: 0.9, shoulders: 0.25, glutes: 0.4, buttLift: 0.5, thighs: 0.25, calves: 0.3, breastFirm: 0.5 },
+		Athletic: { muscle: 0.6, weight: -0.2, shoulders: 0.3, waist: -0.2, thighs: 0.2, glutes: 0.3, buttLift: 0.3, abs: 0.5 },
+		Muscular: { muscle: 1, weight: 0.1, shoulders: 0.6, lats: 0.7, pecs: 0.4, arms: 0.7, thighs: 0.7, calves: 0.6, glutes: 0.5, abs: 1, neckWidth: 0.4 },
+		Hourglass: { waist: -0.8, hips: 0.8, bust: 0.9, glutes: 0.8, thighs: 0.4, breastFirm: 0.3 },
+		Pear: { shoulders: -0.3, bust: -0.3, waist: -0.2, hips: 1, glutes: 1, thighs: 0.9, buttFullness: -0.4 },
+		Voluptuous: { weight: 0.3, bust: 1.3, waist: -0.5, hips: 1.1, glutes: 1.2, thighs: 0.8, buttOut: 0.5, breastFullness: 0.3 },
+		Curvy: { weight: 0.45, hips: 1, bust: 1.2, glutes: 1.1, thighs: 0.8, waist: 0.1 },
+		Heavy: { weight: 1, muscle: -0.2, belly: 0.6, bust: 0.9, hips: 0.9, glutes: 0.8, thighs: 1, arms: 0.9, calves: 0.6, thighGap: -0.8, breastFirm: -0.4 }
 	},
 	male: {
-		Slim: { weight: -0.6, muscle: -0.3, shoulders: -0.3, chest: -0.3 },
-		Athletic: { muscle: 0.6, weight: -0.2, shoulders: 0.4, chest: 0.3, waist: -0.3 },
-		Muscular: { muscle: 1, weight: 0.2, shoulders: 0.8, chest: 0.7, arms: 0.8, thighs: 0.6, neckWidth: 0.8 },
-		Stocky: { weight: 0.7, muscle: 0.3, waist: 0.6, belly: 0.4, legLength: -0.5 },
+		Emaciated: { weight: -1, muscle: -0.6, shoulders: -0.4, arms: -0.8, thighs: -0.8, calves: -0.6, pecs: -0.6 },
+		Thin: { weight: -0.65, muscle: -0.3, shoulders: -0.3, chest: -0.3, arms: -0.4 },
+		Lithe: { weight: -0.4, muscle: 0.3, waist: -0.3, legLength: 0.3, abs: 0.6, vshape: 0.3 },
+		Fitness: { muscle: 0.8, weight: -0.35, abs: 1, pecs: 0.6, vshape: 0.6, shoulders: 0.35, arms: 0.4 },
+		Athletic: { muscle: 0.6, weight: -0.2, shoulders: 0.4, chest: 0.3, waist: -0.3, pecs: 0.4, abs: 0.6 },
+		Muscular: { muscle: 1, weight: 0.2, shoulders: 0.8, chest: 0.7, pecs: 1, lats: 1, vshape: 0.8, arms: 0.8, thighs: 0.6, neckWidth: 0.8, abs: 1 },
+		Stocky: { weight: 0.7, muscle: 0.3, waist: 0.6, belly: 0.4, legLength: -0.5, neckWidth: 0.5 },
+		Portly: { weight: 0.9, muscle: -0.3, belly: 1, waist: 0.9, pecs: -0.3, abs: -1, chest: 0.3 },
+		Heavy: { weight: 1, muscle: -0.1, belly: 0.7, waist: 0.8, arms: 0.8, thighs: 0.9, neckWidth: 0.6 },
 		Tall: { height: 192, legLength: 0.4, torsoLength: 0.2 }
 	}
 };
+
+/**
+ * Breast types, after the shapes commonly used to describe breasts (round, teardrop, bell,
+ * east-west, side-set, close-set, slender, athletic, relaxed). Each sets the chest sliders
+ * other than size.
+ */
+export const BREAST_TYPES = {
+	Round: { breastFirm: 0.6, breastFullness: 0.5, breastPoint: 0.2 },
+	Teardrop: { breastFirm: 0.2, breastFullness: -0.6, breastPoint: 0.1 },
+	Bell: { breastFirm: -0.3, breastFullness: -0.9, breastHeight: -0.3 },
+	'East-west': { breastSpacing: 0.8, breastPoint: -0.3, breastFirm: 0.1 },
+	'Side-set': { breastSpacing: 1, breastFullness: -0.2 },
+	'Close-set': { breastSpacing: -0.8, breastFirm: 0.3 },
+	Slender: { breastHeight: -0.5, breastFirm: -0.4, breastPoint: 0.4, breastFullness: -0.4 },
+	Athletic: { breastSpacing: 0.5, breastFirm: 0.6, breastPoint: -0.3, breastHeight: 0.2 },
+	Relaxed: { breastFirm: -0.9, breastHeight: -0.6, breastFullness: -0.5 }
+};
+const BREAST_KEYS = ['breastFirm', 'breastHeight', 'breastSpacing', 'breastFullness', 'breastPoint'];
+
+/**
+ * Butt types, after the four shapes used by plastic surgeons and fitness guides (round "O",
+ * heart "A", square "H", inverted "V"), plus the high, projecting "bubble" shape.
+ */
+export const BUTT_TYPES = {
+	Round: { glutes: 0.6, buttOut: 0.4, buttFullness: 0, buttWidth: 0.1, buttLift: 0.2 },
+	Heart: { glutes: 0.5, buttFullness: -0.8, buttWidth: 0.35, hips: 0.4, buttOut: 0.2 },
+	Square: { glutes: 0.1, buttWidth: 0.5, buttFullness: 0.1, buttOut: -0.2, buttLift: -0.2 },
+	'Inverted V': { glutes: 0.2, buttFullness: 0.8, buttWidth: -0.3, buttLift: 0.1, buttOut: -0.1 },
+	Bubble: { glutes: 0.8, buttOut: 1, buttLift: 0.7, buttFullness: 0.3 },
+	Flat: { glutes: -0.7, buttOut: -0.8, buttLift: -0.3 }
+};
+const BUTT_KEYS = ['glutes', 'buttOut', 'buttFullness', 'buttWidth', 'buttLift', 'hips'];
+
+/** Apply a breast or butt type: its sliders take the type's values, the others in that set reset. */
+export function applyType(values, kind, name) {
+	const [types, keys] = kind === 'breast' ? [BREAST_TYPES, BREAST_KEYS] : [BUTT_TYPES, BUTT_KEYS];
+	const out = { ...values };
+	for (const k of keys) out[k] = 0;
+	Object.assign(out, types[name] || {});
+	return out;
+}
 
 // ---------- the mesh ----------
 
@@ -145,6 +227,13 @@ export async function loadHuman(url = new URL('./vendor/makehuman/', import.meta
 		index: new Index(bin, layout.indices, layout.triangles * 3),
 		eyes: layout.eyes,
 		markers: layout.markers || {},
+		subdiv: layout.subdiv && {
+			count: layout.subdiv.vertices,
+			starts: new Uint32Array(bin, layout.subdiv.starts, layout.subdiv.vertices + 1),
+			cols: new Index(bin, layout.subdiv.cols, layout.subdiv.nnz),
+			weights: new Float32Array(bin, layout.subdiv.weights, layout.subdiv.nnz),
+			index: new (layout.subdiv.indexType === 'uint32' ? Uint32Array : Uint16Array)(bin, layout.subdiv.indices, layout.subdiv.triangles * 3)
+		},
 		skin: Object.fromEntries(Object.entries(layout.skin || {}).map(([k, e]) => [k, { idx: new Index(bin, e.indices, e.count), w: new Float32Array(bin, e.weights, e.count) }])),
 		morphs
 	};
@@ -286,6 +375,46 @@ function poseArms(p, amount) {
 	}
 }
 
+/** The smooth (subdivided) surface for shaped base positions `p`, written into `out`. */
+export function subdivide(p, out) {
+	const s = meshData.subdiv;
+	const o = out || new Float32Array(s.count * 3);
+	for (let r = 0; r < s.count; r++) {
+		let x = 0, y = 0, z = 0;
+		for (let k = s.starts[r]; k < s.starts[r + 1]; k++) {
+			const c = s.cols[k] * 3, w = s.weights[k];
+			x += p[c] * w; y += p[c + 1] * w; z += p[c + 2] * w;
+		}
+		o[r * 3] = x; o[r * 3 + 1] = y; o[r * 3 + 2] = z;
+	}
+	return o;
+}
+
+/**
+ * Vertex normals of the base mesh (area-weighted), for smoothing with subdivide(): about ten
+ * times cheaper than computing them on the fine mesh, so dragging a slider stays fluid.
+ */
+export function baseNormals(p, out) {
+	const idx = meshData.index;
+	const n = out || new Float32Array(p.length);
+	n.fill(0);
+	for (let t = 0; t < idx.length; t += 3) {
+		const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+		const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+		const vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+		const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+		for (const k of [a, b, c]) { n[k] += nx; n[k + 1] += ny; n[k + 2] += nz; }
+	}
+	return n;
+}
+
+function normalize(n) {
+	for (let i = 0; i < n.length; i += 3) {
+		const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1;
+		n[i] /= l; n[i + 1] /= l; n[i + 2] /= l;
+	}
+}
+
 function eyeCentre(p, [start, count]) {
 	const c = new THREE.Vector3();
 	for (let i = start; i < start + count; i++) c.add(new THREE.Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]));
@@ -328,6 +457,8 @@ export function createViewer(container) {
 	let height = 170;
 	let reach = 40;
 	let geometry = null;
+	let basePos = null;
+	let baseNrm = null;
 	const eyes = [];
 	let ready = null;
 	let current = null;
@@ -357,10 +488,13 @@ export function createViewer(container) {
 	}
 
 	function loaded(d) {
+		// Shapes and poses work on the base mesh; what is drawn is its smoothed version.
+		basePos = new Float32Array(d.count * 3);
+		const smooth = Boolean(d.subdiv);
 		geometry = new THREE.BufferGeometry();
-		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(d.count * 3), 3));
-		geometry.setIndex(new THREE.BufferAttribute(d.index, 1));
-		geometry.setDrawRange(0, d.index.length);
+		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((smooth ? d.subdiv.count : d.count) * 3), 3));
+		geometry.setIndex(new THREE.BufferAttribute(smooth ? d.subdiv.index : d.index, 1));
+		if (smooth) { geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.subdiv.count * 3), 3)); baseNrm = new Float32Array(d.count * 3); }
 		group.add(new THREE.Mesh(geometry, material));
 		// The base mesh has open eye sockets; plain eyeballs close them, as on a shop mannequin.
 		for (let i = 0; i < 2; i++) {
@@ -386,18 +520,27 @@ export function createViewer(container) {
 	function reshape(values) {
 		current = values;
 		const pos = geometry.attributes.position;
-		shapeBody(values, pos.array);
+		shapeBody(values, basePos);
+		if (meshData.subdiv) {
+			subdivide(basePos, pos.array);
+			const nrm = geometry.attributes.normal;
+			subdivide(baseNormals(basePos, baseNrm), nrm.array);
+			normalize(nrm.array);
+			nrm.needsUpdate = true;
+		} else {
+			pos.array.set(basePos.subarray(0, pos.array.length));
+			geometry.computeVertexNormals();
+		}
 		pos.needsUpdate = true;
-		geometry.computeVertexNormals();
 		geometry.computeBoundingBox();
 		geometry.computeBoundingSphere();
 		height = values.height || 170;
 		reach = 0;
-		const arr = pos.array;
+		const arr = basePos;
 		for (let i = 0; i < meshData.eyes[0][0]; i++) reach = Math.max(reach, Math.hypot(arr[i * 3], arr[i * 3 + 2]));
 		const r = height * 0.0068;
 		meshData.eyes.forEach((e, i) => {
-			eyes[i].position.copy(eyeCentre(pos.array, e));
+			eyes[i].position.copy(eyeCentre(basePos, e));
 			eyes[i].scale.setScalar(r);
 		});
 		resize();
@@ -439,7 +582,7 @@ export function createViewer(container) {
 				// Linear depth over the body's own front-to-back range: the front of the torso is
 				// white and the back is dark. The hands reach a little forward in this pose; they
 				// are simply clamped to white so they do not squash the body's range into grey.
-				const [near, far] = depthRange(geometry.attributes.position.array, meshData.eyes[0][0], angle, cam.position.z);
+				const [near, far] = depthRange(geometry.attributes.position.array, geometry.attributes.position.count, angle, cam.position.z);
 				scene.overrideMaterial = depthMaterial(near, far);
 			}
 			const tone = renderer.toneMapping;
