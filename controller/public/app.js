@@ -648,10 +648,12 @@ function openDialog(dialog) {
 }
 for (const dialog of document.querySelectorAll('dialog')) {
 	dialog.addEventListener('close', () => {
-		if (dialog.dataset.pushed) { delete dialog.dataset.pushed; if (history.state?.dialog === dialog.id) history.back(); }
+		// Remove the dialog's history entry; the popstate that follows is ours, not a Back press.
+		if (dialog.dataset.pushed) { delete dialog.dataset.pushed; if (history.state?.dialog === dialog.id) { nav.ownBack = true; history.back(); } }
 	});
 }
 window.addEventListener('popstate', () => {
+	if (nav.ownBack) { nav.ownBack = false; return; }
 	const open = [...document.querySelectorAll('dialog[open]')];
 	if (open.length) { for (const d of open) { delete d.dataset.pushed; d.close(); } return; }
 	if (nav.stack.length) { setView(nav.stack.pop()); return; }
@@ -1186,7 +1188,9 @@ const chars = {
 				};
 				const toVideo = el('button', { type: 'button', textContent: 'Use in Video' });
 				toVideo.addEventListener('click', () => { openPage('video', { sub: true }); video.usePicture(id, src); });
-				return el('div', { className: 'shot' }, el('a', { href: src, target: '_blank' }, el('img', { src, loading: 'lazy', alt: 'Generated picture' })),
+				const open = el('button', { type: 'button', className: 'shot-open', ariaLabel: 'Open picture' }, el('img', { src, loading: 'lazy', alt: 'Generated picture' }));
+				open.addEventListener('click', () => photoViewer.open(this.data.generations.flatMap((x) => x.images.map((i) => `/api/uploads/${i}`)), src));
+				return el('div', { className: 'shot' }, open,
 					el('div', { className: 'shot-actions' }, el('a', { href: src, download: '', textContent: 'Save' }), useAs('face', 'Use as face'), useAs('body', 'Use as body'), useAs('look', 'Use as outfit'), toVideo));
 			})));
 			if (g.status !== 'running') {
@@ -1223,6 +1227,61 @@ for (const input of document.querySelectorAll('.ref-input')) {
 // Labels acting as buttons should also answer the keyboard.
 for (const label of document.querySelectorAll('label[role="button"]')) {
 	label.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); label.click(); } });
+}
+
+/* ---------- Picture viewer ---------- */
+
+/**
+ * Pictures open full screen inside the app, as a dialog: Back (button or gesture) closes it and
+ * returns to the results. (Opening them as links handed them to the browser, and Back then left
+ * the app.) Tap zooms in and out; swipe or the arrows go through the other pictures.
+ */
+const photoViewer = {
+	list: [], index: 0,
+	open(list, src) {
+		this.list = list.length ? list : [src];
+		this.index = Math.max(0, this.list.indexOf(src));
+		this.show();
+		openDialog($('photo'));
+	},
+	show() {
+		const src = this.list[this.index];
+		$('photo-stage').classList.remove('zoomed');
+		$('photo-img').src = src;
+		$('photo-save').href = src;
+		$('photo-count').textContent = this.list.length > 1 ? `${this.index + 1} of ${this.list.length}` : '';
+		$('photo-prev').hidden = this.index === 0;
+		$('photo-next').hidden = this.index >= this.list.length - 1;
+	},
+	step(d) {
+		const i = this.index + d;
+		if (i < 0 || i >= this.list.length) return;
+		this.index = i;
+		this.show();
+	}
+};
+$('photo-close').addEventListener('click', () => $('photo').close());
+$('photo-prev').addEventListener('click', () => photoViewer.step(-1));
+$('photo-next').addEventListener('click', () => photoViewer.step(1));
+{
+	const stage = $('photo-stage');
+	let start = null;
+	stage.addEventListener('pointerdown', (e) => { start = { x: e.clientX, y: e.clientY, t: Date.now() }; });
+	stage.addEventListener('pointercancel', () => { start = null; });
+	stage.addEventListener('pointerup', (e) => {
+		if (!start) return;
+		const dx = e.clientX - start.x, dy = e.clientY - start.y;
+		const zoomed = stage.classList.contains('zoomed');
+		if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+			// A tap: zoom in around the tapped spot, or back out.
+			const img = $('photo-img');
+			const r = img.getBoundingClientRect();
+			const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+			stage.classList.toggle('zoomed');
+			if (!zoomed) { stage.scrollLeft = fx * img.offsetWidth - stage.clientWidth / 2; stage.scrollTop = fy * img.offsetHeight - stage.clientHeight / 2; }
+		} else if (!zoomed && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) photoViewer.step(dx < 0 ? 1 : -1);
+		start = null;
+	});
 }
 
 /* ---------- Body editor ---------- */

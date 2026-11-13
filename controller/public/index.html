@@ -279,6 +279,19 @@
 	</form>
 </main>
 
+<dialog id="photo" class="photo-view" aria-label="Picture">
+	<div class="photo-bar">
+		<button type="button" id="photo-close" class="icon-btn always" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+		<span id="photo-count" class="muted small"></span>
+		<span class="spacer"></span>
+		<a id="photo-save" class="chip-btn" download>Save</a>
+	</div>
+	<div id="photo-stage" class="photo-stage"><img id="photo-img" alt="Generated picture"></div>
+	<button type="button" id="photo-prev" class="photo-nav prev" aria-label="Previous picture">&#8249;</button>
+	<button type="button" id="photo-next" class="photo-nav next" aria-label="Next picture">&#8250;</button>
+	<div class="photo-hint muted small">Tap to zoom · swipe for the next picture</div>
+</dialog>
+
 <dialog id="models" class="sheet" aria-label="Choose a model">
 	<div class="sheet-head"><h2>Model</h2><button type="button" id="models-close" class="icon-btn always" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
 	<div id="models-body"></div>
