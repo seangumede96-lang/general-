@@ -190,3 +190,70 @@ test('recipe details', () => {
 	assert.match(cmd, /Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ\.safetensors/);
 	assert.throws(() => buildWorkflow({}, { video: 'v', image: 'i', prompt: '', seed: 1, width: 480, height: 832, seconds: 5 }), /not the expected version/);
 });
+
+test('the owner picks how long the GPU may run: a chosen length is used, even past the per-pod limit', async () => {
+	const request = await newRequest({ runMinutes: '120' });
+	const q = (await api('POST', '/api/video/quote', request)).body;
+	assert.equal(q.allowed, true, q.reason);
+	assert.equal(q.minutes, 120, 'over the 90-minute per-pod setting, allowed because it was picked');
+	assert.equal(q.run, 120);
+	assert.equal(q.warning, '');
+	const job = await finished((await startJob(request)).body.id);
+	assert.equal(job.status, 'done');
+	assert.match(JSON.parse(rp.state.created[0].args).cmd[0], /^\(sleep 7320; /, 'the pod deletes itself after 120 min + grace');
+	assert.equal(job.params.run, 120);
+	// a length shorter than the estimate is allowed, with a warning
+	const short = (await api('POST', '/api/video/quote', await newRequest({ runMinutes: '30', seconds: 5 }))).body;
+	assert.equal(short.minutes, 30);
+	assert.match(short.warning, /about 42 minutes/);
+	// automatic stays capped by the per-pod setting
+	const auto = (await api('POST', '/api/video/quote', await newRequest({ runMinutes: 'auto' }))).body;
+	assert.equal(auto.minutes, 42);
+	assert.equal(auto.run, 'auto');
+});
+
+test('"until done" has no fixed limit: the GPU stops when the video is done, with a 12-hour offline backstop', async () => {
+	const request = await newRequest({ runMinutes: 'until-done' });
+	const q = (await api('POST', '/api/video/quote', request)).body;
+	assert.equal(q.allowed, true, q.reason);
+	assert.equal(q.run, 'until-done');
+	assert.equal(q.minutes, 720);
+	const job = await finished((await startJob(request)).body.id);
+	assert.equal(job.status, 'done');
+	assert.deepEqual(await podGone(), ['pod1'], 'deleted as soon as the video is done');
+	assert.match(JSON.parse(rp.state.created[0].args).cmd[0], /^\(sleep 43320; /);
+});
+
+test('"until done" with a small balance runs as long as the balance covers, or explains why it cannot start', async () => {
+	rp.state.balance = 2;
+	const q = (await api('POST', '/api/video/quote', await newRequest({ runMinutes: 'until-done' }))).body;
+	assert.equal(q.allowed, true, q.reason);
+	assert.ok(q.minutes >= q.needed && q.minutes < 720, `minutes ${q.minutes}`);
+	assert.ok(q.estimate <= 2);
+	rp.state.balance = 0.05;
+	await app.close();
+	app = createApp({ dataDir: join(root, `d${++n}`), watchdogMs: 0, videoPollMs: 5 });
+	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
+	await api('PUT', '/api/settings', { maxPodMinutes: '90', runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, videoWorkflowUrl: `${comfy.baseUrl}/workflow.json` });
+	const poor = (await api('POST', '/api/video/quote', await newRequest({ runMinutes: 'until-done' }))).body;
+	assert.equal(poor.allowed, false);
+	assert.match(poor.reason, /covers about \d+ minutes/);
+});
+
+test('unknown run lengths fall back to automatic, and the GPU time left is shown while running', async () => {
+	for (const bad of ['999', '-5', 'forever', null, 1e9]) {
+		const q = (await api('POST', '/api/video/quote', await newRequest({ runMinutes: bad }))).body;
+		assert.equal(q.run, 'auto', String(bad));
+		assert.equal(q.minutes, 42);
+	}
+	comfy.state.pollsUntilDone = 40;
+	const started = await startJob(await newRequest({ runMinutes: '60' }));
+	let seen = null;
+	for (let i = 0; i < 200 && seen === null; i++) {
+		const job = (await api('GET', '/api/video')).body.jobs.find((j) => j.id === started.body.id);
+		if (job.gpuSecondsLeft != null) seen = job.gpuSecondsLeft;
+		await new Promise((r) => setTimeout(r, 5));
+	}
+	assert.ok(seen > 3500 && seen <= 3600, `time left ${seen}`);
+	await finished(started.body.id);
+});

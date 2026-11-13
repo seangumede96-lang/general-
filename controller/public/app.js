@@ -842,7 +842,7 @@ const video = {
 			})),
 			progressNode(job.progress),
 			el('div', { className: 'row' },
-				el('span', { className: 'muted small', textContent: `Reserved up to ${job.params.minutes} min, at most ${money(job.params.estimate)}. You can leave this page.` }),
+				el('span', { className: 'muted small', textContent: `${job.params.run === 'until-done' ? 'Runs until the video is done' : `GPU time left: ${job.gpuSecondsLeft == null ? `up to ${job.params.minutes} min` : clock(job.gpuSecondsLeft)}`}, at most ${money(job.params.estimate)}. You can leave this page.` }),
 				el('span', { className: 'spacer' }), stop));
 	},
 
@@ -922,7 +922,8 @@ const video = {
 	request() {
 		return {
 			kind: 'replace', input: this.clip.id, reference: this.picture.id, prompt: $('vid-prompt').value,
-			seconds: this.clip.meta.seconds, width: this.clip.meta.width, height: this.clip.meta.height
+			seconds: this.clip.meta.seconds, width: this.clip.meta.width, height: this.clip.meta.height,
+			runMinutes: $('vid-run').value
 		};
 	},
 
@@ -944,6 +945,7 @@ const video = {
 				await api('POST', '/api/video/jobs', { ...this.request(), rightsConfirmed: true, confirmEstimate: q.estimate });
 				this.clip = this.picture = null;
 				$('vid-form').reset();
+				$('vid-run').value = localStorage.getItem('videoRun') || 'auto';
 				for (const [slot, text] of [['vid-video-slot', 'Choose a video'], ['vid-image-slot', 'Choose a picture']]) {
 					$(slot).textContent = text;
 					$(slot).parentElement.classList.remove('filled');
@@ -954,7 +956,10 @@ const video = {
 			} catch (err) { fail(err.message); }
 		});
 		out.replaceChildren(
-			el('div', { className: 'small', textContent: `${q.seconds} seconds of video. A GPU is reserved for up to ${q.minutes} minutes: about ${Math.round(q.minutes - q.seconds * 2 - 4)} to set up, the rest to generate. ${q.summary}` }),
+			el('div', { className: 'small', textContent: q.run === 'until-done'
+				? `${q.seconds} seconds of video, estimated at about ${q.needed} minutes. The GPU runs until the video is done, with no time limit; it stops by itself after ${Math.round(q.minutes / 6) / 10} hours only if this phone goes offline and cannot stop it. ${q.summary}`
+				: `${q.seconds} seconds of video, estimated at about ${q.needed} minutes. The GPU may run for up to ${q.minutes} minutes. ${q.summary}` }),
+			...(q.warning ? [el('div', { className: 'sys-alert', style: 'margin-top:8px', textContent: q.warning })] : []),
 			el('div', { className: 'row', style: 'margin-top:10px' }, el('span', { className: 'muted small', textContent: 'You pay only for the minutes used.' }), el('span', { className: 'spacer' }), go));
 	}
 };
@@ -962,6 +967,10 @@ const video = {
 $('vid-video-input').addEventListener('change', (e) => { if (e.target.files[0]) video.choose('clip', e.target.files[0]); e.target.value = ''; });
 $('vid-image-input').addEventListener('change', (e) => { if (e.target.files[0]) video.choose('picture', e.target.files[0]); e.target.value = ''; });
 $('vid-form').addEventListener('submit', (e) => { e.preventDefault(); video.quote(); });
+// The run length is remembered; changing it clears an old price so the new one is fetched.
+$('vid-run').value = localStorage.getItem('videoRun') || 'auto';
+if (!$('vid-run').value) $('vid-run').value = 'auto';
+$('vid-run').addEventListener('change', () => { localStorage.setItem('videoRun', $('vid-run').value); $('vid-quote-out').replaceChildren(); });
 
 /* ---------- Characters ---------- */
 

@@ -10,6 +10,11 @@ import { GpuError, MIN_VRAM } from './gpu.js';
 import { createTracker, computeProgress, parseStep } from './progress.js';
 import { MINUTES_PER_CLIP_SECOND } from './video-recipe.js';
 
+/** Run lengths the owner can pick for a video GPU, in minutes (besides automatic and until done). */
+export const RUN_CHOICES = [30, 45, 60, 90, 120, 180];
+/** "Until done" backstop: deletes the GPU if this phone goes offline mid-job. */
+export const UNTIL_DONE_MAX_MINUTES = 720;
+
 export class VideoError extends Error {}
 const ACTIVE = new Set(['starting', 'loading', 'uploading', 'generating', 'saving']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -41,7 +46,9 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		progress: ACTIVE.has(j.status) ? progressOf(j) : null,
 		id: j.id, kind: j.kind, status: j.status, detail: j.detail, prompt: j.prompt, params: JSON.parse(j.params || '{}'),
 		input: j.input_upload, reference: j.ref_upload, result: j.result_upload || null,
-		created_at: j.created_at, step_started_at: j.step_started_at, ended_at: j.ended_at, active: ACTIVE.has(j.status)
+		created_at: j.created_at, step_started_at: j.step_started_at, ended_at: j.ended_at, active: ACTIVE.has(j.status),
+		// How long the GPU may still run before its time limit stops it.
+		gpuSecondsLeft: (() => { const p = ACTIVE.has(j.status) && j.pod_id && db.getPod(j.pod_id); return p && !p.ended_at ? Math.max(0, Math.round((p.deadline_at - clock()) / 1000)) : null; })()
 	});
 
 	const setStep = (id, status, detail = '') => db.updateJob(id, { status, detail, step_started_at: clock() });
@@ -64,12 +71,36 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		return { video, image, seconds: Math.min(Number(seconds), limits().maxClipSeconds) };
 	}
 
+	/**
+	 * How long the GPU may run: 'auto' (estimated for the clip), a number of minutes the owner
+	 * picked, or 'until-done' (no fixed limit: the GPU stops when the video is done, fails or is
+	 * cancelled; a backstop of UNTIL_DONE_MAX_MINUTES, or what the balance covers, still deletes
+	 * it if this phone goes offline mid-job).
+	 */
+	function runChoice(request) {
+		const r = request.runMinutes;
+		if (r === 'until-done') return 'until-done';
+		const n = Number(r);
+		return RUN_CHOICES.includes(n) ? n : 'auto';
+	}
+
 	async function quote(request) {
 		const { seconds } = validate(request);
 		if (db.listJobs().some((j) => ACTIVE.has(j.status))) throw new VideoError('A video is already being processed.');
-		const minutes = minutesFor(seconds);
-		const q = await gpu.quote({ minutes, minVram: MIN_VRAM.comfy, fastNetwork: true });
-		return { ...q, seconds, minutes, trimmed: Number(request.seconds) > seconds, maxClipSeconds: limits().maxClipSeconds };
+		const needed = minutesFor(seconds);
+		const run = runChoice(request);
+		const base = { minVram: MIN_VRAM.comfy, fastNetwork: true, chosenLength: run !== 'auto' };
+		let minutes = run === 'auto' ? needed : run === 'until-done' ? UNTIL_DONE_MAX_MINUTES : run;
+		let q = await gpu.quote({ ...base, minutes });
+		if (run === 'until-done' && !q.allowed && q.options?.length && q.estimate > 0) {
+			// Not enough balance for the full backstop: run for as long as the balance covers.
+			const perMinute = q.estimate / minutes;
+			const affordable = Math.floor((q.remaining - 0.01) / perMinute);
+			if (affordable >= needed) { minutes = affordable; q = await gpu.quote({ ...base, minutes }); }
+			else q = { ...q, reason: `The balance covers about ${Math.max(0, affordable)} minutes of GPU time, but this clip needs about ${needed}.` };
+		}
+		const warning = typeof run === 'number' && run < needed ? `This clip is estimated to need about ${needed} minutes; with ${run} the GPU may shut down before the video is done.` : '';
+		return { ...q, seconds, minutes, needed, run, warning, trimmed: Number(request.seconds) > seconds, maxClipSeconds: limits().maxClipSeconds };
 	}
 
 	async function create(request) {
@@ -89,9 +120,9 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		db.insertJob({
 			id, kind: 'replace', status: 'starting', input_upload: video.id, ref_upload: image.id,
 			prompt: String(request.prompt || '').trim().slice(0, 500),
-			params: { ...size, seconds, minutes: q.minutes, estimate: q.estimate }, rights_confirmed_at: now, created_at: now
+			params: { ...size, seconds, minutes: q.minutes, run: q.run, estimate: q.estimate }, rights_confirmed_at: now, created_at: now
 		});
-		const task = run(id, q.minutes).catch((err) => console.error('[video]', err)).finally(() => running.delete(id));
+		const task = run(id, q.minutes, q.run !== 'auto').catch((err) => console.error('[video]', err)).finally(() => running.delete(id));
 		running.set(id, task);
 		return view(db.getJob(id));
 	}
@@ -117,7 +148,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		} catch { return {}; }
 	}
 
-	async function run(id, minutes) {
+	async function run(id, minutes, chosenLength = false) {
 		let podId = '';
 		const check = () => {
 			if (cancelled.has(id)) throw new VideoError('cancelled');
@@ -131,7 +162,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const template = await loadTemplate();
 			buildWorkflow(template, { video: 'x', image: 'x', prompt: '', seed: 0, ...params }); // fail before renting if the file is wrong
 
-			const pod = await gpu.start({ minutes, minVram: MIN_VRAM.comfy, fastNetwork: true, purpose: 'Video: character replacement', spec: comfyPodSpec() });
+			const pod = await gpu.start({ minutes, minVram: MIN_VRAM.comfy, fastNetwork: true, chosenLength, purpose: 'Video: character replacement', spec: comfyPodSpec() });
 			podId = pod.id;
 			db.updateJob(id, { pod_id: podId });
 			const comfy = createComfyClient(gpu.proxyUrl(podId, COMFY_PORT));

@@ -161,7 +161,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return found.filter((o) => o.rate <= found[0].rate * 2).slice(0, 3);
 	}
 
-	async function quote({ minutes, minVram = 0, fastNetwork = false }) {
+	async function quote({ minutes, minVram = 0, fastNetwork = false, chosenLength = false }) {
 		const c = cfg();
 		minutes = Number(minutes);
 		if (!Number.isFinite(minutes) || minutes < 1) throw new GpuError('Minutes must be at least 1.', 'invalid');
@@ -173,7 +173,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 		const worstRate = Math.max(...options.map((o) => o.rate));
 		const estimate = ceilCents(worstRate * minutes / 60);
 		let reason = null;
-		if (minutes > c.maxPodMinutes) reason = `${minutes} minutes is over the ${c.maxPodMinutes}-minute limit per pod.`;
+		// The per-pod limit guards automatic lengths; a length the owner picked themselves is allowed.
+		if (minutes > c.maxPodMinutes && !chosenLength) reason = `${minutes} minutes is over the ${c.maxPodMinutes}-minute limit per pod.`;
 		else if (db.listPods().some((p) => !p.ended_at)) reason = 'A pod is already running. Stop it first.';
 		else if (!known) reason = 'Could not read your RunPod balance, and no spending cap is set. Try again, or set a cap on the System page.';
 		else if (estimate > remaining) reason = `This could cost up to ${usd(estimate)} but only ${usd(remaining)} is left.`;
@@ -188,8 +189,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 	 * Start a pod. `spec` is { name, image, cmd, ports, env, disk }. The pod's lifetime is
 	 * fixed at `minutes`; the worst case is checked against the budget before anything starts.
 	 */
-	async function start({ minutes, purpose = '', minVram = 0, fastNetwork = false, spec }) {
-		const q = await quote({ minutes, minVram, fastNetwork });
+	async function start({ minutes, purpose = '', minVram = 0, fastNetwork = false, chosenLength = false, spec }) {
+		const q = await quote({ minutes, minVram, fastNetwork, chosenLength });
 		if (!q.allowed) throw new GpuError(q.reason, 'refused');
 		let lastError;
 		for (const gpu of q.options) {
