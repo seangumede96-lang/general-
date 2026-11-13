@@ -271,7 +271,15 @@
 					<p class="muted small">Tap the chosen person on the clip (head, chest and hips work well). Where people overlap, switch to "Not this person" and tap the other one. If someone is lost later in the clip, move to that moment and tap them again.</p>
 				</div>
 
+				<div class="row" style="margin-top:12px; gap:8px; flex-wrap:wrap">
+					<label class="inline">Use from <input id="mc-start" type="number" min="0" step="0.1" value="0" inputmode="decimal" style="width:5.5em"> s</label>
+					<label class="inline">for <input id="mc-length" type="number" min="0.5" step="0.5" value="5" inputmode="decimal" style="width:5em"> s</label>
+					<button type="button" class="link" id="mc-here">From here</button>
+					<button type="button" class="link" id="mc-whole">Whole clip</button>
+				</div>
+				<small class="muted" id="mc-range-note">Try a short part first: time and cost grow with length.</small>
 				<label class="check"><input id="mc-auto" type="checkbox"> <span>Find people automatically instead (only when they are clearly apart)</span></label>
+				<p class="sys-alert" id="mc-auto-warn" hidden>Automatic detection often merges people who touch or overlap into one track. For two or more people close together, mark each one instead.</p>
 				<label>How long the GPU may run
 					<select id="mc-run"><option value="auto">Automatic: estimated for this clip</option><option value="until-done">Until it is done (stops if nothing changes for 20 minutes)</option></select>
 				</label>

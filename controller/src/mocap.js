@@ -19,7 +19,10 @@ const MAX_SECONDS = 60;
 const STALL_MS = 20 * 60000;
 const SMALL_FILE_MAX = 1024 * 1024;
 
-export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 5000, stallMs = STALL_MS, hfBase = 'https://huggingface.co' }) {
+/** Tries at starting a GPU, `retryMs` apart, when none of the right size is free. */
+const START_ATTEMPTS = 7;
+
+export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 5000, stallMs = STALL_MS, hfBase = 'https://huggingface.co', retryMs = 30000 }) {
 	const running = new Map();
 	const cancelled = new Set();
 	const b2Config = () => { const s = db.getSettings(); return { keyId: s.b2KeyId, appKey: s.b2AppKey, bucket: s.b2Bucket, apiBase: s.b2ApiBase || undefined }; };
@@ -67,29 +70,39 @@ export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 	function validate(request) {
 		const video = db.getUpload(String(request.input || ''));
 		if (!video || !video.type.startsWith('video/')) throw new MocapError('Choose a video first.');
-		const seconds = Number(request.seconds);
-		if (!(seconds > 0)) throw new MocapError('Could not read the length of that video.');
-		if (seconds > MAX_SECONDS) throw new MocapError(`Clips can be up to ${MAX_SECONDS} seconds for now; trim it first.`);
-		const people = cleanPeople(request.people);
+		const full = Number(request.seconds);
+		if (!(full > 0)) throw new MocapError('Could not read the length of that video.');
+		// The part of the clip to use: from `start` for `length` seconds (the whole clip if not given).
+		const start = Math.max(0, Number(request.start) || 0);
+		const length = Number(request.length) > 0 ? Math.min(Number(request.length), full - start) : full - start;
+		if (!(length > 0.2)) throw new MocapError('The chosen part of the clip is empty: check the start and length.');
+		if (length > MAX_SECONDS) throw new MocapError(`Up to ${MAX_SECONDS} seconds can be processed at a time; choose a shorter part.`);
+		const seconds = Math.round(length * 100) / 100;
+		// Marks are made on the whole clip; keep those inside the part, timed from its start.
+		const inside = (Array.isArray(request.people) ? request.people : []).map((p) => ({ ...p, marks: (Array.isArray(p?.marks) ? p.marks : []).filter((m) => Number(m?.t) >= start - 0.05 && Number(m?.t) <= start + length).map((m) => ({ ...m, t: Math.max(0, Number(m.t) - start) })) }));
+		const people = cleanPeople(inside);
+		const hadMarks = cleanPeople(request.people).length > 0;
+		if (!people.length && hadMarks && request.automatic !== true) throw new MocapError('Your marks are outside the chosen part of the clip. Mark the people within it (move the slider into that part first).');
 		if (!people.length && request.automatic !== true) throw new MocapError('Mark each person first (tap them on the clip), or choose to find people automatically.');
 		if (!b2Ready()) throw new MocapError('Backblaze is needed to pass the clip to the GPU. Add it on the System page.');
 		if (!db.getSettings().hfToken) throw new MocapError('A Hugging Face token with access to SAM 3 and SAM 3D Body is needed. Add it in Settings.');
-		return { video, seconds, people };
+		return { video, seconds, people, start, full };
 	}
 
 	async function quote(request) {
-		const { seconds } = validate(request);
+		const { seconds, people } = validate(request);
 		if (mine().some((j) => ACTIVE.has(j.status))) throw new MocapError('A motion capture is already running.');
+		const warning = !people.length ? 'Automatic detection often merges people who touch or overlap into one track. For two or more people close together, mark each one instead.' : '';
 		const needed = minutesFor(seconds);
 		const untilDone = request.runMinutes === 'until-done';
 		const minutes = untilDone ? Math.max(needed * 3, 120) : needed;
 		const q = await gpu.quote({ minutes, minVram: MIN_VRAM_GB, fastNetwork: true, wholeGpu: true, chosenLength: untilDone });
-		return { ...q, seconds, minutes, needed, run: untilDone ? 'until-done' : 'auto' };
+		return { ...q, seconds, minutes, needed, warning, run: untilDone ? 'until-done' : 'auto' };
 	}
 
 	async function create(request) {
 		if (request.rightsConfirmed !== true) throw new MocapError('Confirm that you have the right to use this footage first.');
-		const { video, seconds, people } = validate(request);
+		const { video, seconds, people, start, full } = validate(request);
 		const q = await quote(request);
 		if (!q.allowed) throw new MocapError(q.reason);
 		if (request.confirmEstimate !== q.estimate) throw new MocapError(`The price changed to $${q.estimate.toFixed(2)}. Review the new price and confirm again.`);
@@ -98,7 +111,7 @@ export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		const now = clock();
 		db.insertJob({
 			id, kind: 'mocap', status: 'starting', input_upload: video.id, ref_upload: '', prompt: JSON.stringify(people),
-			params: { seconds, minutes: q.minutes, run: q.run, estimate: q.estimate, people: people.map((p) => p.name), automatic: !people.length },
+			params: { seconds, start, clipSeconds: full, minutes: q.minutes, run: q.run, estimate: q.estimate, people: people.map((p) => p.name), automatic: !people.length },
 			rights_confirmed_at: now, created_at: now
 		});
 		const task = run(id, q.minutes, q.run !== 'auto').catch((err) => console.error('[mocap]', err)).finally(() => running.delete(id));
@@ -171,11 +184,24 @@ export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const env = {
 				...(await gatedFiles()),
 				MOCAP_VIDEO_URL: await b2.link(clipName, 4 * 3600),
-				MOCAP_PROMPTS: people.length ? Buffer.from(JSON.stringify({ people })).toString('base64') : ''
+				MOCAP_PROMPTS: people.length ? Buffer.from(JSON.stringify({ people })).toString('base64') : '',
+				MOCAP_TRIM: `${params.start || 0} ${params.seconds}`
 			};
 			check();
 			setStep(id, 'starting', 'Starting the GPU');
-			const pod = await gpu.start({ minutes, minVram: MIN_VRAM_GB, fastNetwork: true, wholeGpu: true, chosenLength, purpose: 'Motion capture', spec: mocapPodSpec(env) });
+			// 48 GB cards are often all taken for a moment: try again for a few minutes before giving up.
+			let pod;
+			for (let attempt = 1; ; attempt++) {
+				try { pod = await gpu.start({ minutes, minVram: MIN_VRAM_GB, fastNetwork: true, wholeGpu: true, chosenLength, purpose: 'Motion capture', spec: mocapPodSpec(env) }); break; }
+				catch (err) {
+					if (!(err instanceof GpuError) || err.code !== 'unavailable' || attempt >= START_ATTEMPTS) {
+						if (err instanceof GpuError && err.code === 'unavailable') throw new MocapError(`No 48 GB GPU was free on RunPod after ${START_ATTEMPTS} tries over about ${Math.round((START_ATTEMPTS - 1) * retryMs / 60000)} minutes. Nothing was charged. Try again later.`);
+						throw err;
+					}
+					db.updateJob(id, { detail: `No 48 GB GPU is free right now; trying again (${attempt + 1} of ${START_ATTEMPTS})` });
+					for (let waited = 0; waited < retryMs; waited += pollMs) { await sleep(pollMs); check(); }
+				}
+			}
 			podId = pod.id;
 			db.updateJob(id, { pod_id: podId });
 

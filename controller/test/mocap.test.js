@@ -72,7 +72,7 @@ beforeEach(async () => {
 	Object.assign(rp.state, { noCapacity: new Set(), pods: new Map(), created: [], deleted: [], seq: 0, balance: 61.38 });
 	rp.state.gpus = rp.state.gpus.map((g) => (g.memory >= 48 ? { ...g, availability: 'HIGH' } : g));
 	Object.assign(state, { hfCalls: [], uploads: [], log: 'STEP 1/5 Installing\nSTEP 4/5 Tracking the people and measuring their bodies\nPROGRESS 60 of 120 frames\nMOCAP DONE 120 frames, 8 bytes\n' });
-	app = createApp({ dataDir: join(root, `d${++n}`), watchdogMs: 0, mocapPollMs: 5, hfBase: `http://127.0.0.1:${hf.address().port}` });
+	app = createApp({ dataDir: join(root, `d${++n}`), watchdogMs: 0, mocapPollMs: 5, mocapRetryMs: 20, hfBase: `http://127.0.0.1:${hf.address().port}` });
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
 	await api('PUT', '/api/settings', {
 		runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podProxyTemplate: `http://127.0.0.1:${pod.address().port}`,
@@ -123,7 +123,7 @@ test('nothing starts without marks (or automatic), rights, Backblaze, the token,
 	assert.match((await api('POST', '/api/mocap/quote', { input, seconds: 5, people: [] })).body.error, /Mark each person/);
 	assert.match((await api('POST', '/api/mocap/quote', { input, seconds: 5, people: [{ name: 'X', marks: [{ t: 0, points: [[0.5, 0.5, 0]] }] }] })).body.error, /Mark each person/, 'only "not this person" points do not count');
 	assert.equal((await api('POST', '/api/mocap/quote', { input, seconds: 5, automatic: true })).body.allowed, true);
-	assert.match((await api('POST', '/api/mocap/quote', { input, seconds: 61, people })).body.error, /up to 60 seconds/);
+	assert.match((await api('POST', '/api/mocap/quote', { input, seconds: 61, people })).body.error, /Up to 60 seconds/);
 	assert.match((await api('POST', '/api/mocap/jobs', { input, seconds: 5, people })).body.error, /right to use this footage/);
 	assert.match((await api('POST', '/api/mocap/quote', { input: await upload('a.png', 'image/png'), seconds: 5, people })).body.error, /Choose a video/);
 	await api('PUT', '/api/settings', { clearHfToken: true, hfToken: '' });
@@ -204,4 +204,51 @@ test('a job only counts as ended once its GPU has been deleted', async () => {
 		await new Promise((r) => setTimeout(r, 2));
 	}
 	assert.fail('job did not end');
+});
+
+test('a part of a long clip can be used: marks are kept inside it and timed from its start', async () => {
+	const input = await upload('long.mp4', 'video/mp4');
+	const marks = [{ name: 'Person A', marks: [{ t: 0.5, points: [[0.3, 0.4, 1]] }, { t: 12.4, points: [[0.3, 0.5, 1]] }] }, { name: 'Person B', marks: [{ t: 10.2, points: [[0.7, 0.4, 1]] }] }];
+	const req = { input, seconds: 41.3, start: 10, length: 5, people: marks };
+	const q = (await api('POST', '/api/mocap/quote', req)).body;
+	assert.equal(q.seconds, 5);
+	assert.equal(q.minutes, minutesFor(5));
+	assert.equal(q.warning, '');
+	const job = await finished((await start(req)).body.id);
+	assert.equal(job.status, 'done', job.detail);
+	assert.deepEqual([job.params.start, job.params.seconds, job.params.clipSeconds], [10, 5, 41.3]);
+	const env = rp.state.created[0].env;
+	assert.equal(env.MOCAP_TRIM, '10 5');
+	const sent = JSON.parse(Buffer.from(env.MOCAP_PROMPTS, 'base64').toString()).people;
+	assert.deepEqual(sent.map((p) => [p.name, p.marks.map((m) => Math.round(m.t * 10) / 10)]), [['Person A', [2.4]], ['Person B', [0.2]]]);
+	// marks only outside the part: said plainly
+	assert.match((await api('POST', '/api/mocap/quote', { input, seconds: 41.3, start: 20, length: 5, people: marks })).body.error, /outside the chosen part/);
+	// too long a part, or an empty one
+	assert.match((await api('POST', '/api/mocap/quote', { input, seconds: 90, start: 0, length: 70, people: marks })).body.error, /Up to 60 seconds/);
+	assert.match((await api('POST', '/api/mocap/quote', { input, seconds: 41.3, start: 41.3, length: 5, people: marks })).body.error, /empty/);
+	// automatic gets a warning about merged people
+	assert.match((await api('POST', '/api/mocap/quote', { input, seconds: 41.3, start: 0, length: 5, automatic: true })).body.warning, /merges people/);
+});
+
+test('when no 48 GB GPU is free it tries again, says so, and gives up cleanly without charging', async () => {
+	const big = rp.state.gpus.filter((g) => g.memory >= 48).map((g) => g.id);
+	for (const id of big) rp.state.noCapacity.add(id);
+	const started = await start(await request());
+	let saw = '';
+	for (let i = 0; i < 400; i++) {
+		const j = (await api('GET', '/api/mocap')).body.jobs.find((x) => x.id === started.body.id);
+		if (/trying again/.test(j.detail)) saw = j.detail;
+		if (saw) break;
+		await new Promise((r) => setTimeout(r, 5));
+	}
+	assert.match(saw, /No 48 GB GPU is free right now; trying again \(2 of 7\)/);
+	rp.state.noCapacity.clear(); // a card frees up
+	const job = await finished(started.body.id);
+	assert.equal(job.status, 'done', job.detail);
+	// and when none ever frees up
+	for (const id of big) rp.state.noCapacity.add(id);
+	const never = await finished((await start(await request())).body.id);
+	assert.equal(never.status, 'failed');
+	assert.match(never.detail, /No 48 GB GPU was free on RunPod after 7 tries.*Nothing was charged/);
+	rp.state.noCapacity.clear();
 });

@@ -1381,6 +1381,9 @@ const mocap = {
 		const v = $('mc-video');
 		v.src = item.url;
 		$('mc-scrub').max = String(item.meta.seconds);
+		$('mc-start').value = '0';
+		$('mc-length').value = String(Math.min(5, Math.round(item.meta.seconds * 10) / 10));
+		this.rangeNote();
 		$('mc-scrub').value = '0';
 		$('mc-marker').hidden = false;
 		this.render();
@@ -1415,7 +1418,9 @@ const mocap = {
 		if (!mark) { mark = { t, points: [] }; this.people[this.sel].marks.push(mark); }
 		mark.points.push([Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000, this.mode]);
 		$('mc-auto').checked = false;
+		$('mc-auto-warn').hidden = true;
 		this.renderPeople();
+		this.rangeNote();
 	},
 
 	draw() {
@@ -1472,9 +1477,21 @@ const mocap = {
 		this.renderPeople();
 	},
 
+	/** Say which part of the clip will be used, and whether the marks fall inside it. */
+	rangeNote() {
+		if (!this.clip?.meta) return;
+		const full = this.clip.meta.seconds;
+		const start = Math.min(full, Math.max(0, Number($('mc-start').value) || 0));
+		const len = Math.min(full - start, Math.max(0, Number($('mc-length').value) || 0));
+		const marks = this.people.flatMap((p) => p.marks.filter((m) => m.points.some((x) => x[2])));
+		const outside = marks.filter((m) => m.t < start - 0.05 || m.t > start + len).length;
+		$('mc-range-note').textContent = `Using ${mmss(start)} to ${mmss(start + len)} (${len.toFixed(1)} s of ${full.toFixed(1)} s).${outside ? ` ${outside} of your marks are outside this part and will not be used.` : ''} Time and cost grow with length.`;
+		$('mc-quote-out').replaceChildren();
+	},
+
 	request() {
 		return {
-			input: this.clip.id, seconds: this.clip.meta.seconds, automatic: $('mc-auto').checked, runMinutes: $('mc-run').value,
+			input: this.clip.id, seconds: this.clip.meta.seconds, start: Number($('mc-start').value) || 0, length: Number($('mc-length').value) || this.clip.meta.seconds, automatic: $('mc-auto').checked, runMinutes: $('mc-run').value,
 			people: $('mc-auto').checked ? [] : this.people.filter((p) => p.marks.some((m) => m.points.some((x) => x[2]))).map((p) => ({ name: p.name, marks: p.marks }))
 		};
 	},
@@ -1500,8 +1517,10 @@ const mocap = {
 			} catch (err) { fail(err.message); go.disabled = false; go.textContent = `Process for up to ${money(q.estimate)}`; }
 		});
 		const who = this.request().people;
+		const warn = q.warning ? [el('div', { className: 'sys-alert', style: 'margin-top:8px', textContent: q.warning })] : [];
 		out.replaceChildren(
-			el('div', { className: 'small', textContent: `${q.seconds.toFixed(1)} s clip, ${who.length ? `${who.length} ${who.length === 1 ? 'person' : 'people'} marked` : 'people found automatically'}. Estimated about ${q.needed} minutes on a 48 GB GPU${q.run === 'until-done' ? '; it runs until done' : `, reserved for up to ${q.minutes} minutes`}. ${q.summary}` }),
+			...warn,
+			el('div', { className: 'small', textContent: `${q.seconds.toFixed(1)} s of the clip, ${who.length ? `${who.length} ${who.length === 1 ? 'person' : 'people'} marked` : 'people found automatically'}. Estimated about ${q.needed} minutes on a 48 GB GPU${q.run === 'until-done' ? '; it runs until done' : `, reserved for up to ${q.minutes} minutes`}. ${q.summary}` }),
 			el('div', { className: 'row', style: 'margin-top:10px' }, el('span', { className: 'muted small', textContent: 'You pay only for the minutes used.' }), el('span', { className: 'spacer' }), go));
 	}
 };
@@ -1511,6 +1530,10 @@ $('mc-video').addEventListener('seeked', () => mocap.draw());
 $('mc-video').addEventListener('loadeddata', () => { $('mc-video').currentTime = 0; mocap.draw(); });
 $('mc-overlay').addEventListener('pointerup', (e) => mocap.tap(e));
 $('mc-undo').addEventListener('click', () => mocap.undo());
+for (const id of ['mc-start', 'mc-length']) $(id).addEventListener('input', () => mocap.rangeNote());
+$('mc-here').addEventListener('click', () => { $('mc-start').value = String(Math.round($('mc-video').currentTime * 10) / 10); mocap.rangeNote(); });
+$('mc-whole').addEventListener('click', () => { if (!mocap.clip?.meta) return; $('mc-start').value = '0'; $('mc-length').value = String(Math.round(mocap.clip.meta.seconds * 10) / 10); mocap.rangeNote(); });
+$('mc-auto').addEventListener('change', () => { $('mc-auto-warn').hidden = !$('mc-auto').checked; $('mc-quote-out').replaceChildren(); });
 for (const b of $('mc-mode').querySelectorAll('button')) b.addEventListener('click', () => { mocap.mode = Number(b.dataset.mode); mocap.renderPeople(); });
 $('mc-form').addEventListener('submit', (e) => { e.preventDefault(); mocap.quote(); });
 new ResizeObserver(() => mocap.draw()).observe($('mc-video'));

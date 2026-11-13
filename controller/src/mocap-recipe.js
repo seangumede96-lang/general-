@@ -8,6 +8,7 @@
 //   MOCAP_GATED       lines "<path under the checkpoint folder> <one-hour Hugging Face link>"
 //   MOCAP_SMALL       JSON {"<path>": "<base64>"} for small gated files (no download link exists)
 //   MOCAP_PROMPTS     base64 JSON of the owner's marks (people and points), or empty for automatic
+//   MOCAP_TRIM        "<start> <length>" in seconds: the part of the clip to use (marks are timed from its start)
 //   MOCAP_PATCH, MOCAP_QC   base64 of the two helper scripts in mocap-pod/
 // Results are served on LOG_PORT from /srv/log: setup.log, out/joints.zip, out/qc.json.
 import { readFileSync } from 'node:fs';
@@ -83,7 +84,10 @@ function script() {
 		'cat /root/x/downloads.log',
 		'if grep -q MISSING /root/x/downloads.log; then echo "A download failed (see above)"; false; fi',
 		// The tool needs .mp4; re-encoding also normalises odd phone formats. Sound is dropped.
-		'ffmpeg -loglevel error -y -i /root/video/in -an -c:v libx264 -preset veryfast -crf 16 -pix_fmt yuv420p /root/video/clip.mp4 && rm -f /root/video/in',
+		// Only the chosen part (MOCAP_TRIM "<start> <length>" in seconds), re-encoded so it starts on a frame.
+		'read TSTART TLEN <<< "${MOCAP_TRIM:-0 0}"',
+		'TRIM=""; if [ -n "$TLEN" ] && [ "$TLEN" != "0" ]; then TRIM="-ss $TSTART -t $TLEN"; fi',
+		'ffmpeg -loglevel error -y $TRIM -i /root/video/in -an -c:v libx264 -preset veryfast -crf 16 -pix_fmt yuv420p /root/video/clip.mp4 && rm -f /root/video/in',
 		'FRAMES=$(ffprobe -v error -count_packets -select_streams v:0 -show_entries stream=nb_read_packets -of csv=p=0 /root/video/clip.mp4)',
 		"FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 /root/video/clip.mp4 | awk -F/ '{ printf \"%.3f\", ($2 ? $1 / $2 : $1) }')",
 		'echo "CLIP $FRAMES frames at $FPS fps"',
