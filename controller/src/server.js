@@ -17,7 +17,7 @@ import { B2Error } from './b2.js';
 import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel, isUncensored } from './gpu.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.bin': 'application/octet-stream' };
 const MAX_BODY = 1024 * 1024;
 const MAX_STEPS = 12;
 const MAX_ATTACHMENTS = 10;

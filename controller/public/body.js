@@ -1,273 +1,250 @@
-// A parametric 3D mannequin for the body editor. Every part is generated from numbers, so
-// any slider change rebuilds the figure instantly. Units are centimetres; +Y is up, +Z faces
-// the viewer, the soles stand on y = 0.
+// The body editor's 3D mannequin: the MakeHuman base body (CC0, see vendor/makehuman/LICENSE)
+// with its morph targets. Sliders blend the targets on the phone, so every change is instant.
+// The finished figure is in centimetres, +Y up, facing +Z, soles on y = 0.
 import * as THREE from './vendor/three/three.module.js';
 
-/** Starting proportions for each base body. Widths are full widths, depths front-to-back. */
-const BASES = {
-	female: {
-		height: 168, head: { w: 14.5, h: 21.5, d: 18.5 }, neck: { len: 8, r: 5 },
-		shoulders: 37, chest: { w: 29, d: 21 }, bust: 1, waist: { w: 25, d: 18.5 }, hips: { w: 36, d: 23 }, glutes: 1,
-		thigh: 8.6, knee: 5, calf: 5.8, ankle: 3.3, upperArm: 4.2, forearm: 3.5, wrist: 2.5,
-		torsoLen: 0.31, legLen: 0.48, armLen: 0.40
-	},
-	male: {
-		height: 178, head: { w: 15.5, h: 23, d: 20 }, neck: { len: 8.5, r: 6.3 },
-		shoulders: 44, chest: { w: 34, d: 24 }, bust: 0, waist: { w: 30, d: 21.5 }, hips: { w: 34, d: 22 }, glutes: 0.7,
-		thigh: 9.2, knee: 5.6, calf: 6.4, ankle: 3.8, upperArm: 5, forearm: 4.1, wrist: 3,
-		torsoLen: 0.315, legLen: 0.475, armLen: 0.41
-	}
-};
+/** Layout version of saved values; older saves (from the first, drawn mannequin) are converted. */
+const VERSION = 2;
 
-/** The sliders: key, label, range, step, and whether it is a length (shown vertically). */
+/**
+ * The sliders. Most run from -1 (the target's "less" end) through 0 (average) to +1 ("more"),
+ * a little past either end for exaggerated figures. Vertical ones are lengths.
+ */
 export const SLIDERS = [
 	{ key: 'height', label: 'Height', min: 140, max: 205, step: 1, unit: 'cm', vertical: true },
-	{ key: 'neckLength', label: 'Neck', min: 0.6, max: 1.7, step: 0.01, vertical: true },
-	{ key: 'torsoLength', label: 'Torso', min: 0.85, max: 1.18, step: 0.01, vertical: true },
-	{ key: 'legLength', label: 'Legs', min: 0.85, max: 1.2, step: 0.01, vertical: true },
-	{ key: 'armLength', label: 'Arms', min: 0.88, max: 1.15, step: 0.01, vertical: true },
-	{ key: 'headSize', label: 'Head size', min: 0.8, max: 1.25, step: 0.01 },
-	{ key: 'neckWidth', label: 'Neck width', min: 0.7, max: 1.45, step: 0.01 },
-	{ key: 'shoulders', label: 'Shoulders', min: 0.8, max: 1.3, step: 0.01 },
-	{ key: 'chest', label: 'Chest', min: 0.75, max: 1.4, step: 0.01 },
-	{ key: 'bust', label: 'Bust', min: 0, max: 2.6, step: 0.01 },
-	{ key: 'waist', label: 'Waist', min: 0.6, max: 1.5, step: 0.01 },
-	{ key: 'hips', label: 'Hips', min: 0.75, max: 1.6, step: 0.01 },
-	{ key: 'glutes', label: 'Glutes', min: 0, max: 2.4, step: 0.01 },
-	{ key: 'thighs', label: 'Thighs', min: 0.7, max: 1.7, step: 0.01 },
-	{ key: 'calves', label: 'Calves', min: 0.75, max: 1.5, step: 0.01 },
-	{ key: 'arms', label: 'Arm thickness', min: 0.7, max: 1.6, step: 0.01 }
+	{ key: 'neckLength', label: 'Neck', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'torsoLength', label: 'Torso', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'legLength', label: 'Legs', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'armLength', label: 'Arms', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'weight', label: 'Weight', min: -1, max: 1, step: 0.01 },
+	{ key: 'muscle', label: 'Muscle', min: -1, max: 1, step: 0.01 },
+	{ key: 'headSize', label: 'Head size', min: -1, max: 1, step: 0.01 },
+	{ key: 'neckWidth', label: 'Neck width', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'shoulders', label: 'Shoulders', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'chest', label: 'Chest', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'bust', label: 'Bust', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'waist', label: 'Waist', min: -1.2, max: 1.3, step: 0.01 },
+	{ key: 'hips', label: 'Hips', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'glutes', label: 'Glutes', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'belly', label: 'Belly', min: -1, max: 1, step: 0.01 },
+	{ key: 'thighs', label: 'Thighs', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'calves', label: 'Calves', min: -1.2, max: 1.3, step: 0.01 },
+	{ key: 'arms', label: 'Arm thickness', min: -1.2, max: 1.4, step: 0.01 }
 ];
 
-/** Head shapes: width, height and depth ratios applied on top of head size. */
-export const HEAD_SHAPES = { oval: [1, 1, 1], round: [1.08, 0.94, 1.03], long: [0.93, 1.1, 0.98], heart: [1.05, 1.02, 0.97], square: [1.07, 0.97, 1.02] };
+/** Which morph targets each slider drives, and how strongly. */
+const DRIVES = {
+	neckLength: [['neck-height', 1]],
+	torsoLength: [['napetowaist-dist', 1], ['waisttohip-dist', 0.5]],
+	legLength: [['upperleg-height', 1], ['lowerleg-height', 1]],
+	armLength: [['upperarm-length', 1], ['lowerarm-length', 1]],
+	headSize: [['head-height', 1], ['head-width', 1]],
+	neckWidth: [['neck-circ', 1]],
+	shoulders: [['shoulder-dist', 1]],
+	chest: [['frontchest-dist', 1], ['bust-circ', 0.6], ['torso-depth', 0.4]],
+	bust: [['cup', 1]],
+	waist: [['waist-circ', 1]],
+	hips: [['hips-circ', 1], ['hip-depth', 0.4]],
+	glutes: [['glutes', 1]],
+	belly: [['belly', 1]],
+	thighs: [['thigh-circ', 1]],
+	calves: [['calf-circ', 1]],
+	arms: [['upperarm-circ', 1], ['wrist-circ', 0.4]]
+};
 
-/** Default slider values for a base body (1 means "as the base"). */
+/** Head shapes, each a MakeHuman head target. */
+export const HEAD_SHAPES = { oval: 'head-oval', round: 'head-round', long: 'head-rectangular', heart: 'head-invertedtriangular', square: 'head-square', diamond: 'head-diamond' };
+const HEAD_AMOUNT = 0.7;
+
+const BASE_HEIGHT = { female: 168, male: 178 };
+
+/** Default values for a base body (0 means "average"). */
 export function defaults(base = 'female') {
-	const b = BASES[base];
-	const v = { base, headShape: 'oval' };
-	for (const s of SLIDERS) v[s.key] = s.key === 'height' ? b.height : s.key === 'bust' ? b.bust : s.key === 'glutes' ? b.glutes : 1;
+	const v = { version: VERSION, base: base === 'male' ? 'male' : 'female', headShape: 'oval' };
+	for (const s of SLIDERS) v[s.key] = s.key === 'height' ? BASE_HEIGHT[v.base] : 0;
 	return v;
 }
+
+/**
+ * Bring saved values up to date. The first mannequin stored ratios around 1 (bust and glutes
+ * around their base amount); those become the nearest positions on the new sliders.
+ */
+export function migrate(values) {
+	if (!values || typeof values !== 'object') return defaults();
+	const out = defaults(values.base);
+	if (values.version === VERSION) {
+		for (const s of SLIDERS) if (Number.isFinite(values[s.key])) out[s.key] = clamp(values[s.key], s.min, s.max);
+	} else {
+		for (const s of SLIDERS) {
+			const old = values[s.key];
+			if (!Number.isFinite(old)) continue;
+			out[s.key] = s.key === 'height' ? old : s.key === 'bust' || s.key === 'glutes' ? (old - (out.base === 'male' ? 0.5 : 1)) * 0.8 : (old - 1) * 3;
+			out[s.key] = clamp(out[s.key], s.min, s.max);
+		}
+	}
+	if (values.headShape in HEAD_SHAPES) out.headShape = values.headShape;
+	if (values.name) out.name = values.name;
+	return out;
+}
+
+function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
 
 /** Whole-body presets on top of a base. */
 export const PRESETS = {
 	female: {
-		Slim: { waist: 0.88, hips: 0.92, thighs: 0.88, bust: 0.7, glutes: 0.7, arms: 0.88 },
-		Athletic: { shoulders: 1.06, waist: 0.95, thighs: 1.05, calves: 1.08, arms: 1.1, bust: 0.9 },
-		Hourglass: { waist: 0.8, hips: 1.18, bust: 1.6, glutes: 1.4, thighs: 1.12 },
-		Pear: { shoulders: 0.94, bust: 0.7, waist: 0.9, hips: 1.25, glutes: 1.5, thighs: 1.3 },
-		Curvy: { waist: 1.05, hips: 1.25, bust: 1.9, glutes: 1.7, thighs: 1.35, arms: 1.15, calves: 1.15 }
+		Slim: { weight: -0.6, waist: -0.4, hips: -0.3, thighs: -0.4, bust: -0.4, glutes: -0.4 },
+		Athletic: { muscle: 0.6, weight: -0.2, shoulders: 0.3, waist: -0.2, thighs: 0.2, glutes: 0.3 },
+		Hourglass: { waist: -0.8, hips: 0.8, bust: 0.9, glutes: 0.8, thighs: 0.4 },
+		Pear: { shoulders: -0.3, bust: -0.3, waist: -0.2, hips: 1, glutes: 1, thighs: 0.9 },
+		Curvy: { weight: 0.45, hips: 1, bust: 1.2, glutes: 1.1, thighs: 0.8, waist: 0.1 }
 	},
 	male: {
-		Slim: { shoulders: 0.94, chest: 0.9, waist: 0.9, arms: 0.88, thighs: 0.9 },
-		Athletic: { shoulders: 1.08, chest: 1.08, waist: 0.92, arms: 1.15, thighs: 1.08, calves: 1.08 },
-		Muscular: { shoulders: 1.18, chest: 1.22, waist: 0.98, arms: 1.4, thighs: 1.25, calves: 1.2, neckWidth: 1.25 },
-		Stocky: { shoulders: 1.08, chest: 1.15, waist: 1.25, hips: 1.1, thighs: 1.2, arms: 1.2, legLength: 0.93 },
-		Tall: { height: 192, legLength: 1.06, torsoLength: 1.02 }
+		Slim: { weight: -0.6, muscle: -0.3, shoulders: -0.3, chest: -0.3 },
+		Athletic: { muscle: 0.6, weight: -0.2, shoulders: 0.4, chest: 0.3, waist: -0.3 },
+		Muscular: { muscle: 1, weight: 0.2, shoulders: 0.8, chest: 0.7, arms: 0.8, thighs: 0.6, neckWidth: 0.8 },
+		Stocky: { weight: 0.7, muscle: 0.3, waist: 0.6, belly: 0.4, legLength: -0.5 },
+		Tall: { height: 192, legLength: 0.4, torsoLength: 0.2 }
 	}
 };
 
-// ---------- geometry helpers ----------
+// ---------- the mesh ----------
 
-/** Catmull-Rom through keys [[t, value], ...] sorted by t. */
-function curve(keys, t) {
-	if (t <= keys[0][0]) return keys[0][1];
-	if (t >= keys.at(-1)[0]) return keys.at(-1)[1];
-	let i = 0;
-	while (keys[i + 1][0] < t) i++;
-	const [t1, p1] = keys[i];
-	const [t2, p2] = keys[i + 1];
-	const p0 = (keys[i - 1] || keys[i])[1];
-	const p3 = (keys[i + 2] || keys[i + 1])[1];
-	const u = (t - t1) / (t2 - t1);
-	const u2 = u * u;
-	const u3 = u2 * u;
-	return 0.5 * ((2 * p1) + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3);
+let meshData = null;
+
+/** Load the converted MakeHuman body once: base positions, triangles and sparse morph targets. */
+export async function loadHuman(url = new URL('./vendor/makehuman/', import.meta.url)) {
+	if (meshData) return meshData;
+	const [layout, bin] = await Promise.all([
+		fetch(new URL('human.json', url)).then((r) => { if (!r.ok) throw new Error(`body model: HTTP ${r.status}`); return r.json(); }),
+		fetch(new URL('human.bin', url)).then((r) => { if (!r.ok) throw new Error(`body model: HTTP ${r.status}`); return r.arrayBuffer(); })
+	]);
+	const Index = layout.indexType === 'uint32' ? Uint32Array : Uint16Array;
+	const morphs = {};
+	for (const m of layout.morphs) morphs[m.name] = { idx: new Index(bin, m.indices, m.count), off: new Float32Array(bin, m.offsets, m.count * 3) };
+	meshData = {
+		count: layout.vertices,
+		base: new Float32Array(bin, layout.positions, layout.vertices * 3),
+		index: new Index(bin, layout.indices, layout.triangles * 3),
+		eyes: layout.eyes,
+		morphs
+	};
+	return meshData;
 }
 
-/** A tube from `from` to `to` whose cross-section at fraction t is an ellipse rx(t) by rz(t). */
-function tube(from, to, rx, rz = rx, rings = 18, seg = 22) {
-	const dir = new THREE.Vector3().subVectors(to, from);
-	const len = dir.length();
-	const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-	const pos = [];
-	const idx = [];
-	for (let i = 0; i <= rings; i++) {
-		const t = i / rings;
-		const a = rx(t);
-		const b = rz(t);
-		for (let j = 0; j <= seg; j++) {
-			const th = (j / seg) * Math.PI * 2;
-			const p = new THREE.Vector3(Math.cos(th) * a, t * len, Math.sin(th) * b).applyQuaternion(q).add(from);
-			pos.push(p.x, p.y, p.z);
+/** The weight of every morph target for a set of slider values. */
+export function weights(v) {
+	const w = {};
+	const add = (name, x) => { if (x) w[name] = (w[name] || 0) + x; };
+	const two = (name, x) => { if (x > 0) add(`${name}-up`, x); else if (x < 0) add(`${name}-down`, -x); };
+	const g = v.base === 'male' ? 'male' : 'female';
+	add(g, 1);
+	two(`${g}-weight`, v.weight || 0);
+	two(`${g}-muscle`, v.muscle || 0);
+	for (const [key, drives] of Object.entries(DRIVES)) for (const [name, k] of drives) two(name, (v[key] || 0) * k);
+	if (HEAD_SHAPES[v.headShape]) add(HEAD_SHAPES[v.headShape], HEAD_AMOUNT);
+	return w;
+}
+
+/** Positions (centimetres, standing on y = 0, exactly v.height tall) for the given values. */
+export function shapeBody(v, out) {
+	const d = meshData;
+	const p = out || new Float32Array(d.count * 3);
+	p.set(d.base);
+	for (const [name, k] of Object.entries(weights(v))) {
+		const m = d.morphs[name];
+		if (!m) continue;
+		for (let i = 0; i < m.idx.length; i++) {
+			const j = m.idx[i] * 3;
+			p[j] += m.off[i * 3] * k;
+			p[j + 1] += m.off[i * 3 + 1] * k;
+			p[j + 2] += m.off[i * 3 + 2] * k;
 		}
 	}
-	for (let i = 0; i < rings; i++) for (let j = 0; j < seg; j++) {
-		const a = i * (seg + 1) + j;
-		const b = a + seg + 1;
-		idx.push(a, b, a + 1, b, b + 1, a + 1);
+	// Measure the drawn skin only (the eye markers sit inside the head), then scale to the height.
+	const skin = d.eyes[0][0];
+	let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
+	for (let i = 0; i < skin; i++) {
+		const y = p[i * 3 + 1];
+		if (y < minY) minY = y;
+		if (y > maxY) maxY = y;
+		cx += p[i * 3]; cz += p[i * 3 + 2];
 	}
-	const g = new THREE.BufferGeometry();
-	g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-	g.setIndex(idx);
-	g.computeVertexNormals();
-	return g;
-}
-
-function blob(center, rx, ry, rz) {
-	const g = new THREE.SphereGeometry(1, 28, 20);
-	g.scale(rx, ry, rz);
-	g.translate(center.x, center.y, center.z);
-	return g;
+	cx /= skin; cz /= skin;
+	const k = (v.height || BASE_HEIGHT[v.base] || 170) / (maxY - minY);
+	for (let i = 0; i < d.count; i++) {
+		p[i * 3] = (p[i * 3] - cx) * k;
+		p[i * 3 + 1] = (p[i * 3 + 1] - minY) * k;
+		p[i * 3 + 2] = (p[i * 3 + 2] - cz) * k;
+	}
+	return p;
 }
 
 /**
- * The torso as one surface: rings from the crotch to the base of the neck, each a rounded
- * rectangle-ish ellipse with separate front and back depths (for chest and glutes).
+ * Camera distances to the front of the torso and to behind the body's middle. The front is taken
+ * from the trunk only (hands and fingers reach forward in this pose and have many vertices).
  */
-function torso(y0, y1, keysW, keysFront, keysBack, rings = 40, seg = 40) {
-	const pos = [];
-	const idx = [];
-	const n = 2.4; // superellipse: slightly squarer than an ellipse, like a real torso
-	for (let i = 0; i <= rings; i++) {
-		const t = i / rings;
-		const y = y0 + (y1 - y0) * t;
-		const w = curve(keysW, t) / 2;
-		const df = curve(keysFront, t);
-		const db = curve(keysBack, t);
-		for (let j = 0; j <= seg; j++) {
-			const th = (j / seg) * Math.PI * 2;
-			const c = Math.cos(th);
-			const s = Math.sin(th);
-			const x = w * Math.sign(c) * Math.abs(c) ** (2 / n);
-			const z = (s >= 0 ? df : db) * Math.sign(s) * Math.abs(s) ** (2 / n);
-			pos.push(x, y, z);
-		}
+function depthRange(p, skin, angle, cameraZ) {
+	const sin = Math.sin(angle), cos = Math.cos(angle);
+	let top = 0;
+	for (let i = 0; i < skin; i++) top = Math.max(top, p[i * 3 + 1]);
+	let front = -Infinity, back = Infinity, sum = 0;
+	for (let i = 0; i < skin; i++) {
+		const x = p[i * 3], y = p[i * 3 + 1];
+		const z = -x * sin + p[i * 3 + 2] * cos;
+		sum += z;
+		if (z < back) back = z;
+		if (Math.abs(x) < top * 0.12 && y > top * 0.45 && y < top * 0.8 && z > front) front = z;
 	}
-	for (let i = 0; i < rings; i++) for (let j = 0; j < seg; j++) {
-		const a = i * (seg + 1) + j;
-		const b = a + seg + 1;
-		idx.push(a, b, a + 1, b, b + 1, a + 1);
-	}
-	const g = new THREE.BufferGeometry();
-	g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-	g.setIndex(idx);
-	g.computeVertexNormals();
-	return g;
+	// Only the front half shows from the camera, so the range ends a little behind the body's
+	// middle plane: limbs stay mid-grey and the torso's curves get most of the contrast.
+	const middle = sum / skin;
+	return [cameraZ - front - 1, cameraZ - middle + (middle - back) * 0.7];
 }
 
-/** Build every part of the body for the given slider values; returns geometries and the total height. */
-export function buildBody(v) {
-	const b = BASES[v.base] || BASES.female;
-	const female = v.base !== 'male';
-	const hs = HEAD_SHAPES[v.headShape] || HEAD_SHAPES.oval;
-	const H = v.height;
-	// Lengths in proportion to height, then adjusted by the length sliders; the whole figure is
-	// rescaled at the end so it is exactly the chosen height.
-	const head = { w: b.head.w * v.headSize * hs[0], h: b.head.h * v.headSize * hs[1], d: b.head.d * v.headSize * hs[2] };
-	const neckLen = b.neck.len * v.neckLength;
-	const torsoLen = b.torsoLen * b.height * v.torsoLength;
-	const legLen = b.legLen * b.height * v.legLength;
-	const footH = 0.04 * b.height;
-	const raw = footH + legLen + torsoLen + neckLen + head.h * 0.92;
-	const k = H / raw;
+function depthMaterial(near, far) {
+	return new THREE.ShaderMaterial({
+		uniforms: { near: { value: near }, far: { value: far } },
+		vertexShader: 'varying float vDist; void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vDist = -mv.z; gl_Position = projectionMatrix * mv; }',
+		fragmentShader: 'uniform float near; uniform float far; varying float vDist; void main() { float d = clamp((far - vDist) / (far - near), 0.0, 1.0); gl_FragColor = vec4(vec3(0.08 + 0.92 * d), 1.0); }'
+	});
+}
 
-	const parts = [];
-	const add = (g) => { g.scale(k, k, k); parts.push(g); };
-	const V = (x, y, z) => new THREE.Vector3(x, y, z);
-
-	const crotchY = footH + legLen;
-	const neckBaseY = crotchY + torsoLen;
-	const hipW = b.hips.w * v.hips;
-	const waistW = b.waist.w * v.waist;
-	const chestW = b.chest.w * v.chest;
-	const shoulderW = b.shoulders * v.shoulders;
-	const neckR = b.neck.r * v.neckWidth;
-	const glute = v.glutes;
-
-	// Torso: crotch, widest hip, lower hip, waist, under-chest, chest, armpit, shoulder line, neck base.
-	const keysW = [[0, hipW * 0.6], [0.06, hipW * 0.9], [0.13, hipW], [0.3, hipW * 0.93 + waistW * 0.07], [0.47, waistW], [0.62, (waistW + chestW) / 2], [0.74, chestW], [0.86, chestW * 0.98], [0.93, shoulderW * 0.82], [1, neckR * 2.4]];
-	const hipD = b.hips.d * v.hips;
-	const keysFront = [[0, hipD * 0.3], [0.13, hipD * 0.47], [0.47, b.waist.d * v.waist * 0.5], [0.74, b.chest.d * v.chest * 0.52], [0.9, b.chest.d * v.chest * 0.42], [1, neckR * 1.1]];
-	const keysBack = [[0, hipD * 0.32 * (0.85 + glute * 0.18)], [0.13, hipD * 0.5 * (0.8 + glute * 0.25)], [0.3, hipD * 0.45], [0.47, b.waist.d * v.waist * 0.48], [0.74, b.chest.d * v.chest * 0.47], [1, neckR * 1.15]];
-	add(torso(crotchY - 2, neckBaseY, keysW, keysFront, keysBack));
-	add(blob(V(0, crotchY - 1.5, 0), hipW * 0.3, 3.5, hipD * 0.3)); // closes the bottom of the torso
-
-	// Glutes and bust as rounded volumes on the torso surface.
-	if (glute > 0.05) for (const s of [-1, 1]) add(blob(V(s * hipW * 0.2, crotchY + torsoLen * 0.1, -hipD * 0.3), hipW * 0.21 * (0.7 + glute * 0.25), torsoLen * 0.1 * (0.8 + glute * 0.2), hipD * 0.22 * (0.6 + glute * 0.35)));
-	const bust = v.bust;
-	if (bust > 0.05) for (const s of [-1, 1]) {
-		const r = 5.2 * (0.5 + bust * 0.42);
-		add(blob(V(s * chestW * 0.22, crotchY + torsoLen * 0.71, b.chest.d * v.chest * 0.38), r, r * 0.92, r * 0.85));
-	}
-
-	// Neck and head.
-	add(tube(V(0, neckBaseY - 2, 0), V(0, neckBaseY + neckLen + 2, -0.5), (t) => neckR * (1.1 - t * 0.12), (t) => neckR * (1.05 - t * 0.1)));
-	const headCenter = V(0, neckBaseY + neckLen + head.h * 0.42, 0.4);
-	add(blob(headCenter, head.w / 2, head.h / 2, head.d / 2));
-	add(blob(V(0, headCenter.y - head.h * 0.2, head.d * 0.06), head.w * 0.38, head.h * 0.24, head.d * 0.38)); // jaw, mostly inside the head
-
-	// Legs: hip joint, knee, ankle, with a thigh, knee and calf profile.
-	const thighR = b.thigh * v.thighs;
-	const calfR = b.calf * v.calves;
-	const kneeR = b.knee * (0.75 + v.thighs * 0.25);
-	const ankleR = b.ankle * (0.85 + v.calves * 0.15);
-	for (const s of [-1, 1]) {
-		const hip = V(s * hipW * 0.24, crotchY + torsoLen * 0.13, 0);
-		const ankle = V(s * hipW * 0.17, footH + 2, -1);
-		const knee = hip.clone().lerp(ankle, 0.52);
-		add(tube(hip, knee, (t) => curve([[0, Math.min(thighR * 1.15, hipW * 0.26)], [0.22, thighR * 1.05], [0.45, thighR], [1, kneeR]], t), (t) => curve([[0, thighR * 1.1], [0.4, thighR * 0.95], [1, kneeR * 1.05]], t)));
-		add(tube(knee, ankle, (t) => curve([[0, kneeR], [0.28, calfR], [0.7, calfR * 0.7], [1, ankleR]], t), (t) => curve([[0, kneeR * 1.05], [0.3, calfR * 1.1], [1, ankleR]], t)));
-		add(blob(knee, kneeR, kneeR * 1.1, kneeR));
-		add(blob(V(ankle.x, footH * 0.55, 4.2), ankleR * 1.15, footH * 0.6, 12 * (b.height / 170)));
-	}
-
-	// Arms in a relaxed A-pose, about 16 degrees out from the body.
-	const armLen = b.armLen * b.height * v.armLength;
-	const upperR = b.upperArm * v.arms;
-	const foreR = b.forearm * (0.8 + v.arms * 0.2);
-	const wristR = b.wrist * (0.9 + v.arms * 0.1);
-	const angle = (16 * Math.PI) / 180;
-	for (const s of [-1, 1]) {
-		const shoulder = V(s * shoulderW * 0.43, neckBaseY - 4, -0.5);
-		const out = V(s * Math.sin(angle), -Math.cos(angle), 0);
-		const elbow = shoulder.clone().addScaledVector(out, armLen * 0.46);
-		const wrist = shoulder.clone().addScaledVector(out, armLen * 0.86);
-		add(blob(shoulder, upperR * 1.25, upperR * 1.2, upperR * 1.15)); // shoulder cap
-		add(tube(shoulder, elbow, (t) => curve([[0, upperR * 1.1], [0.4, upperR], [1, upperR * 0.75]], t)));
-		add(tube(elbow, wrist, (t) => curve([[0, foreR * 0.9], [0.25, foreR], [1, wristR]], t), (t) => curve([[0, foreR * 0.85], [1, wristR * 0.75]], t)));
-		add(blob(elbow, upperR * 0.78, upperR * 0.8, upperR * 0.78));
-		add(blob(wrist.clone().addScaledVector(out, armLen * 0.07), wristR * 1.2, armLen * 0.08, wristR * 0.6)); // hand
-	}
-	return { parts, height: H };
+function eyeCentre(p, [start, count]) {
+	const c = new THREE.Vector3();
+	for (let i = start; i < start + count; i++) c.add(new THREE.Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]));
+	return c.divideScalar(count);
 }
 
 // ---------- the viewer ----------
 
 /**
- * A live 3D view inside `container`. Drag sideways to turn the figure. `update(values)` rebuilds
- * it; `snapshot(w, h, view)` renders a plain picture of it for the image engine.
+ * A live 3D view inside `container`. Drag sideways to turn the figure. `update(values)` reshapes
+ * it; `snapshot(w, h, angle, mode)` renders a plain picture of it for the image engine.
  */
 export function createViewer(container) {
 	const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 	renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 	container.append(renderer.domElement);
 	const scene = new THREE.Scene();
-	scene.background = new THREE.Color('#f4f4f4');
-	scene.add(new THREE.HemisphereLight('#ffffff', '#8a8a8a', 1.6));
-	const key = new THREE.DirectionalLight('#ffffff', 1.6);
-	key.position.set(80, 160, 140);
+	scene.background = new THREE.Color('#f2f2f2');
+	scene.add(new THREE.HemisphereLight('#ffffff', '#7d7d7d', 1.5));
+	const key = new THREE.DirectionalLight('#ffffff', 1.7);
+	key.position.set(90, 170, 150);
 	scene.add(key);
-	const rim = new THREE.DirectionalLight('#ffffff', 0.5);
-	rim.position.set(-120, 80, -100);
+	const rim = new THREE.DirectionalLight('#ffffff', 0.6);
+	rim.position.set(-130, 90, -110);
 	scene.add(rim);
-	const material = new THREE.MeshStandardMaterial({ color: '#c9a48d', roughness: 0.75, metalness: 0 });
+	// A matte, light-wood mannequin finish.
+	const material = new THREE.MeshStandardMaterial({ color: '#d8c3a5', roughness: 0.82, metalness: 0 });
 	const group = new THREE.Group();
 	scene.add(group);
 	const camera = new THREE.PerspectiveCamera(22, 1, 1, 5000);
 	let yaw = 0;
 	let height = 170;
+	let geometry = null;
+	const eyes = [];
+	let ready = null;
+	let current = null;
 
 	function frame(cam, aspect) {
 		const fill = 0.86;
@@ -291,20 +268,47 @@ export function createViewer(container) {
 		renderer.render(scene, camera);
 	}
 
-	// While a slider is dragged it can fire many times per frame; rebuild once per frame at most.
+	function loaded(d) {
+		geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(d.count * 3), 3));
+		geometry.setIndex(new THREE.BufferAttribute(d.index, 1));
+		geometry.setDrawRange(0, d.index.length);
+		group.add(new THREE.Mesh(geometry, material));
+		// The base mesh has open eye sockets; plain eyeballs close them, as on a shop mannequin.
+		for (let i = 0; i < 2; i++) {
+			const eye = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), material);
+			eyes.push(eye);
+			group.add(eye);
+		}
+	}
+
+	ready = loadHuman().then(loaded).catch((err) => {
+		container.textContent = `The body model could not load: ${err.message}`;
+		throw err;
+	});
+
+	// While a slider is dragged it can fire many times per frame; reshape once per frame at most.
 	let pending = null;
 	function update(values) {
 		const first = pending === null;
 		pending = values;
-		if (first) requestAnimationFrame(() => { const v = pending; pending = null; rebuild(v); });
+		if (first) ready.then(() => requestAnimationFrame(() => { if (pending) { const v = pending; pending = null; reshape(v); } }), () => {});
 	}
 
-	function rebuild(values) {
-		for (const m of group.children) m.geometry.dispose();
-		group.clear();
-		const built = buildBody(values);
-		height = built.height;
-		for (const g of built.parts) group.add(new THREE.Mesh(g, material));
+	function reshape(values) {
+		current = values;
+		const pos = geometry.attributes.position;
+		shapeBody(values, pos.array);
+		pos.needsUpdate = true;
+		geometry.computeVertexNormals();
+		geometry.computeBoundingBox();
+		geometry.computeBoundingSphere();
+		height = values.height || 170;
+		const r = height * 0.0068;
+		meshData.eyes.forEach((e, i) => {
+			eyes[i].position.copy(eyeCentre(pos.array, e));
+			eyes[i].scale.setScalar(r);
+		});
 		resize();
 	}
 
@@ -318,6 +322,7 @@ export function createViewer(container) {
 
 	return {
 		update,
+		ready: () => ready,
 		setView(angle) { yaw = angle; draw(); },
 		/**
 		 * A front (or chosen) view at exactly w by h pixels as a PNG blob. 'shape' is the shaded
@@ -325,25 +330,25 @@ export function createViewer(container) {
 		 * kind of picture the Krea 2 depth add-on follows.
 		 */
 		async snapshot(w, h, angle = 0, mode = 'shape') {
-			if (pending) { const v = pending; pending = null; rebuild(v); }
+			await ready;
+			if (pending) { const v = pending; pending = null; reshape(v); }
+			if (!current) throw new Error('the body is still loading');
 			const cam = camera.clone();
 			const prevBg = scene.background;
 			const prevYaw = yaw;
 			scene.background = new THREE.Color(mode === 'depth' ? '#000000' : '#ffffff');
-			if (mode === 'depth') scene.overrideMaterial = new THREE.MeshDepthMaterial();
 			yaw = angle;
 			group.rotation.y = yaw;
+			group.updateMatrixWorld(true);
 			renderer.setPixelRatio(1);
 			renderer.setSize(w, h, false);
 			frame(cam, w / h);
 			if (mode === 'depth') {
-				// Clip exactly to the body's front-to-back extent, so its nearest point is white,
-				// its farthest is near black, and the whole range shows the curves.
-				const box = new THREE.Box3().setFromObject(group);
-				const d = cam.position.z;
-				cam.near = Math.max(1, d - box.max.z - 1);
-				cam.far = d - box.min.z + 6;
-				cam.updateProjectionMatrix();
+				// Linear depth over the body's own front-to-back range: the front of the torso is
+				// white and the back is dark. The hands reach a little forward in this pose; they
+				// are simply clamped to white so they do not squash the body's range into grey.
+				const [near, far] = depthRange(geometry.attributes.position.array, meshData.eyes[0][0], angle, cam.position.z);
+				scene.overrideMaterial = depthMaterial(near, far);
 			}
 			renderer.render(scene, cam);
 			const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));

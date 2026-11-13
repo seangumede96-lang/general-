@@ -1215,7 +1215,7 @@ const bodyEditor = {
 			try { this.module = await import('./body.js'); }
 			catch (err) { $('body-view').textContent = `The 3D view could not start: ${err.message}`; return; }
 			this.viewer = this.module.createViewer($('body-view'));
-			this.values = JSON.parse(localStorage.getItem('bodyCurrent') || 'null') || this.module.defaults('female');
+			this.values = this.module.migrate(JSON.parse(localStorage.getItem('bodyCurrent') || 'null') || this.module.defaults('female'));
 			this.build();
 		}
 		this.refresh();
@@ -1226,7 +1226,7 @@ const bodyEditor = {
 	/** Draw the controls once; refresh() keeps them in step with the values. */
 	build() {
 		const m = this.module;
-		const label = (sl, v) => sl.unit ? `${Math.round(v)} ${sl.unit}` : sl.key === 'bust' || sl.key === 'glutes' ? `${Math.round(v * 100)}` : `${v >= 1 ? '+' : ''}${Math.round((v - 1) * 100)}%`;
+		const label = (sl, v) => sl.unit ? `${Math.round(v)} ${sl.unit}` : `${v > 0 ? '+' : ''}${Math.round(v * 100)}`;
 		const slider = (sl) => {
 			const input = el('input', { type: 'range', min: sl.min, max: sl.max, step: sl.step, ariaLabel: sl.label });
 			const out = el('span');
@@ -1282,7 +1282,7 @@ const bodyEditor = {
 		const saved = this.saved();
 		$('body-saved').replaceChildren(...(saved.length ? saved.map((t) => {
 			const b = el('button', { type: 'button', textContent: t.name });
-			b.addEventListener('click', () => { this.values = { ...m.defaults(t.values.base), ...t.values }; this.changed(true); });
+			b.addEventListener('click', () => { this.values = m.migrate(t.values); this.changed(true); });
 			b.addEventListener('contextmenu', (e) => { e.preventDefault(); if (confirm(`Delete "${t.name}"?`)) { localStorage.setItem('bodyTemplates', JSON.stringify(this.saved().filter((x) => x.name !== t.name))); this.refresh(); } });
 			return b;
 		}) : [el('span', { className: 'muted small', textContent: 'Saved bodies appear here. Long-press one to delete it.' })]));
