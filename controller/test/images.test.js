@@ -247,4 +247,7 @@ test('without Backblaze the session still starts, with no LoRAs', async () => {
 	assert.ok(!JSON.parse(rp.state.created[0].args).cmd[0].includes('example-b2'));
 	assert.deepEqual((await api('GET', '/api/images')).body.loras, []);
 	assert.match(imagePodSpec([]).cmd, /STEP 1\/3[\s\S]*STEP 2\/3[\s\S]*STEP 3\/3/);
+	assert.equal(imagePodSpec([]).image, 'runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404');
+	assert.equal(imagePodSpec([], 'ghcr.io/x/assistant-image-engine:latest').image, 'ghcr.io/x/assistant-image-engine:latest');
+	assert.match(imagePodSpec([]).cmd, /if \[ -f \/root\/ComfyUI\/\.ready-made-engine \]; then .*; else\ncd \/root && git clone[\s\S]*\nfi\n/);
 });

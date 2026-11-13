@@ -36,7 +36,9 @@ export const SETTING_DEFAULTS = {
 	b2Bucket: '',
 	b2ApiBase: '',
 	imageLoras: '[]',
-	imageSetupLog: ''
+	imageSetupLog: '',
+	// The ready-made image engine (empty = install on the stock PyTorch image each time).
+	imageEngineImage: ''
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */

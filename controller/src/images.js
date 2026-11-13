@@ -144,7 +144,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const files = (await b2.list('loras/')).filter((f) => f.name.endsWith('.safetensors'));
 			loras = await Promise.all(files.map(async (f) => ({ name: f.name, size: f.size, url: await b2.link(f.name) })));
 		}
-		const started = await gpu.start({ minutes: Number(minutes) + SETUP_MINUTES, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(loras) });
+		const started = await gpu.start({ minutes: Number(minutes) + SETUP_MINUTES, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(loras, db.getSettings().imageEngineImage) });
 		db.setSettings({ imageLoras: JSON.stringify(loras.map(({ name, size }) => ({ name, size }))) });
 		return started.id;
 	}

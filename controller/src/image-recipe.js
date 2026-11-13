@@ -18,7 +18,9 @@ const MODELS = [
 export const loraFileName = (name) => name.split('/').pop().replace(/[^\w.-]/g, '_');
 
 /** Pod start command. `loras` is [{ name, url }] with time-limited links made on the phone. */
-export function imagePodSpec(loras = []) {
+export const STOCK_IMAGE = 'runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404';
+
+export function imagePodSpec(loras = [], engineImage = '') {
 	const M = '/root/ComfyUI/models';
 	const files = [...MODELS, ...loras.map((l) => [l.url, `loras/${loraFileName(l.name)}`])];
 	const cmd = [
@@ -27,14 +29,17 @@ export function imagePodSpec(loras = []) {
 		'trap \'echo "SETUP FAILED"; sleep 900\' ERR',
 		'set -eE',
 		'echo "STEP 1/3 Installing the image engine"',
+		// With the ready-made engine image everything below is already installed and skipped.
+		'if [ -f /root/ComfyUI/.ready-made-engine ]; then echo "Ready-made engine: nothing to install"; cd /root/ComfyUI; else',
 		'cd /root && git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI && cd ComfyUI',
 		'pip install -q --break-system-packages -r requirements.txt && pip install -q --break-system-packages -U torchaudio torchvision pillow',
 		'git clone -q https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit custom_nodes/ComfyUI-Krea2-Ostris-Edit && git -C custom_nodes/ComfyUI-Krea2-Ostris-Edit checkout -q 7756566',
+		'fi',
 		...downloadLines(files, M, '2/3'),
 		'echo "STEP 3/3 Starting the image engine"',
 		`exec python3 main.py --listen 0.0.0.0 --port ${COMFY_PORT}`
 	].join('\n');
-	return { kind: 'image', name: 'assistant-images', image: 'runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404', disk: 80, ports: [`${COMFY_PORT}/http`, `${LOG_PORT}/http`], cmd };
+	return { kind: 'image', name: 'assistant-images', image: engineImage || STOCK_IMAGE, disk: 80, ports: [`${COMFY_PORT}/http`, `${LOG_PORT}/http`], cmd };
 }
 
 export const SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] };
