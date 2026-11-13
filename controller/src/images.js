@@ -6,7 +6,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createComfyClient, ComfyError } from './comfy.js';
 import { openB2 } from './b2.js';
-import { imagePodSpec, buildImageGraph, SIZES, REFERENCE_ROLES, MAX_REFERENCES } from './image-recipe.js';
+import { imagePodSpec, buildImageGraph, SIZES, sizeFor, MAX_QUALITY_COUNT, REFERENCE_ROLES, MAX_REFERENCES } from './image-recipe.js';
 import { COMFY_PORT, LOG_PORT } from './video-recipe.js';
 import { MIN_VRAM } from './gpu.js';
 import { createTracker, computeProgress, parseStep, imagePlan } from './progress.js';
@@ -152,8 +152,9 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 	function validate(req) {
 		const prompt = String(req.prompt || '').trim();
 		if (!prompt) throw new ImageError('Describe the picture first.');
-		const [width, height] = SIZES[req.size] || SIZES.portrait;
-		const count = Math.min(4, Math.max(1, Number.parseInt(req.count, 10) || 2));
+		const quality = req.quality === 'max' ? 'max' : 'standard';
+		const [width, height] = sizeFor(req.size, quality);
+		const count = Math.min(quality === 'max' ? MAX_QUALITY_COUNT : 4, Math.max(1, Number.parseInt(req.count, 10) || 2));
 		// Up to three LoRAs, each with its own strength, applied one after another.
 		const known = new Set(savedLoras().map((l) => l.name));
 		const loras = (Array.isArray(req.loras) ? req.loras : []).slice(0, 3).map((l) => ({ name: String(l?.name || ''), strength: Math.min(2, Math.max(0, Number(l?.strength) || 0.9)) }));
@@ -181,7 +182,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			if (!depth || !depth.type.startsWith('image/')) throw new ImageError('The body depth map is missing. Open the body editor and tap "Use this body" again.');
 		}
 		const depthStrength = Math.min(1.2, Math.max(0.3, Number(req.depthStrength) || 0.9));
-		return { depth, depthStrength, shape, shapeDenoise, prompt: prompt.slice(0, 4000), width, height, count, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
+		return { depth, depthStrength, shape, shapeDenoise, prompt: prompt.slice(0, 4000), width, height, count, quality, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
 	}
 
 	async function generate(req) {
@@ -190,7 +191,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (!p?.ready_at) throw new ImageError(p ? 'The image engine is still starting.' : 'Start a session first.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
-		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, depth: v.depth?.id || '', depthStrength: v.depth ? v.depthStrength : null, asked: v.prompt, note: '' };
+		const params = { size: v.size, quality: v.quality, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, depth: v.depth?.id || '', depthStrength: v.depth ? v.depthStrength : null, asked: v.prompt, note: '' };
 		v.enhance = req.enhance === true;
 		v.prefix = String(req.prefix || '').trim().slice(0, 100);
 		db.insertGeneration({ id, prompt: v.prompt, params, created_at: clock() });

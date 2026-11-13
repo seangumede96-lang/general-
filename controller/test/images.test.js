@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/server.js';
-import { buildImageGraph, imagePodSpec } from '../src/image-recipe.js';
+import { buildImageGraph, imagePodSpec, MAX_SIZES } from '../src/image-recipe.js';
 import { startMockRunpod } from './mock-runpod.js';
 import { startMockComfy } from './mock-comfy.js';
 import { startMockModel } from './mock-model.js';
@@ -82,6 +82,24 @@ test('a session rents one pod set up with Krea 2, the same-face add-on and the L
 	assert.equal(s.session.state, 'ready');
 	assert.deepEqual(s.loras.map((l) => l.name), ['loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors']);
 	assert.ok(!JSON.stringify((await api('GET', '/api/settings')).body).includes('secret-app-key'));
+});
+
+test('max quality asks for Krea 2\'s largest size and at most 2 pictures', async () => {
+	await startSession();
+	await api('GET', '/api/images');
+	const before = comfy.state.prompts.length;
+	const g = await generate({ prompt: 'a woman, full body', size: 'portrait', quality: 'max', count: 4 });
+	assert.equal(g.status, 'done');
+	assert.equal(g.params.quality, 'max');
+	const graph = comfy.state.prompts[before].prompt;
+	assert.deepEqual([graph['7'].inputs.width, graph['7'].inputs.height, graph['7'].inputs.batch_size], [1664, 2496, 2]);
+	for (const [w, h] of Object.values(MAX_SIZES)) { assert.equal(w % 16, 0); assert.equal(h % 16, 0); assert.ok(w * h <= 2048 * 2048 * 1.01); }
+	const sq = await generate({ prompt: 'x', size: 'square', quality: 'max', count: 1 });
+	assert.deepEqual([comfy.state.prompts.at(-1).prompt['7'].inputs.width, comfy.state.prompts.at(-1).prompt['7'].inputs.height], [2048, 2048]);
+	assert.equal(sq.params.quality, 'max');
+	const std = await generate({ prompt: 'x', size: 'landscape', quality: 'nonsense', count: 4 });
+	assert.equal(std.params.quality, 'standard');
+	assert.deepEqual([comfy.state.prompts.at(-1).prompt['7'].inputs.width, comfy.state.prompts.at(-1).prompt['7'].inputs.batch_size], [1536, 4]);
 });
 
 test('pictures are generated with the hand-tested settings and saved on the phone', async () => {

@@ -49,6 +49,15 @@ export function imagePodSpec(loras = [], engineImage = '') {
 }
 
 export const SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] };
+/**
+ * Max quality: Krea 2's own largest size, about 4 megapixels (its model card generates
+ * 2048 x 2048 directly). Sides are multiples of 16, as the model's latent grid needs.
+ * Anything bigger than this is an upscale, not more real detail.
+ */
+export const MAX_SIZES = { portrait: [1664, 2496], square: [2048, 2048], landscape: [2496, 1664] };
+/** At max quality a request makes at most this many pictures, to stay within a 24 GB card. */
+export const MAX_QUALITY_COUNT = 2;
+export const sizeFor = (size, quality) => (quality === 'max' ? MAX_SIZES : SIZES)[size] || (quality === 'max' ? MAX_SIZES : SIZES).portrait;
 
 /** What each kind of reference picture is for, and how large the model gets to see it. */
 export const REFERENCE_ROLES = {

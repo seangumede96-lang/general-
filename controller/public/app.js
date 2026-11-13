@@ -1162,7 +1162,7 @@ const chars = {
 		// Remember the strengths used, so next time each LoRA starts where you left it.
 		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
 		try {
-			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs, refCounts, depth: this.shape?.id || '', depthStrength: this.depthStrength() });
+			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, quality: $('img-quality').value, count: Number($('img-count').value), refs, refCounts, depth: this.shape?.id || '', depthStrength: this.depthStrength() });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -1174,7 +1174,7 @@ const chars = {
 			if (g.params.asked && g.params.asked !== g.prompt) card.append(el('div', { className: 'small', style: 'margin-bottom:4px', textContent: `You asked: ${g.params.asked}` }));
 			card.append(el('div', { className: 'gen-prompt', textContent: g.prompt }));
 			if (g.params.note) card.append(el('div', { className: 'approval-note', style: 'padding:0 0 8px', textContent: g.params.note }));
-			if (g.status === 'running') card.append(el('div', { className: 'brain-state starting', textContent: `Making ${g.params.count} picture${g.params.count > 1 ? 's' : ''}… usually under a minute.` }));
+			if (g.status === 'running') card.append(el('div', { className: 'brain-state starting', textContent: `Making ${g.params.count} picture${g.params.count > 1 ? 's' : ''}${g.params.quality === 'max' ? ' at max quality' : ''}… usually under ${g.params.quality === 'max' ? 'two minutes' : 'a minute'}.` }));
 			if (g.status === 'failed') card.append(el('p', { className: 'sys-alert', textContent: g.detail }));
 			if (g.images.length) card.append(el('div', { className: 'shots' }, ...g.images.map((id) => {
 				const src = `/api/uploads/${id}`;
@@ -1207,6 +1207,20 @@ const chars = {
 
 $('img-form').addEventListener('submit', (e) => { e.preventDefault(); chars.generate(); });
 $('img-shape-open').addEventListener('click', () => openPage('body', { sub: true }));
+/** Quality: remembered between visits; max quality makes at most 2 pictures per request. */
+function qualityChanged() {
+	const max = $('img-quality').value === 'max';
+	localStorage.setItem('imgQuality', $('img-quality').value);
+	$('img-count').max = max ? '2' : '4';
+	if (max && Number($('img-count').value) > 2) $('img-count').value = '2';
+	const sizes = max ? { portrait: '1664 × 2496', square: '2048 × 2048', landscape: '2496 × 1664' } : { portrait: '1024 × 1536', square: '1024 × 1024', landscape: '1536 × 1024' };
+	$('img-quality-note').textContent = `${sizes[$('img-size').value] || sizes.portrait} pixels.${max ? ' The model\'s largest size; each picture takes longer.' : ''}`;
+}
+$('img-quality').value = localStorage.getItem('imgQuality') === 'max' ? 'max' : 'standard';
+$('img-quality').addEventListener('change', qualityChanged);
+$('img-size').addEventListener('change', qualityChanged);
+$('img-count').addEventListener('change', () => { const n = Math.min(Number($('img-count').max), Math.max(1, Math.round(Number($('img-count').value) || 1))); $('img-count').value = String(n); });
+qualityChanged();
 $('img-shape-clear').addEventListener('click', () => chars.setShape(null));
 $('img-shape-strength').addEventListener('input', () => chars.shapeText());
 chars.renderRefs();
