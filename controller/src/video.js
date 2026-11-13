@@ -63,7 +63,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 	/** Jobs left "running" by a crash or restart cannot be resumed yet: close them and free the pod. */
 	async function recover() {
-		for (const j of db.listJobs().filter((x) => ACTIVE.has(x.status))) {
+		for (const j of db.listJobs().filter((x) => x.kind !== 'mocap' && ACTIVE.has(x.status))) {
 			db.updateJob(j.id, { status: 'failed', detail: 'The app was restarted while this was running.', ended_at: clock() });
 			if (j.pod_id) await gpu.stop(j.pod_id, 'job interrupted by restart').catch(() => {});
 		}
@@ -94,7 +94,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 	async function quote(request) {
 		const { seconds } = validate(request);
-		if (db.listJobs().some((j) => ACTIVE.has(j.status))) throw new VideoError('A video is already being processed.');
+		if (db.listJobs().some((j) => j.kind !== 'mocap' && ACTIVE.has(j.status))) throw new VideoError('A video is already being processed.');
 		const needed = minutesFor(seconds);
 		const run = runChoice(request);
 		const base = { minVram: MIN_VRAM.comfy, fastNetwork: true, wholeGpu: true, chosenLength: run !== 'auto' };
@@ -259,7 +259,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			for (const id of running.keys()) cancelled.add(id);
 			await Promise.allSettled([...running.values()]);
 		},
-		list: () => db.listJobs().map(view),
+		list: () => db.listJobs().filter((j) => j.kind !== 'mocap').map(view),
 		get: (id) => { const j = db.getJob(id); return j ? view(j) : null; },
 		cancel(id) {
 			const j = db.getJob(id);

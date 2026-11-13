@@ -1,5 +1,7 @@
-// Backblaze B2, native API: list files and make short-lived download links. The pod is
-// given links, never keys, so the keys stay on the phone.
+// Backblaze B2, native API: list files, upload files, and make short-lived download links.
+// The pod is given links, never keys, so the keys stay on the phone.
+import { createHash } from 'node:crypto';
+import { createReadStream, openAsBlob } from 'node:fs';
 const REAL = 'https://api.backblazeb2.com';
 
 export class B2Error extends Error {}
@@ -24,6 +26,21 @@ export async function openB2({ keyId, appKey, bucket, apiBase = REAL }) {
 		async list(prefix) {
 			const { files = [] } = await post('b2_list_file_names', { bucketId, prefix, maxFileCount: 200 });
 			return files.filter((f) => f.action === 'upload' || !f.action).map((f) => ({ name: f.fileName, size: f.contentLength }));
+		},
+		/** Upload a file from the phone (single request; fine up to several GB). */
+		async upload(fileName, path, type = 'application/octet-stream') {
+			const sha1 = createHash('sha1');
+			for await (const chunk of createReadStream(path)) sha1.update(chunk);
+			const { uploadUrl, authorizationToken } = await post('b2_get_upload_url', { bucketId });
+			const body = await openAsBlob(path);
+			const res = await fetch(uploadUrl, {
+				method: 'POST',
+				headers: { Authorization: authorizationToken, 'X-Bz-File-Name': fileName.split('/').map(encodeURIComponent).join('/'), 'Content-Type': type, 'X-Bz-Content-Sha1': sha1.digest('hex') },
+				body, signal: AbortSignal.timeout(30 * 60000)
+			}).catch(() => null);
+			const out = res ? await res.json().catch(() => ({})) : {};
+			if (!res?.ok) throw new B2Error(`Backblaze upload: ${out.message || out.code || (res ? `HTTP ${res.status}` : 'could not connect')}`);
+			return { name: fileName, size: out.contentLength };
 		},
 		/** A link that downloads exactly this file for a limited time. */
 		async link(fileName, seconds = 3600) {

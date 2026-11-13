@@ -41,11 +41,14 @@ export const SETTING_DEFAULTS = {
 	imageEngineImage: 'ghcr.io/seangumede96-lang/assistant-image-engine:latest',
 	// The ready-made video engine (controller/engine-video): ComfyUI and the add-ons preinstalled
 	// on RunPod's PyTorch image, about 1.5 GB on top of it instead of a 14.6 GB third-party image.
-	videoEngineImage: 'ghcr.io/seangumede96-lang/assistant-video-engine:latest'
+	videoEngineImage: 'ghcr.io/seangumede96-lang/assistant-video-engine:latest',
+	// Hugging Face token for gated models (motion capture: SAM 3, SAM 3D Body). Stays on the phone:
+	// pods get one-hour download links made with it, never the token.
+	hfToken: ''
 };
 
 /** Settings that hold credentials: stored, used, never sent to the browser. */
-export const SECRET_SETTINGS = ['apiKey', 'runpodApiKey', 'b2AppKey'];
+export const SECRET_SETTINGS = ['apiKey', 'runpodApiKey', 'b2AppKey', 'hfToken'];
 
 export function openDb(dataDir) {
 	mkdirSync(dataDir, { recursive: true, mode: 0o700 });
