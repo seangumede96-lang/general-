@@ -151,6 +151,7 @@ export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 	async function run(id, minutes, chosenLength) {
 		let podId = '';
+		let outcome = null;
 		const check = () => {
 			if (cancelled.has(id)) throw new MocapError('cancelled');
 			const pod = podId && db.getPod(podId);
@@ -223,22 +224,24 @@ export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 				if (qcText) { const qcPath = join(dir, 'qc.json'); await writeFile(qcPath, qcText, { mode: 0o600 }); await b2.upload(`pipeline/mocap/${id}/qc.json`, qcPath, 'application/json'); }
 				b2Path = `pipeline/mocap/${id}/`;
 			} catch (err) { console.error('[mocap] Backblaze copy failed', err.message); }
-			db.updateJob(id, { status: 'done', detail: '', result_upload: uploadId, params: JSON.stringify({ ...params, qc, b2Path }), ended_at: clock() });
+			outcome = { status: 'done', detail: '', result_upload: uploadId, params: JSON.stringify({ ...params, qc, b2Path }) };
 		} catch (err) {
 			const wasCancelled = cancelled.has(id);
 			const known = err instanceof MocapError || err instanceof GpuError || err instanceof B2Error;
 			if (!known) console.error('[mocap]', err);
-			db.updateJob(id, {
+			outcome = {
 				status: wasCancelled ? 'cancelled' : 'failed',
-				detail: wasCancelled ? 'You cancelled this.' : known ? err.message : 'Something unexpected went wrong. The GPU has been shut down.',
-				ended_at: clock()
-			});
+				detail: wasCancelled ? 'You cancelled this.' : known ? err.message : 'Something unexpected went wrong. The GPU has been shut down.'
+			};
 		} finally {
 			cancelled.delete(id);
+			// The GPU is deleted first; only then does the job count as ended, so nothing shows
+			// it finished while its GPU could still be charging.
 			if (podId && !db.getPod(podId)?.ended_at) {
-				const reason = db.getJob(id).status === 'done' ? 'motion capture finished' : `motion capture ${db.getJob(id).status}`;
+				const reason = outcome?.status === 'done' ? 'motion capture finished' : `motion capture ${outcome?.status || 'stopped'}`;
 				await gpu.stop(podId, reason).catch((err) => console.error('[mocap] could not delete pod', podId, err.message));
 			}
+			db.updateJob(id, { ...(outcome || { status: 'failed', detail: 'Stopped unexpectedly.' }), ended_at: clock() });
 		}
 	}
 

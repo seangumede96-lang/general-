@@ -190,3 +190,18 @@ for f in range(40):
 	assert.match(out.verdict, /identity swaps/);
 	rmSync(dir, { recursive: true, force: true });
 });
+
+test('a job only counts as ended once its GPU has been deleted', async () => {
+	state.log = 'STEP 4/5 Tracking\n';
+	const started = await start(await request());
+	for (let i = 0; i < 300 && !rp.state.created.length; i++) await new Promise((r) => setTimeout(r, 5));
+	await new Promise((r) => setTimeout(r, 30));
+	await api('POST', `/api/mocap/jobs/${started.body.id}/cancel`);
+	// Every time the job is seen as ended, its GPU is already gone.
+	for (let i = 0; i < 600; i++) {
+		const job = (await api('GET', '/api/mocap')).body.jobs.find((j) => j.id === started.body.id);
+		if (!job.active) { assert.deepEqual(rp.state.deleted, ['pod1']); return; }
+		await new Promise((r) => setTimeout(r, 2));
+	}
+	assert.fail('job did not end');
+});
