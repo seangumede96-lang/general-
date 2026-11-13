@@ -22,6 +22,7 @@ export async function startMockComfy(opts = {}) {
 		outcome: 'ok',         // ok | reject (workflow refused) | error (fails while generating) | empty (no output)
 		template: TEMPLATE,
 		images: 0,             // >0: report that many pictures instead of a video
+		lost: false,           // true: the job vanishes from the queue and never reaches history
 		uploads: [], prompts: [], historyChecks: 0,
 		...opts
 	};
@@ -53,7 +54,9 @@ export async function startMockComfy(opts = {}) {
 			const outputs = state.outcome === 'empty' ? {} : state.images ? { '10': { images: Array.from({ length: state.images }, (_, i) => ({ filename: `gen_0000${i + 1}_.png`, subfolder: '', type: 'output' })) } } : { '30': { gifs: [{ filename: 'assistant_00001.mp4', subfolder: '', type: 'output', format: 'video/h264-mp4' }] } };
 			return json(res, 200, { p1: { status: { status_str: 'success', completed: true }, outputs } });
 		}
-		if (url.pathname === '/view') { res.writeHead(200, { 'Content-Type': state.images ? 'image/png' : 'video/mp4' }); return res.end(state.images ? `PNG:${url.searchParams.get('filename')}` : 'RESULT-VIDEO-BYTES'); }
+		// The queue holds the job while history has no entry for it, unless the engine 'lost' it.
+		if (url.pathname === '/queue') return json(res, 200, { queue_running: state.prompts.length && !state.lost && state.historyChecks <= state.pollsUntilDone ? [[1, 'p1', {}, {}, []]] : [], queue_pending: [] });
+				if (url.pathname === '/view') { res.writeHead(200, { 'Content-Type': state.images ? 'image/png' : 'video/mp4' }); return res.end(state.images ? `PNG:${url.searchParams.get('filename')}` : 'RESULT-VIDEO-BYTES'); }
 		res.writeHead(404).end();
 	});
 	await new Promise((r) => server.listen(0, '127.0.0.1', r));

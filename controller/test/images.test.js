@@ -305,3 +305,28 @@ test('without Backblaze the session still starts, with no LoRAs', async () => {
 	assert.equal(imagePodSpec([], 'ghcr.io/x/assistant-image-engine:latest').image, 'ghcr.io/x/assistant-image-engine:latest');
 	assert.match(imagePodSpec([]).cmd, /if \[ -f \/root\/ComfyUI\/\.ready-made-engine \]; then .*; else\ncd \/root && git clone[\s\S]*\nfi\n/);
 });
+
+test('a picture the engine lost, or one far past normal time, fails instead of keeping the GPU busy', async () => {
+	await startSession();
+	await api('GET', '/api/images');
+	// lost: not finished, not running, not waiting
+	comfy.state.lost = true;
+	comfy.state.pollsUntilDone = 1e9;
+	const lost = await generate({ prompt: 'a woman', size: 'portrait', count: 1 });
+	assert.equal(lost.status, 'failed');
+	assert.match(lost.detail, /lost this picture/);
+	// still running in the engine, but for far too long
+	comfy.state.lost = false;
+	comfy.state.historyChecks = 0;
+	const r = await api('POST', '/api/images/generate', { prompt: 'a woman', size: 'portrait', count: 1 });
+	await new Promise((res) => setTimeout(res, 60));
+	now += 11 * 60000;
+	let g;
+	for (let i = 0; i < 300; i++) {
+		g = (await api('GET', '/api/images')).body.generations.find((x) => x.id === r.body.id);
+		if (g.status !== 'running') break;
+		await new Promise((res) => setTimeout(res, 10));
+	}
+	assert.equal(g.status, 'failed');
+	assert.match(g.detail, /over 10 minutes/);
+});

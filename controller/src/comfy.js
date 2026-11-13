@@ -70,6 +70,14 @@ export function createComfyClient(baseUrl, { retryDelaysMs = RETRY_DELAYS_MS } =
 			return { done: true, files };
 		},
 
+		/** Whether the engine still holds this job: running or waiting in its queue. */
+		async inQueue(promptId) {
+			const res = await call('/queue');
+			if (!res.ok) throw new ComfyError(`The engine stopped answering (HTTP ${res.status}).`);
+			const q = await res.json();
+			return [...(q.queue_running || []), ...(q.queue_pending || [])].some((item) => item[1] === promptId);
+		},
+
 		/** Download an output file to disk. Returns the number of bytes written. */
 		async download(file, destination) {
 			const qs = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder || '', type: file.type || 'output' });

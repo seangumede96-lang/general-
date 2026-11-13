@@ -11,6 +11,9 @@ import { COMFY_PORT, LOG_PORT } from './video-recipe.js';
 import { MIN_VRAM } from './gpu.js';
 import { createTracker, computeProgress, parseStep, imagePlan } from './progress.js';
 
+/** Longest a Standard picture request may take; Max quality gets twice this. */
+const MAX_GENERATE_MINUTES = 10;
+
 export class ImageError extends Error {}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -219,12 +222,21 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const graph = buildImageGraph({ ...v, refs, shape: shapeFile, depth: depthFile, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
 			const promptId = await comfy.queue(graph, id);
 			let files;
+			// A job the engine has lost, or one far past any normal time, must not keep the GPU
+			// marked busy (and charging) until the session's time runs out.
+			const started = clock();
+			const limit = (v.quality === 'max' ? MAX_GENERATE_MINUTES * 2 : MAX_GENERATE_MINUTES) * 60000;
+			let missing = 0;
 			for (;;) {
 				await sleep(pollMs);
 				if (db.getPod(p.id)?.ended_at) throw new ImageError('The session ended before the picture was finished.');
-				gpu.touch(p.id);
 				const r = await comfy.result(promptId);
 				if (r.done) { files = r.files; break; }
+				if (clock() - started > limit) throw new ImageError(`The picture took over ${Math.round(limit / 60000)} minutes, far longer than normal, so it was stopped. The session is still on: try again, perhaps with fewer or smaller pictures.`);
+				// Not finished, not running and not waiting: the engine lost it (it restarted or ran out of memory).
+				missing = (await comfy.inQueue(promptId)) ? 0 : missing + 1;
+				if (missing >= 3) throw new ImageError('The image engine lost this picture (it may have run out of memory or restarted). Try again; Standard quality or fewer pictures use less memory.');
+				gpu.touch(p.id);
 			}
 			if (!files.length) throw new ImageError('The image engine finished but produced no picture.');
 			for (const [i, f] of files.entries()) {
