@@ -12,6 +12,7 @@ export async function startMockRunpod(opts = {}) {
 			{ id: 'NVIDIA RTX A6000', name: 'RTX A6000', memory: 48, secure: true, community: true, price: { secure: 0.49, community: 0.33 }, availability: 'NONE' }
 		],
 		noCapacity: new Set(),   // gpu ids whose create fails with 400
+		dropCreateAnswer: 0,     // this many creates succeed on RunPod but the answer is lost
 		insufficientBalance: false,
 		pods: new Map(),
 		billing: new Map(),      // podId -> totalAmount
@@ -48,6 +49,8 @@ export async function startMockRunpod(opts = {}) {
 			const gpu = state.gpus.find((g) => g.id === body.gpu.id);
 			const pod = { id: `pod${++state.seq}`, name: body.name, image: body.image, status: 'RUNNING', cloud: body.cloud, gpu: { id: gpu.id, count: 1 }, cost: gpu.price[body.cloud.toLowerCase()] };
 			state.pods.set(pod.id, pod);
+			// Simulates a phone connection that drops after RunPod has made the pod.
+			if (state.dropCreateAnswer) { state.dropCreateAnswer--; return res.socket.destroy(); }
 			return json(res, 201, pod);
 		}
 		if (req.method === 'GET' && path === '/pods') return json(res, 200, { pods: [...state.pods.values()], pagination: { nextCursor: null, hasNextPage: false } });

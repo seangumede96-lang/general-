@@ -6,20 +6,26 @@ import { Readable } from 'node:stream';
 
 export class ComfyError extends Error {}
 
-export function createComfyClient(baseUrl) {
+/** Waits between retries after a dropped connection (phone networks drop briefly). */
+const RETRY_DELAYS_MS = [2000, 5000, 10000, 20000];
+
+export function createComfyClient(baseUrl, { retryDelaysMs = RETRY_DELAYS_MS } = {}) {
 	const base = baseUrl.replace(/\/+$/, '');
 
-	async function call(path, init = {}, timeoutMs = 30000) {
-		let res;
-		try { res = await fetch(base + path, { ...init, signal: init.signal || AbortSignal.timeout(timeoutMs) }); }
-		catch (err) { throw new ComfyError(`Could not reach the video engine (${err?.cause?.code || err.name}).`); }
-		return res;
+	async function call(path, init = {}, timeoutMs = 30000, retries = retryDelaysMs) {
+		for (let attempt = 0; ; attempt++) {
+			try { return await fetch(base + path, { ...init, signal: AbortSignal.timeout(timeoutMs) }); }
+			catch (err) {
+				if (attempt < retries.length) { await new Promise((r) => setTimeout(r, retries[attempt])); continue; }
+				throw new ComfyError(`Could not reach the video engine (${err?.cause?.code || err.name}), after ${retries.length + 1} tries.`);
+			}
+		}
 	}
 
 	return {
 		/** True once ComfyUI answers. While the pod is still downloading models it does not. */
 		async ready() {
-			try { return (await call('/system_stats', {}, 8000)).ok; } catch { return false; }
+			try { return (await call('/system_stats', {}, 8000, [])).ok; } catch { return false; }
 		},
 
 		/** Upload a file into ComfyUI's input folder; returns the name to use in a workflow. */

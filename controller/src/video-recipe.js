@@ -71,6 +71,8 @@ function setupScript() {
 		'exec > /srv/log/setup.log 2>&1',
 		'trap \'echo "SETUP FAILED"; sleep 900\' ERR',
 		'set -eE',
+		// The ready-made engine already has ComfyUI and the add-ons: skip straight to the models.
+		'if [ -f /ComfyUI/.ready-made-engine ]; then echo "STEP 2/4 Ready-made engine: nothing to install"; else',
 		'echo "STEP 1/4 Installing the video engine"',
 		'pip install -q -U "huggingface_hub[hf_transfer]" websocket-client',
 		'cd / && git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI.git && cd /ComfyUI && pip install -q -r requirements.txt',
@@ -80,15 +82,24 @@ function setupScript() {
 		...NODE_PACKS_PLAIN.map((r) => `git clone -q --depth 1 https://github.com/${r}`),
 		'(cd ComfyUI-AdaptiveWindowSize/ComfyUI-AdaptiveWindowSize && mv * ../)',
 		'pip install -q --upgrade onnxruntime-gpu==1.22',
+		'fi',
 		...downloadLines(MODELS.map(([url, dest]) => [url, dest]), M, '3/4'),
 		'echo "STEP 4/4 Starting the video engine"',
-		`cd /ComfyUI && exec python main.py --listen --port ${COMFY_PORT} --use-sage-attention`
+		// The workflow's fast attention needs SageAttention working on this GPU; the job reads
+		// this line and uses PyTorch's own attention instead when it does not.
+		'if python3 -c "import torch, sageattention; q = torch.randn(1, 8, 64, 64, device=\'cuda\', dtype=torch.float16); sageattention.sageattn(q, q, q)" >/dev/null 2>&1; then echo "ATTENTION sageattn"; SAGE=--use-sage-attention; else echo "ATTENTION sdpa"; SAGE=; fi',
+		`cd /ComfyUI && exec python main.py --listen --port ${COMFY_PORT} $SAGE`
 	];
 	return lines.join('\n');
 }
 
-export const comfyPodSpec = () => ({
-	kind: 'comfy', name: 'assistant-video', image: 'wlsdml1114/multitalk-base:1.7', disk: 90,
+/** The third-party image the setup script installs onto (14.6 GB download). */
+export const STOCK_VIDEO_IMAGE = 'wlsdml1114/multitalk-base:1.7';
+/** The ready-made video engine (controller/engine-video), built by GitHub Actions. */
+export const READY_VIDEO_ENGINE = 'ghcr.io/seangumede96-lang/assistant-video-engine:latest';
+
+export const comfyPodSpec = (engineImage = '') => ({
+	kind: 'comfy', name: 'assistant-video', image: engineImage || STOCK_VIDEO_IMAGE, disk: 90,
 	ports: [`${COMFY_PORT}/http`, `${LOG_PORT}/http`], cmd: setupScript()
 });
 
@@ -107,7 +118,7 @@ export function outputSize(width, height) {
 }
 
 /** Fill the reference workflow with this job's inputs. Node ids are those of the pinned file. */
-export function buildWorkflow(template, { video, image, prompt, seed, width, height, seconds }) {
+export function buildWorkflow(template, { video, image, prompt, seed, width, height, seconds, attention = 'sageattn' }) {
 	const wf = structuredClone(template);
 	const need = (id, cls) => {
 		if (wf[id]?.class_type !== cls) throw new Error(`The workflow file is not the expected version (node ${id} should be ${cls}).`);
@@ -120,5 +131,6 @@ export function buildWorkflow(template, { video, image, prompt, seed, width, hei
 	need('150', 'INTConstant').value = width;
 	need('151', 'INTConstant').value = height;
 	Object.assign(need('30', 'VHS_VideoCombine'), { frame_rate: FPS, save_output: true, filename_prefix: 'assistant' });
+	need('22', 'WanVideoModelLoader').attention_mode = attention === 'sdpa' ? 'sdpa' : 'sageattn';
 	return wf;
 }

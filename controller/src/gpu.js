@@ -125,14 +125,14 @@ export function createGpuManager({ db, clock = Date.now }) {
 	 * Stock changes by the minute, so up to three are returned as fallbacks, but only ones
 	 * priced within twice the cheapest: a fallback must never be a much dearer card.
 	 */
-	async function candidates(minVram, fastNetwork = false) {
+	async function candidates(minVram, fastNetwork = false, wholeGpu = false) {
 		// Jobs that download tens of gigabytes go to RunPod's own data centres (Secure Cloud) when
 		// one is free: privately hosted machines can be far too slow to download on.
 		if (fastNetwork && cfg().clouds.includes('SECURE')) {
-			const secure = await candidatesIn(['SECURE'], minVram);
+			const secure = await candidatesIn(['SECURE'], minVram, wholeGpu);
 			if (secure.length) return secure;
 		}
-		return candidatesIn(cfg().clouds, minVram);
+		return candidatesIn(cfg().clouds, minVram, wholeGpu);
 	}
 
 	/** RunPod's price list per cloud, kept for a minute: it is slow to fetch (seconds from a phone) and a quote is followed at once by a start. */
@@ -146,12 +146,14 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return gpus;
 	}
 
-	async function candidatesIn(clouds, minVram) {
+	/** `wholeGpu` skips MIG slices: a fraction of a card's compute, far too slow for video. */
+	async function candidatesIn(clouds, minVram, wholeGpu = false) {
 		const found = [];
 		const lists = await Promise.all(clouds.map((cloud) => catalogFor(cloud)));
 		clouds.forEach((cloud, i) => {
 			const side = cloud.toLowerCase();
 			for (const g of lists[i]) {
+				if (wholeGpu && /\bMIG\b/i.test(`${g.name || ''} ${g.id || ''}`)) continue;
 				if (g[side] && g.memory >= minVram && g.availability !== 'NONE' && g.price?.[side] > 0) {
 					found.push({ id: g.id, name: g.name || g.id, memory: g.memory, rate: g.price[side], cloud, availability: g.availability });
 				}
@@ -161,11 +163,11 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return found.filter((o) => o.rate <= found[0].rate * 2).slice(0, 3);
 	}
 
-	async function quote({ minutes, minVram = 0, fastNetwork = false, chosenLength = false }) {
+	async function quote({ minutes, minVram = 0, fastNetwork = false, chosenLength = false, wholeGpu = false }) {
 		const c = cfg();
 		minutes = Number(minutes);
 		if (!Number.isFinite(minutes) || minutes < 1) throw new GpuError('Minutes must be at least 1.', 'invalid');
-		const options = await candidates(minVram, fastNetwork);
+		const options = await candidates(minVram, fastNetwork, wholeGpu);
 		await refreshBalance();
 		const { remaining, known } = budget();
 		if (!options.length) return { allowed: false, reason: minVram ? `No GPU with ${minVram} GB or more is available right now.` : 'No GPU is available right now.', options, remaining };
@@ -189,8 +191,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 	 * Start a pod. `spec` is { name, image, cmd, ports, env, disk }. The pod's lifetime is
 	 * fixed at `minutes`; the worst case is checked against the budget before anything starts.
 	 */
-	async function start({ minutes, purpose = '', minVram = 0, fastNetwork = false, chosenLength = false, spec }) {
-		const q = await quote({ minutes, minVram, fastNetwork, chosenLength });
+	async function start({ minutes, purpose = '', minVram = 0, fastNetwork = false, chosenLength = false, wholeGpu = false, spec }) {
+		const q = await quote({ minutes, minVram, fastNetwork, chosenLength, wholeGpu });
 		if (!q.allowed) throw new GpuError(q.reason, 'refused');
 		let lastError;
 		for (const gpu of q.options) {
@@ -208,6 +210,13 @@ export function createGpuManager({ db, clock = Date.now }) {
 				});
 			} catch (err) {
 				lastError = err;
+				if (err.code === 'network') {
+					// The request may have reached RunPod even though the answer did not reach
+					// this phone: delete any pod of ours this app does not know about, so nothing
+					// is left running (and charging) unseen.
+					await removeUnknownPods(spec.name);
+					throw new GpuError(`Could not reach RunPod to start the GPU (${err.message.replace(/^Could not reach RunPod \(|\)\.$/g, '')}). Nothing was left running. Check the phone's connection and try again.`, 'network');
+				}
 				catalog.clear(); // the list said this was in stock and it was not
 				if (err.code === 'unavailable') continue; // no capacity for this type: try the next
 				throw err;
@@ -219,6 +228,21 @@ export function createGpuManager({ db, clock = Date.now }) {
 			return db.getPod(pod.id);
 		}
 		throw new GpuError(`None of the available GPUs could be started. ${lastError?.message || ''}`.trim(), 'unavailable');
+	}
+
+	/** Delete running pods with this app's name that are not in its records (made during a dropped connection). */
+	async function removeUnknownPods(name) {
+		for (let attempt = 0; attempt < 3; attempt++) {
+			try {
+				const { pods = [] } = (await call('GET', '/pods')) || {};
+				for (const p of pods) {
+					if (p.name === name && p.status !== 'TERMINATED' && !db.getPod(p.id)) {
+						await call('DELETE', `/pods/${encodeURIComponent(p.id)}`).catch(() => {});
+					}
+				}
+				return;
+			} catch { await new Promise((r) => setTimeout(r, 1000 * (attempt + 1))); }
+		}
 	}
 
 	/** Delete a pod. `reasonIfGone` is recorded instead when RunPod says it no longer exists. */

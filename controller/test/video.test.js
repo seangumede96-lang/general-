@@ -306,3 +306,46 @@ test('generating far past its estimate stops the GPU', async () => {
 	assert.match(job.detail, /Generating took over 60 minutes/);
 	assert.deepEqual(await podGone(), ['pod1']);
 });
+
+test('video never uses MIG slices of a GPU, even when they are cheapest', async () => {
+	rp.state.gpus = [...rp.state.gpus, { id: 'NVIDIA RTX PRO 6000 MIG 24GB', name: 'RTX PRO 6000 MIG 24GB', memory: 24, secure: true, community: true, price: { secure: 0.1, community: 0.05 }, availability: 'HIGH' }];
+	try {
+		const q = (await api('POST', '/api/video/quote', await newRequest())).body;
+		assert.equal(q.allowed, true, q.reason);
+		assert.ok(q.options.length && q.options.every((o) => !/MIG/.test(o.name)), JSON.stringify(q.options.map((o) => o.name)));
+		// other uses (a test pod) may still pick it
+		const any = (await api('POST', '/api/system/quote', { minutes: 5, kind: 'test' })).body;
+		assert.ok(any.options.some((o) => /MIG/.test(o.name)));
+	} finally { rp.state.gpus = rp.state.gpus.filter((g) => !/MIG/.test(g.name)); }
+});
+
+test('if the answer to "start a GPU" is lost, the GPU RunPod made anyway is deleted and the job says why', async () => {
+	rp.state.dropCreateAnswer = 1;
+	const job = await finished((await startJob(await newRequest())).body.id);
+	assert.equal(job.status, 'failed');
+	assert.match(job.detail, /Could not reach RunPod to start the GPU.*Nothing was left running/);
+	assert.deepEqual(rp.state.deleted, ['pod1'], 'the unseen pod is deleted');
+	assert.equal([...rp.state.pods.values()].filter((p) => p.status !== 'TERMINATED').length, 0);
+});
+
+test('the ready-made engine skips installing, and the attention the GPU reports is used', async () => {
+	const script = comfyPodSpec().cmd;
+	assert.match(script, /if \[ -f \/ComfyUI\/\.ready-made-engine \]; then .*; else/);
+	assert.ok(script.indexOf("'fi'") === -1 && script.includes('\nfi\n'), 'the install block is closed before the downloads');
+	assert.match(script, /ATTENTION sageattn.*ATTENTION sdpa/);
+	assert.match(script, /main\.py --listen --port 8188 \$SAGE$/);
+	assert.equal(comfyPodSpec().image, 'wlsdml1114/multitalk-base:1.7');
+	assert.equal(comfyPodSpec('ghcr.io/x/y:1').image, 'ghcr.io/x/y:1');
+	// a GPU without working SageAttention gets PyTorch's attention in the workflow
+	comfy.state.setupLog = 'STEP 2/4 Ready-made engine: nothing to install\nATTENTION sdpa\n';
+	await api('PUT', '/api/settings', { videoEngineImage: 'ghcr.io/x/video-engine:latest' });
+	const job = await finished((await startJob(await newRequest())).body.id);
+	assert.equal(job.status, 'done', job.detail);
+	assert.equal(rp.state.created[0].image, 'ghcr.io/x/video-engine:latest');
+	assert.equal(comfy.state.prompts[0].prompt['22'].inputs.attention_mode, 'sdpa');
+	// and one with it keeps the fast path
+	comfy.state.setupLog = 'ATTENTION sageattn\n';
+	const fast = await finished((await startJob(await newRequest())).body.id);
+	assert.equal(fast.status, 'done');
+	assert.equal(comfy.state.prompts[1].prompt['22'].inputs.attention_mode, 'sageattn');
+});

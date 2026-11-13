@@ -97,7 +97,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (db.listJobs().some((j) => ACTIVE.has(j.status))) throw new VideoError('A video is already being processed.');
 		const needed = minutesFor(seconds);
 		const run = runChoice(request);
-		const base = { minVram: MIN_VRAM.comfy, fastNetwork: true, chosenLength: run !== 'auto' };
+		const base = { minVram: MIN_VRAM.comfy, fastNetwork: true, wholeGpu: true, chosenLength: run !== 'auto' };
 		let minutes = run === 'auto' ? needed : run === 'until-done' ? UNTIL_DONE_MAX_MINUTES : run;
 		let q = await gpu.quote({ ...base, minutes });
 		if (run === 'until-done' && !q.allowed && q.options?.length && q.estimate > 0) {
@@ -152,7 +152,8 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const lines = (await res.text()).trim().split('\n');
 			const failed = lines.some((l) => l.startsWith('SETUP FAILED'));
 			const step = lines.filter((l) => l.startsWith('STEP ')).at(-1);
-			return { step: step?.replace(/^STEP /, ''), failed, tail: lines.filter((l) => !l.startsWith('SETUP FAILED')).slice(-4).join(' | ').slice(-400) };
+			const attention = lines.findLast((l) => l.startsWith('ATTENTION '))?.slice(10).trim();
+			return { step: step?.replace(/^STEP /, ''), failed, attention, tail: lines.filter((l) => !l.startsWith('SETUP FAILED')).slice(-4).join(' | ').slice(-400) };
 		} catch { return {}; }
 	}
 
@@ -170,7 +171,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const template = await loadTemplate();
 			buildWorkflow(template, { video: 'x', image: 'x', prompt: '', seed: 0, ...params }); // fail before renting if the file is wrong
 
-			const pod = await gpu.start({ minutes, minVram: MIN_VRAM.comfy, fastNetwork: true, chosenLength, purpose: 'Video: character replacement', spec: comfyPodSpec() });
+			const pod = await gpu.start({ minutes, minVram: MIN_VRAM.comfy, fastNetwork: true, wholeGpu: true, chosenLength, purpose: 'Video: character replacement', spec: comfyPodSpec(db.getSettings().videoEngineImage) });
 			podId = pod.id;
 			db.updateJob(id, { pod_id: podId });
 			const comfy = createComfyClient(gpu.proxyUrl(podId, COMFY_PORT));
@@ -197,6 +198,8 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 				await sleep(pollMs);
 			}
 
+			// Which attention the GPU can use (the setup log says; older engines always had SageAttention).
+			const attention = (await setupProgress(podId)).attention === 'sdpa' ? 'sdpa' : 'sageattn';
 			setStep(id, 'uploading', 'Sending your video to the GPU');
 			check();
 			const input = db.getUpload(job.input_upload);
@@ -207,7 +210,7 @@ export function createVideoStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			setStep(id, 'generating', 'Replacing the character');
 			check();
 			const prompt = job.prompt || 'a person, natural lighting, detailed, realistic';
-			const promptId = await comfy.queue(buildWorkflow(template, { video, image, prompt, seed: Math.floor(Math.random() * 2 ** 31), ...params }), id);
+			const promptId = await comfy.queue(buildWorkflow(template, { video, image, prompt, seed: Math.floor(Math.random() * 2 ** 31), ...params, attention }), id);
 			let files;
 			const genStarted = clock();
 			const genLimit = Math.max(60, params.seconds * MINUTES_PER_CLIP_SECOND * generateFactor) * 60000;

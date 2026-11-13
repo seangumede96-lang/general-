@@ -3,6 +3,7 @@
 import { createServer } from 'node:http';
 
 export const TEMPLATE = {
+	'22': { class_type: 'WanVideoModelLoader', inputs: { attention_mode: 'sageattn' } },
 	'27': { class_type: 'WanVideoSampler', inputs: { steps: 4, cfg: 1, seed: 42 } },
 	'30': { class_type: 'VHS_VideoCombine', inputs: { frame_rate: 16, save_output: false, filename_prefix: 'Wanimate' } },
 	'57': { class_type: 'LoadImage', inputs: { image: 'example.jpg' } },
