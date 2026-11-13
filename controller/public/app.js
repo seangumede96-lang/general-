@@ -1245,6 +1245,11 @@ document.addEventListener('focusin', () => { for (const ms of [300, 800]) setTim
 setInterval(fitWindow, 1000);
 fitWindow();
 
+/* ---------- Offline page ---------- */
+
+// Lets the browser show a helpful page instead of an error when the engine is not running.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
 /* ---------- Start ---------- */
 
 refreshChip();

@@ -502,7 +502,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		if (!file.startsWith(PUBLIC_DIR)) throw new HttpError(403, 'Forbidden');
 		let body;
 		try { body = await readFile(file); } catch { throw new HttpError(404, 'Not found'); }
-		res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+		res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', ...(rel.endsWith('sw.js') ? { 'Service-Worker-Allowed': '/' } : {}) });
 		res.end(body);
 	}
 

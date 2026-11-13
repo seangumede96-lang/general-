@@ -86,6 +86,20 @@ Open http://127.0.0.1:8400, go to Settings, enter the model endpoint, and press
 To try the UI without a real model, run `node test/mock-model.js` and use the address it
 prints as the model endpoint.
 
+## Keep it running
+
+Android may stop Termux in the background (some phones do this aggressively). Two scripts
+make the app come back by itself:
+
+- `bin/keep-running.sh` (inside Ubuntu) restarts the app within seconds whenever it stops,
+  and records each stop in `~/.assistant-controller/restarts.log`.
+- `bin/termux-start.sh` (copied to Termux's home) starts the above if the app is not
+  answering. Run it from `~/.bashrc` so opening Termux starts the app, and from
+  `~/.termux/boot/` (Termux:Boot app) so it starts when the phone does.
+
+If the engine is down anyway, the page shows "The assistant is not running" with an
+Open Termux button instead of a browser error, and reloads by itself when it is back.
+
 ## Test
 
 ```sh
