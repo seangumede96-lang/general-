@@ -125,7 +125,16 @@ export function createGpuManager({ db, clock = Date.now }) {
 	 * Stock changes by the minute, so up to three are returned as fallbacks, but only ones
 	 * priced within twice the cheapest: a fallback must never be a much dearer card.
 	 */
-	async function candidates(minVram, fastNetwork = false, wholeGpu = false) {
+	/**
+	 * `wide`: for jobs that need a big card when stock is thin, consider up to six types across all
+	 * allowed clouds instead of the three cheapest within twice the cheapest price.
+	 */
+	async function candidates(minVram, fastNetwork = false, wholeGpu = false, wide = false) {
+		if (wide) {
+			const all = await candidatesIn(cfg().clouds, minVram, wholeGpu, true);
+			// Secure first among equals: its downloads are faster.
+			return all.sort((a, b) => a.rate - b.rate || (a.cloud === 'SECURE' ? -1 : 1)).slice(0, 6);
+		}
 		// Jobs that download tens of gigabytes go to RunPod's own data centres (Secure Cloud) when
 		// one is free: privately hosted machines can be far too slow to download on.
 		if (fastNetwork && cfg().clouds.includes('SECURE')) {
@@ -147,7 +156,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 	}
 
 	/** `wholeGpu` skips MIG slices: a fraction of a card's compute, far too slow for video. */
-	async function candidatesIn(clouds, minVram, wholeGpu = false) {
+	async function candidatesIn(clouds, minVram, wholeGpu = false, all = false) {
 		const found = [];
 		const lists = await Promise.all(clouds.map((cloud) => catalogFor(cloud)));
 		clouds.forEach((cloud, i) => {
@@ -160,14 +169,15 @@ export function createGpuManager({ db, clock = Date.now }) {
 			}
 		});
 		found.sort((a, b) => a.rate - b.rate);
+		if (all) return found;
 		return found.filter((o) => o.rate <= found[0].rate * 2).slice(0, 3);
 	}
 
-	async function quote({ minutes, minVram = 0, fastNetwork = false, chosenLength = false, wholeGpu = false }) {
+	async function quote({ minutes, minVram = 0, fastNetwork = false, chosenLength = false, wholeGpu = false, wide = false }) {
 		const c = cfg();
 		minutes = Number(minutes);
 		if (!Number.isFinite(minutes) || minutes < 1) throw new GpuError('Minutes must be at least 1.', 'invalid');
-		const options = await candidates(minVram, fastNetwork, wholeGpu);
+		const options = await candidates(minVram, fastNetwork, wholeGpu, wide);
 		await refreshBalance();
 		const { remaining, known } = budget();
 		if (!options.length) return { allowed: false, reason: minVram ? `No GPU with ${minVram} GB or more is available right now.` : 'No GPU is available right now.', options, remaining };
@@ -191,8 +201,8 @@ export function createGpuManager({ db, clock = Date.now }) {
 	 * Start a pod. `spec` is { name, image, cmd, ports, env, disk }. The pod's lifetime is
 	 * fixed at `minutes`; the worst case is checked against the budget before anything starts.
 	 */
-	async function start({ minutes, purpose = '', minVram = 0, fastNetwork = false, chosenLength = false, wholeGpu = false, spec }) {
-		const q = await quote({ minutes, minVram, fastNetwork, chosenLength, wholeGpu });
+	async function start({ minutes, purpose = '', minVram = 0, fastNetwork = false, chosenLength = false, wholeGpu = false, wide = false, spec }) {
+		const q = await quote({ minutes, minVram, fastNetwork, chosenLength, wholeGpu, wide });
 		if (!q.allowed) throw new GpuError(q.reason, 'refused');
 		let lastError;
 		for (const gpu of q.options) {

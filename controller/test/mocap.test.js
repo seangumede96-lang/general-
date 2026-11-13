@@ -252,3 +252,24 @@ test('when no 48 GB GPU is free it tries again, says so, and gives up cleanly wi
 	assert.match(never.detail, /No 48 GB GPU was free on RunPod after 7 tries.*Nothing was charged/);
 	rp.state.noCapacity.clear();
 });
+
+test('motion capture asks for a 60 GB disk and tries up to six 48 GB+ types across clouds', async () => {
+	assert.equal(mocapPodSpec({}).disk, 60);
+	rp.state.gpus = [...rp.state.gpus,
+		{ id: 'NVIDIA A40', name: 'A40', memory: 48, secure: true, community: false, price: { secure: 0.59, community: 0 }, availability: 'LOW' },
+		{ id: 'NVIDIA L40S', name: 'L40S', memory: 48, secure: true, community: false, price: { secure: 1.09, community: 0 }, availability: 'LOW' },
+		{ id: 'NVIDIA L40', name: 'L40', memory: 48, secure: false, community: true, price: { secure: 0, community: 0.69 }, availability: 'LOW' },
+		{ id: 'NVIDIA A100-SXM4-80GB', name: 'A100 SXM', memory: 80, secure: true, community: false, price: { secure: 2.19, community: 0 }, availability: 'LOW' }];
+	try {
+		const q = (await api('POST', '/api/mocap/quote', await request())).body;
+		assert.equal(q.allowed, true, q.reason);
+		assert.ok(q.options.length >= 5, JSON.stringify(q.options.map((o) => o.name)));
+		assert.ok(q.options.some((o) => o.name === 'A100 SXM') && q.options.some((o) => o.cloud === 'COMMUNITY'), 'beyond twice the cheapest, and community too');
+		// the first three are full; the fourth works
+		for (const o of q.options.slice(0, 3)) rp.state.noCapacity.add(o.id);
+		const job = await finished((await start(await request())).body.id);
+		assert.equal(job.status, 'done', job.detail);
+		assert.equal(rp.state.created.length, 4);
+		assert.equal(rp.state.created[3].gpu.id, q.options[3].id);
+	} finally { rp.state.gpus = rp.state.gpus.filter((g) => !['NVIDIA A40', 'NVIDIA L40S', 'NVIDIA L40', 'NVIDIA A100-SXM4-80GB'].includes(g.id)); rp.state.noCapacity.clear(); }
+});

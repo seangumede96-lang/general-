@@ -109,7 +109,9 @@ function script() {
 
 /** The pod for one job; `env` carries the links, marks and helper scripts listed above. */
 export const mocapPodSpec = (env) => ({
-	kind: 'mocap', name: 'assistant-mocap', image: IMAGE, disk: 100,
+	// 60 GB holds the models (about 25 GB) and the install; asking for more often finds no free
+	// machine when stock is low (RunPod could not place 100 GB on any listed 48 GB card).
+	kind: 'mocap', name: 'assistant-mocap', image: IMAGE, disk: 60,
 	ports: [`${LOG_PORT}/http`], cmd: script(),
 	env: { MOCAP_PATCH: PATCH_SCRIPT.toString('base64'), MOCAP_QC: QC_SCRIPT.toString('base64'), ...env }
 });

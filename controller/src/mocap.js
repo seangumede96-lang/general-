@@ -96,7 +96,7 @@ export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		const needed = minutesFor(seconds);
 		const untilDone = request.runMinutes === 'until-done';
 		const minutes = untilDone ? Math.max(needed * 3, 120) : needed;
-		const q = await gpu.quote({ minutes, minVram: MIN_VRAM_GB, fastNetwork: true, wholeGpu: true, chosenLength: untilDone });
+		const q = await gpu.quote({ minutes, minVram: MIN_VRAM_GB, fastNetwork: true, wholeGpu: true, wide: true, chosenLength: untilDone });
 		return { ...q, seconds, minutes, needed, warning, run: untilDone ? 'until-done' : 'auto' };
 	}
 
@@ -192,7 +192,7 @@ export function createMocapStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			// 48 GB cards are often all taken for a moment: try again for a few minutes before giving up.
 			let pod;
 			for (let attempt = 1; ; attempt++) {
-				try { pod = await gpu.start({ minutes, minVram: MIN_VRAM_GB, fastNetwork: true, wholeGpu: true, chosenLength, purpose: 'Motion capture', spec: mocapPodSpec(env) }); break; }
+				try { pod = await gpu.start({ minutes, minVram: MIN_VRAM_GB, fastNetwork: true, wholeGpu: true, wide: true, chosenLength, purpose: 'Motion capture', spec: mocapPodSpec(env) }); break; }
 				catch (err) {
 					if (!(err instanceof GpuError) || err.code !== 'unavailable' || attempt >= START_ATTEMPTS) {
 						if (err instanceof GpuError && err.code === 'unavailable') throw new MocapError(`No 48 GB GPU was free on RunPod after ${START_ATTEMPTS} tries over about ${Math.round((START_ATTEMPTS - 1) * retryMs / 60000)} minutes. Nothing was charged. Try again later.`);
