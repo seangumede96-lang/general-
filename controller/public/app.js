@@ -1048,9 +1048,9 @@ const chars = {
 		const v = Number($('img-shape-strength').value);
 		$('img-shape-strength-text').textContent = v >= 70 ? ' Tight: shape followed closely, may look stiff' : v >= 30 ? ' Balanced' : ' Loose: more natural, shape only roughly';
 	},
-	/** Slider 0-100 (right = follow tighter) to the engine's denoise: how much of the guide is repainted. */
-	shapeDenoise() {
-		return Math.round((0.92 - Number($('img-shape-strength').value) / 100 * 0.47) * 100) / 100;
+	/** Slider 0-100 (right = follow tighter) to the depth add-on's strength. */
+	depthStrength() {
+		return Math.round((0.55 + Number($('img-shape-strength').value) / 100 * 0.55) * 100) / 100;
 	},
 
 	/** Reference pictures per role: { face: [{ id, src }], body: [...], look: [...] }, up to 3 in each box. */
@@ -1139,7 +1139,7 @@ const chars = {
 		// Remember the strengths used, so next time each LoRA starts where you left it.
 		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
 		try {
-			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs, refCounts, shape: this.shape?.id || '', shapeDenoise: this.shapeDenoise() });
+			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, count: Number($('img-count').value), refs, refCounts, depth: this.shape?.id || '', depthStrength: this.depthStrength() });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -1296,9 +1296,11 @@ const bodyEditor = {
 		button.textContent = 'Preparing…';
 		try {
 			const [w, h] = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] }[$('img-size').value] || [1024, 1536];
-			const blob = await this.viewer.snapshot(w, h, 0);
-			const up = await uploadWithProgress(new File([blob], 'body-shape.png', { type: 'image/png' }), () => {});
-			chars.setShape(up.id, URL.createObjectURL(blob));
+			// The depth map is what the image engine follows; the shaded view is only the thumbnail.
+			const depth = await this.viewer.snapshot(w, h, 0, 'depth');
+			const preview = await this.viewer.snapshot(w, h, 0, 'shape');
+			const up = await uploadWithProgress(new File([depth], 'body-depth.png', { type: 'image/png' }), () => {});
+			chars.setShape(up.id, URL.createObjectURL(preview));
 			openPage('characters');
 		} catch (err) { alert(`The body could not be prepared: ${err.message}`); }
 		finally { button.disabled = false; button.textContent = 'Use this body for pictures'; }

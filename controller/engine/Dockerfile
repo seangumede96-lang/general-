@@ -14,6 +14,8 @@ RUN git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI \
 	&& pip install -q --break-system-packages -U torchaudio torchvision pillow \
 	&& git clone -q https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit custom_nodes/ComfyUI-Krea2-Ostris-Edit \
 	&& git -C custom_nodes/ComfyUI-Krea2-Ostris-Edit checkout -q 7756566 \
+	&& git clone -q https://github.com/facok/comfyui-krea2-controlnet custom_nodes/comfyui-krea2-controlnet \
+	&& git -C custom_nodes/comfyui-krea2-controlnet checkout -q 79ebfd3 \
 	&& rm -rf /root/.cache/pip
 
 # Marks the image so the setup script knows it can skip installing.

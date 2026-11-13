@@ -89,7 +89,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 	}
 
 	/** Download size of a session: the Krea 2 files (measured 11 Nov 2026) plus the LoRAs it loads. */
-	const MODEL_GB = 13.14 + 13.2 + 8.88 + 0.25 + 0.2;
+	const MODEL_GB = 13.14 + 13.2 + 8.88 + 0.25 + 0.2 + 0.86;
 	const sessionGb = () => Math.round(MODEL_GB + savedLoras().reduce((n, l) => n + (l.size || 0), 0) / 1e9);
 
 	async function status() {
@@ -175,7 +175,13 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			if (!shape || !shape.type.startsWith('image/')) throw new ImageError('The body shape picture is missing. Open the body editor and tap "Use this body" again.');
 		}
 		const shapeDenoise = Math.min(0.95, Math.max(0.3, Number(req.shapeDenoise) || 0.72));
-		return { shape, shapeDenoise, prompt: prompt.slice(0, 4000), width, height, count, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
+		let depth = null;
+		if (req.depth) {
+			depth = db.getUpload(String(req.depth));
+			if (!depth || !depth.type.startsWith('image/')) throw new ImageError('The body depth map is missing. Open the body editor and tap "Use this body" again.');
+		}
+		const depthStrength = Math.min(1.2, Math.max(0.3, Number(req.depthStrength) || 0.9));
+		return { depth, depthStrength, shape, shapeDenoise, prompt: prompt.slice(0, 4000), width, height, count, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
 	}
 
 	async function generate(req) {
@@ -184,7 +190,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (!p?.ready_at) throw new ImageError(p ? 'The image engine is still starting.' : 'Start a session first.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
-		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, asked: v.prompt, note: '' };
+		const params = { size: v.size, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, depth: v.depth?.id || '', depthStrength: v.depth ? v.depthStrength : null, asked: v.prompt, note: '' };
 		v.enhance = req.enhance === true;
 		v.prefix = String(req.prefix || '').trim().slice(0, 100);
 		db.insertGeneration({ id, prompt: v.prompt, params, created_at: clock() });
@@ -208,7 +214,8 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const refs = [];
 			for (const r of v.refs) refs.push({ role: r.role, count: r.count, file: await comfy.upload(r.upload.path, `${r.role}-${r.upload.id}-${r.upload.name}`, r.upload.type) });
 			const shapeFile = v.shape ? await comfy.upload(v.shape.path, `shape-${v.shape.id}.png`, v.shape.type) : null;
-			const graph = buildImageGraph({ ...v, refs, shape: shapeFile, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
+			const depthFile = v.depth ? await comfy.upload(v.depth.path, `depth-${v.depth.id}.png`, v.depth.type) : null;
+			const graph = buildImageGraph({ ...v, refs, shape: shapeFile, depth: depthFile, seed: Math.floor(Math.random() * 2 ** 31), prefix: `gen-${id}` });
 			const promptId = await comfy.queue(graph, id);
 			let files;
 			for (;;) {

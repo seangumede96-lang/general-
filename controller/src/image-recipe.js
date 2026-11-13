@@ -5,13 +5,17 @@ import { COMFY_PORT, LOG_PORT, downloadLines } from './video-recipe.js';
 
 const HF = 'https://huggingface.co';
 const REID_LORA = 'krea2_reid_rank32.safetensors';
+export const DEPTH_LORA = 'krea2_depth_control.safetensors';
+// Krea 2 depth control: LoRA by Patil (Krea 2 Community licence); ComfyUI nodes by facok, pinned.
+const DEPTH_NODES = { repo: 'https://github.com/facok/comfyui-krea2-controlnet', commit: '79ebfd3', dir: 'custom_nodes/comfyui-krea2-controlnet' };
 // Public downloads. Text-to-image uses the fp8 model; the same-face method needs the int8 one.
 const MODELS = [
 	[`${HF}/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors`, 'diffusion_models/krea2_turbo_fp8_scaled.safetensors'],
 	[`${HF}/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors`, 'diffusion_models/krea2_turbo_int8_convrot.safetensors'],
 	[`${HF}/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_bf16.safetensors`, 'text_encoders/qwen3vl_4b_bf16.safetensors'],
 	[`${HF}/Comfy-Org/Krea-2/resolve/main/vae/qwen_image_vae.safetensors`, 'vae/qwen_image_vae.safetensors'],
-	[`${HF}/yijunwang2/krea2-reid/resolve/main/${REID_LORA}`, `loras/${REID_LORA}`]
+	[`${HF}/yijunwang2/krea2-reid/resolve/main/${REID_LORA}`, `loras/${REID_LORA}`],
+	[`${HF}/Patil/Krea-2-depth-controlnet/resolve/main/depth-control-lora.safetensors`, `loras/${DEPTH_LORA}`]
 ];
 
 /** File name a LoRA gets on the pod: its own name, made safe for a shell and a path. */
@@ -35,6 +39,8 @@ export function imagePodSpec(loras = [], engineImage = '') {
 		'pip install -q --break-system-packages -r requirements.txt && pip install -q --break-system-packages -U torchaudio torchvision pillow',
 		'git clone -q https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit custom_nodes/ComfyUI-Krea2-Ostris-Edit && git -C custom_nodes/ComfyUI-Krea2-Ostris-Edit checkout -q 7756566',
 		'fi',
+		// The depth-control nodes, in case the ready-made engine predates them.
+		`[ -d ${DEPTH_NODES.dir} ] || { git clone -q ${DEPTH_NODES.repo} ${DEPTH_NODES.dir} && git -C ${DEPTH_NODES.dir} checkout -q ${DEPTH_NODES.commit}; }`,
 		...downloadLines(files, M, '2/3'),
 		'echo "STEP 3/3 Starting the image engine"',
 		`exec python3 main.py --listen 0.0.0.0 --port ${COMFY_PORT}`
@@ -72,7 +78,7 @@ export const referenceMegapixels = (r) => REFERENCE_ROLES[r.role].megapixels * M
  * nodes plus the re-identification LoRA), otherwise plain text-to-image. `loras` is a list
  * of [{ name, strength }] applied one after another.
  */
-export function buildImageGraph({ prompt, negative = '', width, height, count, seed, loras = [], refs = [], prefix, shape = null, shapeDenoise = 0.72 }) {
+export function buildImageGraph({ prompt, negative = '', width, height, count, seed, loras = [], refs = [], prefix, shape = null, shapeDenoise = 0.72, depth = null, depthStrength = 0.9 }) {
 	const useRefs = refs.length > 0;
 	const text = useRefs ? `${prompt} ${referenceHints(refs)}` : prompt;
 	const g = {
@@ -96,6 +102,14 @@ export function buildImageGraph({ prompt, negative = '', width, height, count, s
 		g[id] = { class_type: 'LoraLoaderModelOnly', inputs: { model, lora_name: loraFileName(l.name), strength_model: l.strength } };
 		model = [id, 0];
 	});
+	// Depth control from the body editor: the picture follows the mannequin's 3D shape.
+	if (depth) {
+		g[50] = { class_type: 'LoadImage', inputs: { image: depth } };
+		g[51] = { class_type: 'Krea2ControlImageEncode', inputs: { control_image: ['50', 0], vae: ['3', 0], resize: 'match_latent_size', upscale_method: 'lanczos', crop: 'center', channel_mode: 'grayscale', normalize: 'per_image_minmax', invert: false, batch_mode: 'independent_images', latent: ['7', 0] } };
+		g[52] = { class_type: 'Krea2ControlLoRALoader', inputs: { model, lora_name: DEPTH_LORA, strength: depthStrength } };
+		g[53] = { class_type: 'Krea2ControlApply', inputs: { model: ['52', 0], control_latent: ['51', 0] } };
+		model = ['53', 0];
+	}
 	if (useRefs) {
 		const images = {};
 		refs.forEach((r, i) => {

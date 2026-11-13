@@ -258,6 +258,25 @@ test('a body shape from the editor becomes the starting picture, partly repainte
 	assert.match((await generate({ prompt: 'x', shape: 'missing' })).error, /body shape picture is missing/);
 });
 
+test('depth control from the body editor is wired in before the same-face patch', async () => {
+	const { DEPTH_LORA } = await import('../src/image-recipe.js');
+	const g = buildImageGraph({ prompt: 'x', width: 1024, height: 1536, count: 2, seed: 1, prefix: 'p', depth: 'depth-1.png', depthStrength: 0.85,
+		loras: [{ name: 'loras/style.safetensors', strength: 0.9 }], refs: [{ role: 'face', file: 'f.png' }] });
+	assert.deepEqual(g['51'].inputs, { control_image: ['50', 0], vae: ['3', 0], resize: 'match_latent_size', upscale_method: 'lanczos', crop: 'center', channel_mode: 'grayscale', normalize: 'per_image_minmax', invert: false, batch_mode: 'independent_images', latent: ['7', 0] });
+	assert.deepEqual(g['52'].inputs, { model: ['4', 0], lora_name: DEPTH_LORA, strength: 0.85 });
+	assert.deepEqual(g['31'].inputs.model, ['53', 0], 'same-face patch sits on top of the depth control');
+	assert.equal(g['8'].inputs.denoise, 1, 'depth control starts from noise, not from the mannequin picture');
+
+	await startSession();
+	await api('GET', '/api/images');
+	const depth = await upload('body-depth.png', 'image/png');
+	const done = await generate({ prompt: 'a woman', depth, depthStrength: 0.8 });
+	assert.equal(done.status, 'done');
+	assert.match(comfy.state.uploads.at(-1).name, /^depth-/);
+	assert.equal(comfy.state.prompts.at(-1).prompt['52'].inputs.strength, 0.8);
+	assert.match(imagePodSpec([]).cmd, /comfyui-krea2-controlnet checkout -q 79ebfd3[\s\S]*krea2_depth_control\.safetensors/);
+});
+
 test('without Backblaze the session still starts, with no LoRAs', async () => {
 	await api('PUT', '/api/settings', { clearB2AppKey: true });
 	assert.equal((await startSession()).status, 200);

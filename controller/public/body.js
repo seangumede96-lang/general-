@@ -319,20 +319,35 @@ export function createViewer(container) {
 	return {
 		update,
 		setView(angle) { yaw = angle; draw(); },
-		/** A front (or chosen) view at exactly w by h pixels on a white background, as a PNG blob. */
-		async snapshot(w, h, angle = 0) {
+		/**
+		 * A front (or chosen) view at exactly w by h pixels as a PNG blob. 'shape' is the shaded
+		 * figure on white; 'depth' is a depth map (near = white, far and background = black), the
+		 * kind of picture the Krea 2 depth add-on follows.
+		 */
+		async snapshot(w, h, angle = 0, mode = 'shape') {
 			if (pending) { const v = pending; pending = null; rebuild(v); }
 			const cam = camera.clone();
 			const prevBg = scene.background;
 			const prevYaw = yaw;
-			scene.background = new THREE.Color('#ffffff');
+			scene.background = new THREE.Color(mode === 'depth' ? '#000000' : '#ffffff');
+			if (mode === 'depth') scene.overrideMaterial = new THREE.MeshDepthMaterial();
 			yaw = angle;
 			group.rotation.y = yaw;
 			renderer.setPixelRatio(1);
 			renderer.setSize(w, h, false);
 			frame(cam, w / h);
+			if (mode === 'depth') {
+				// Clip exactly to the body's front-to-back extent, so its nearest point is white,
+				// its farthest is near black, and the whole range shows the curves.
+				const box = new THREE.Box3().setFromObject(group);
+				const d = cam.position.z;
+				cam.near = Math.max(1, d - box.max.z - 1);
+				cam.far = d - box.min.z + 6;
+				cam.updateProjectionMatrix();
+			}
 			renderer.render(scene, cam);
 			const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));
+			scene.overrideMaterial = null;
 			scene.background = prevBg;
 			yaw = prevYaw;
 			renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
