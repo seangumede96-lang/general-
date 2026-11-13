@@ -24,7 +24,7 @@ test('every slider, preset and head shape drives morph targets that exist in the
 	for (const v of [all, { ...all, base: 'male' }, ...Object.keys(body.HEAD_SHAPES).map((headShape) => ({ ...body.defaults(), headShape }))]) {
 		for (const name of Object.keys(body.weights(v))) assert.ok(human.morphs[name], `missing morph ${name}`);
 	}
-	for (const s of body.SLIDERS) if (!['height', 'armPose', 'stance', 'hipDipHeight'].includes(s.key)) {
+	for (const s of body.SLIDERS) if (!['height', 'armPose', 'stance', 'hipDipHeight', 'fupaHeight'].includes(s.key)) {
 		const lo = body.weights({ ...body.defaults(), [s.key]: s.min });
 		const hi = body.weights({ ...body.defaults(), [s.key]: s.max });
 		assert.notDeepEqual(lo, hi, `${s.key} changes nothing`);
@@ -89,4 +89,50 @@ test('the hip dip height slider moves the dip up and down', () => {
 	assert.ok(mid['hip-dips-2-up'] > 0 && mid['hip-dips-3-up'] > 0);
 	for (let n = 0; n < 5; n++) assert.ok(human.morphs[`hip-dips-${n}-up`]?.idx.length > 20, `dip ${n} missing`);
 	assert.equal(Object.keys(body.weights({ ...body.defaults(), hipDipHeight: 0.5 })).filter((k) => k.startsWith('hip-dips')).length, 0);
+});
+
+test('any mix of slider values, including extremes and junk, gives a sound figure', () => {
+	let seed = 12345;
+	const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+	const keys = body.SLIDERS.map((s) => s.key);
+	const cases = [];
+	for (const base of ['female', 'male']) {
+		cases.push(Object.fromEntries(body.SLIDERS.map((s) => [s.key, s.max])), Object.fromEntries(body.SLIDERS.map((s) => [s.key, s.min])));
+		for (let i = 0; i < 40; i++) cases.push({ base, headShape: Object.keys(body.HEAD_SHAPES)[i % 6], ...Object.fromEntries(body.SLIDERS.map((s) => [s.key, s.min + rnd() * (s.max - s.min)])) });
+		for (const name of Object.keys(body.PRESETS[base])) cases.push({ ...body.defaults(base), ...body.PRESETS[base][name] });
+	}
+	for (const name of Object.keys(body.BREAST_TYPES)) cases.push(body.applyType(body.defaults(), 'breast', name));
+	for (const name of Object.keys(body.BUTT_TYPES)) cases.push(body.applyType(body.defaults(), 'butt', name));
+	cases.push(body.applyType(body.defaults(), 'butt', 'no such type'));
+	for (const raw of cases) {
+		const v = body.migrate({ version: 2, ...raw });
+		const p = body.shapeBody(v);
+		assert.ok(p.every(Number.isFinite), `non-finite position for ${JSON.stringify(raw).slice(0, 80)}`);
+		const fine = body.subdivide(p);
+		assert.ok(fine.every(Number.isFinite));
+		const n = body.baseNormals(p);
+		assert.ok(n.every(Number.isFinite));
+		let top = 0, bottom = Infinity;
+		for (let i = 0; i < human.eyes[0][0]; i++) { top = Math.max(top, p[i * 3 + 1]); bottom = Math.min(bottom, p[i * 3 + 1]); }
+		assert.ok(Math.abs(bottom) < 1e-3, 'stands on the floor');
+		assert.ok(top >= v.height * 0.9 && top <= v.height * 1.1, `height ${top} for ${v.height}`);
+	}
+	// junk in saved values is ignored
+	for (const junk of [{ height: 'tall', bust: NaN, glutes: Infinity, waist: '0.5', base: 'robot', headShape: 'cube' }, 42, 'text', [], { version: 2, weight: 1e9, hipDipHeight: -1e9 }]) {
+		const v = body.migrate(junk);
+		for (const s of body.SLIDERS) assert.ok(Number.isFinite(v[s.key]) && v[s.key] >= s.min && v[s.key] <= s.max, `${s.key}=${v[s.key]}`);
+		assert.ok(body.shapeBody(v).every(Number.isFinite));
+	}
+	assert.equal(keys.length, new Set(keys).size, 'slider keys are unique');
+});
+
+test('waist-to-chest length makes the figure taller or shorter; width and belly button move their region', () => {
+	const tall = (v) => { const p = body.shapeBody(v); let t = 0; for (let i = 0; i < human.eyes[0][0]; i++) t = Math.max(t, p[i * 3 + 1]); return t; };
+	const base = tall(body.defaults());
+	assert.ok(tall({ ...body.defaults(), waistLength: 1.5 }) > base + 5, 'longer');
+	assert.ok(tall({ ...body.defaults(), waistLength: -1 }) < base - 3, 'shorter');
+	for (const key of ['midWidth', 'navelHeight', 'fupaHeight', 'hipDipHeight']) assert.ok(body.SLIDERS.some((s) => s.key === key), key);
+	const w = body.weights({ ...body.defaults(), fupa: 1, fupaHeight: 0.5 });
+	assert.ok(w['fupa-3-up'] > 0);
+	for (let n = 0; n < 5; n++) assert.ok(human.morphs[`fupa-${n}-up`]?.idx.length > 10, `fupa ${n}`);
 });

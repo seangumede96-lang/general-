@@ -211,17 +211,69 @@ for n, off in enumerate(DIP_STEPS):
 layout_extra = {'hipDipSteps': len(DIP_STEPS)}
 # Lower belly (FUPA): a soft mound above the pubic bone, on the front only.
 FUPA_Y = CROTCH + 0.65
-fupa = {}
-for k in band(CROTCH - 0.2, CROTCH + 1.4, 1.4):
+FUPA_STEPS = [-0.4, -0.2, 0.0, 0.2, 0.4]  # five heights, 2 cm apart, for the height slider
+fupa_band = band(CROTCH - 0.6, CROTCH + 1.8, 1.4)
+centres = {}
+for k in fupa_band:
+    y = bp[k][1]
+    key = round(y / 0.08)
+    if key not in centres:
+        zs = [bp[j][2] for j in body_idx if abs(bp[j][1] - y) < 0.08 and abs(bp[j][0]) < 1.4]
+        centres[key] = sum(zs) / len(zs)
+for n, off in enumerate(FUPA_STEPS):
+    fupa = {}
+    for k in fupa_band:
+        x, y, z = bp[k]
+        zc = centres[round(y / 0.08)]
+        if z <= zc: continue
+        front = smooth((z - zc) / 0.6)
+        w = front * math.exp(-((y - FUPA_Y - off) / 0.42) ** 2) * math.exp(-(x / 1.0) ** 2)
+        if w > 1e-3: fupa[k] = (0.0, -0.02 * w, 0.19 * w)
+    morphs[f'fupa-{n}-up'] = fupa
+    morphs[f'fupa-{n}-down'] = {k: (0.0, 0.0, -v[2] * 0.6) for k, v in fupa.items()}
+
+# Midsection, between the waist and the bottom of the ribcage: its length (the figure gets
+# taller or shorter: the editor adds this after scaling to the chosen height), its width, and
+# the belly button's height. Arm vertices move with the chest, so the arms keep their length.
+WAIST_Y, CHEST_Y, ARMPIT_Y = 2.7, 4.3, 5.3
+wts = json.load(open(data / 'rigs' / 'default_weights.mhw'))['weights']
+arm_w = {}
+for bone, lst in wts.items():
+    if any(t in bone for t in ('upperarm', 'lowerarm', 'wrist', 'finger', 'metacarpal', 'shoulder01', 'clavicle')):
+        for i, x in lst:
+            if i in remap: arm_w[remap[i]] = min(1.0, arm_w.get(remap[i], 0) + x)
+LONG = 0.6  # decimetres at full strength
+long_up = {}
+for k in range(len(used)):
+    x, y, z = verts[used[k]]
+    ramp = smooth((y - WAIST_Y) / (CHEST_Y - WAIST_Y))
+    a = arm_w.get(k, 0.0)
+    if any(k in range(st, st + c) for st, c in markers.values() if True):
+        a = 1.0 if y > WAIST_Y else a  # joint markers of the arms move with the chest
+    dy = LONG * (a + (1 - a) * ramp)
+    if dy > 1e-4: long_up[k] = (0.0, dy, 0.0)
+morphs['midsection-long-up'] = long_up
+morphs['midsection-long-down'] = {k: (0.0, -v[1] * 0.8, 0.0) for k, v in long_up.items()}
+mid_rows = {}
+wide = {}
+for k in body_idx:
     x, y, z = bp[k]
-    zs = [bp[j][2] for j in body_idx if abs(bp[j][1] - y) < 0.08 and abs(bp[j][0]) < 1.4]
-    zc = sum(zs) / len(zs)
-    if z <= zc: continue
-    front = smooth((z - zc) / 0.6)
-    w = front * math.exp(-((y - FUPA_Y) / 0.38) ** 2) * math.exp(-(x / 0.75) ** 2)
-    if w > 1e-3: fupa[k] = (0.0, -0.02 * w, 0.17 * w)
-morphs['fupa-up'] = fupa
-morphs['fupa-down'] = {k: (0.0, 0.0, -v[2] * 0.6) for k, v in fupa.items()}
+    if arm_w.get(k, 0.0) > 0.5: continue
+    # Even widening from just below the waist up to the armpits, fading only at the two ends,
+    # so the sides stay straight instead of bulging out in the middle.
+    bump = smooth((y - (WAIST_Y - 0.9)) / 0.7) * smooth((ARMPIT_Y - y) / 0.6) * (1 - arm_w.get(k, 0.0))
+    if bump <= 1e-3: continue
+    key = round(y / 0.08)
+    if key not in mid_rows:
+        zs = [bp[j][2] for j in body_idx if abs(bp[j][1] - y) < 0.08 and abs(bp[j][0]) < 1.6 and arm_w.get(j, 0.0) < 0.5]
+        mid_rows[key] = sum(zs) / len(zs)
+    zc = mid_rows[key]
+    wide[k] = (0.16 * x * bump, 0.0, 0.08 * (z - zc) * bump)
+morphs['midsection-wide-up'] = wide
+morphs['midsection-wide-down'] = {k: tuple(-c * 0.8 for c in v) for k, v in wide.items()}
+morphs['navel-up'] = target('stomach/stomach-navel-up.target')
+morphs['navel-in'] = target('stomach/stomach-navel-in.target')
+morphs['navel-down'] = target('stomach/stomach-navel-down.target')
 
 # --- binary: positions (float32), indices (uint16/uint32), then per morph: count, indices (uint16), offsets (float32 x3)
 n = len(used)

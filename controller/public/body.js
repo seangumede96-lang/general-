@@ -26,7 +26,11 @@ export const SLIDERS = [
 	{ key: 'vshape', label: 'V-shape', group: 'torso', min: -1, max: 1.3, step: 0.01 },
 	{ key: 'waist', label: 'Waist', group: 'torso', min: -1.2, max: 1.3, step: 0.01 },
 	{ key: 'belly', label: 'Belly', group: 'torso', min: -1, max: 1, step: 0.01 },
+	{ key: 'waistLength', label: 'Waist to chest length', group: 'torso', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'midWidth', label: 'Waist to chest width', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'navelHeight', label: 'Belly button height', group: 'torso', min: -1, max: 1.3, step: 0.01 },
 	{ key: 'fupa', label: 'Lower belly (FUPA)', group: 'torso', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'fupaHeight', label: 'Lower belly height (lower ↔ higher)', group: 'torso', min: -1, max: 1, step: 0.01 },
 	{ key: 'abs', label: 'Abs tone', group: 'torso', min: -1, max: 1.3, step: 0.01 },
 	{ key: 'arms', label: 'Arm thickness', group: 'torso', min: -1.2, max: 1.4, step: 0.01 },
 	{ key: 'bust', label: 'Breast size', group: 'chest', min: -1, max: 1.6, step: 0.01 },
@@ -96,7 +100,9 @@ const DRIVES = {
 	buttOut: [['glute-out', 1]],
 	buttWidth: [['glute-width', 1]],
 	buttSplit: [['glute-split', 1]],
-	fupa: [['fupa', 1]],
+	waistLength: [['midsection-long', 1]],
+	midWidth: [['midsection-wide', 1]],
+	navelHeight: [['navel', 1]],
 	buttFullness: [['glute-top', 1]],
 	bowLegs: [['bowlegs', 1]],
 	calves: [['calf-circ', 1]],
@@ -259,14 +265,18 @@ export function weights(v) {
 	two(`${g}-weight`, at('weight'));
 	two(`${g}-muscle`, at('muscle'));
 	for (const [key, drives] of Object.entries(DRIVES)) for (const [name, k] of drives) two(name, at(key) * k);
-	// Hip dips are stored at five heights; the height slider blends the two nearest.
-	const dip = at('hipDips');
-	if (dip) {
-		const f = (Math.max(-1, Math.min(1, v.hipDipHeight || 0)) + 1) * 2;
+	// Hip dips and the lower belly are stored at five heights; their height sliders blend the
+	// two nearest, so they slide up and down.
+	const placed = (name, amount, place) => {
+		if (!amount) return;
+		const f = (Math.max(-1, Math.min(1, Number(place) || 0)) + 1) * 2;
 		const i = Math.min(3, Math.floor(f)), t = f - i;
-		two(`hip-dips-${i}`, dip * (1 - t));
-		two(`hip-dips-${i + 1}`, dip * t);
-	}
+		two(`${name}-${i}`, amount * (1 - t));
+		two(`${name}-${i + 1}`, amount * t);
+	};
+	placed('hip-dips', at('hipDips'), v.hipDipHeight);
+	placed('fupa', at('fupa'), v.fupaHeight);
+	add('navel-in', 0.8); // a visible belly button, so its height can be seen and set
 	if (HEAD_SHAPES[v.headShape]) add(HEAD_SHAPES[v.headShape], HEAD_AMOUNT);
 	return w;
 }
@@ -276,16 +286,21 @@ export function shapeBody(v, out) {
 	const d = meshData;
 	const p = out || new Float32Array(d.count * 3);
 	p.set(d.base);
-	for (const [name, k] of Object.entries(weights(v))) {
+	const w = weights(v);
+	const addMorph = (name, k) => {
 		const m = d.morphs[name];
-		if (!m) continue;
+		if (!m) return;
 		for (let i = 0; i < m.idx.length; i++) {
 			const j = m.idx[i] * 3;
 			p[j] += m.off[i * 3] * k;
 			p[j + 1] += m.off[i * 3 + 1] * k;
 			p[j + 2] += m.off[i * 3 + 2] * k;
 		}
-	}
+	};
+	// The midsection length is added after the figure is scaled to its height, so it makes the
+	// figure taller or shorter instead of shortening the legs to compensate.
+	const after = (name) => name.startsWith('midsection-long');
+	for (const [name, k] of Object.entries(w)) if (!after(name)) addMorph(name, k);
 	poseArms(p, v.armPose || 0);
 	poseLegs(p, v.stance || 0);
 	// Measure the drawn skin only (the eye markers sit inside the head), then scale to the height.
@@ -299,6 +314,7 @@ export function shapeBody(v, out) {
 	}
 	cx /= skin; cz /= skin;
 	const k = (v.height || BASE_HEIGHT[v.base] || 170) / (maxY - minY);
+	for (const [name, x] of Object.entries(w)) if (after(name)) addMorph(name, x);
 	for (let i = 0; i < d.count; i++) {
 		p[i * 3] = (p[i * 3] - cx) * k;
 		p[i * 3 + 1] = (p[i * 3 + 1] - minY) * k;
@@ -587,7 +603,10 @@ export function createViewer(container) {
 		pos.needsUpdate = true;
 		geometry.computeBoundingBox();
 		geometry.computeBoundingSphere();
-		height = values.height || 170;
+		// Frame by the real height: the waist-to-chest length can make the figure taller than the
+		// Height slider says.
+		height = 0;
+		for (let i = 0; i < meshData.eyes[0][0]; i++) height = Math.max(height, basePos[i * 3 + 1]);
 		reach = 0;
 		const arr = basePos;
 		for (let i = 0; i < meshData.eyes[0][0]; i++) reach = Math.max(reach, Math.hypot(arr[i * 3], arr[i * 3 + 2]));

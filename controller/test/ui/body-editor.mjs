@@ -255,6 +255,42 @@ await wait(800);
 if (!(await visible('body'))) fail('rapid tapping left the body editor');
 if ((await page.locator('#body-view canvas').screenshot()).length < 20000) fail('figure blank after rapid tapping');
 
+// ---- every slider at its maximum, then its minimum, then rapid random changes: no errors,
+// the figure is still drawn, and Use this body still works
+const setAll = (which) => page.evaluate((which) => {
+	for (const i of document.querySelectorAll('#body input[type=range]')) { i.value = which === 'max' ? i.max : which === 'min' ? i.min : String(Number(i.min) + Math.random() * (Number(i.max) - Number(i.min))); i.dispatchEvent(new Event('input', { bubbles: true })); }
+}, which);
+for (const which of ['max', 'min', 'random', 'random', 'random']) {
+	await setAll(which);
+	await wait(600);
+	const px = await page.evaluate(() => { const c = document.querySelector('#body-view canvas'); const g = document.createElement('canvas'); g.width = 60; g.height = 120; const x = g.getContext('2d'); x.drawImage(c, 0, 0, 60, 120); const d = x.getImageData(0, 0, 60, 120).data; let light = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 180 && d[i + 1] > 180) light++; return light; });
+	if (px < 40) fail(`figure not drawn with all sliders at ${which} (${px} light pixels)`);
+}
+await tap(page.locator('#body-use'));
+await page.waitForFunction(() => !document.querySelector('#characters').hidden, null, { timeout: 15000 }).catch(() => fail('Use this body failed after extreme sliders'));
+
+// ---- damaged saved data: the editor still opens and works
+await page.evaluate(() => {
+	localStorage.setItem('bodyCurrent', '{not json');
+	localStorage.setItem('bodyTemplates', JSON.stringify([null, 5, { name: 'ok', values: { base: 'male', weight: 0.5 } }, { name: 'bad' }, { values: {} }]));
+	localStorage.setItem('bodyTab', 'nonsense');
+});
+await page.reload();
+await wait(1500);
+// The app reopens where it was (Characters, after Use this body); go to the editor from there.
+if (!(await visible('body'))) {
+	if (!(await visible('characters'))) { await tap(page.locator('#menu')); await tap(page.locator('#open-characters')); }
+	await tap(page.locator('#img-shape-open'));
+}
+await wait(3000);
+if (!(await visible('body'))) fail('editor did not open with damaged saved data');
+if (await page.locator('#body .creator-pane:not([hidden])').count() !== 1) fail('a bad saved tab name left no tab open');
+await tap(page.locator('#body-tabs [data-tab=saved]'));
+const names = await page.locator('#body-saved .saved-chip button:not(.chip-x)').allTextContents();
+if (JSON.stringify(names) !== JSON.stringify(['ok'])) fail(`damaged saved bodies not skipped: ${JSON.stringify(names)}`);
+await tap(page.locator('#body-saved button', { hasText: 'ok' }));
+if ((await values())?.base !== 'male') fail('a good saved body next to damaged ones did not load');
+
 await browser.close();
 await app.close();
 console.log(`${process.argv[2] || 'Pixel 7'}: ${problems.length} problem${problems.length === 1 ? '' : 's'}`);

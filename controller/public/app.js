@@ -1349,13 +1349,21 @@ const bodyEditor = {
 			try { this.module = await import('./body.js'); }
 			catch (err) { $('body-view').textContent = `The 3D view could not start: ${err.message}`; return; }
 			this.viewer = this.module.createViewer($('body-view'));
-			this.values = this.module.migrate(JSON.parse(localStorage.getItem('bodyCurrent') || 'null') || this.module.defaults('female'));
+			let current = null;
+			try { current = JSON.parse(localStorage.getItem('bodyCurrent') || 'null'); } catch { current = null; }
+			this.values = this.module.migrate(current || this.module.defaults('female'));
 			this.build();
 		}
 		this.refresh();
 	},
 
-	saved() { try { return JSON.parse(localStorage.getItem('bodyTemplates') || '[]'); } catch { return []; } },
+	/** Saved bodies; anything damaged in storage is skipped rather than breaking the editor. */
+	saved() {
+		try {
+			const list = JSON.parse(localStorage.getItem('bodyTemplates') || '[]');
+			return Array.isArray(list) ? list.filter((t) => t && typeof t.name === 'string' && t.values && typeof t.values === 'object') : [];
+		} catch { return []; }
+	},
 
 	/** Draw the controls once; refresh() keeps them in step with the values. */
 	build() {
