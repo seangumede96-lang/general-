@@ -51,11 +51,26 @@ export const SLIDERS = [
 	{ key: 'hipDipHeight', label: 'Hip dip height (lower ↔ higher)', group: 'butt', min: -1, max: 1, step: 0.01 },
 	{ key: 'buttWidth', label: 'Butt width', group: 'butt', min: -1, max: 1.2, step: 0.01 },
 	{ key: 'buttFullness', label: 'Fullness: bottom ↔ top', group: 'butt', min: -1, max: 1, step: 0.01 },
+	// Stage 5 shape library (procedural, smoothed targets; see tools/hipglute-lib.mjs).
+	{ key: 'gluteUpper', label: 'Upper glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteLower', label: 'Lower glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteShelf', label: 'Shelf (top projection)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteInner', label: 'Inner glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteOuter', label: 'Outer glute (side)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteThighBlend', label: 'Glute to thigh blend', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteFold', label: 'Under-fold definition', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteAsym', label: 'Left ↔ right glute (+ her left fuller)', group: 'butt', min: -1, max: 1, step: 0.01 },
+	{ key: 'iliacWidth', label: 'Upper hip width (iliac)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'pelvicTilt', label: 'Pelvic tilt', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'stance', label: 'Feet apart', group: 'legs', min: 0, max: 1, step: 0.01 },
 	{ key: 'thighs', label: 'Thighs', group: 'legs', min: -1.2, max: 1.5, step: 0.01 },
 	{ key: 'thighGap', label: 'Thigh gap', group: 'legs', min: -1, max: 1.3, step: 0.01 },
 	{ key: 'bowLegs', label: 'Bow legs', group: 'legs', min: -1.3, max: 1.5, step: 0.01 },
 	{ key: 'calves', label: 'Calves', group: 'legs', min: -1.2, max: 1.3, step: 0.01 },
+	{ key: 'thighUpper', label: 'Upper thigh', group: 'legs', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'thighOuter', label: 'Outer thigh', group: 'legs', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'thighInner', label: 'Inner thigh', group: 'legs', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'hamstring', label: 'Back of thigh', group: 'legs', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'headSize', label: 'Head size', group: 'head', min: -1, max: 1, step: 0.01 },
 	{ key: 'neckWidth', label: 'Neck width', group: 'head', min: -1.2, max: 1.2, step: 0.01 }
 ];
@@ -107,6 +122,19 @@ const DRIVES = {
 	midWidth: [['midsection-wide', 1]],
 	navelHeight: [['navel', 1]],
 	buttFullness: [['glute-top', 1]],
+	gluteUpper: [['glute-upper', 1]],
+	gluteLower: [['glute-lower', 1]],
+	gluteShelf: [['glute-shelf', 1]],
+	gluteInner: [['glute-inner', 1]],
+	gluteOuter: [['glute-outer', 1]],
+	gluteThighBlend: [['glute-thigh-blend', 1]],
+	gluteFold: [['glute-fold', 1]],
+	iliacWidth: [['iliac-width', 1]],
+	pelvicTilt: [['pelvic-tilt', 1]],
+	thighUpper: [['thigh-upper', 1]],
+	thighOuter: [['thigh-outer', 1]],
+	thighInner: [['thigh-inner', 1]],
+	hamstring: [['hamstring', 1]],
 	bowLegs: [['bowlegs', 1]],
 	calves: [['calf-circ', 1]],
 	arms: [['upperarm-circ', 1], ['wrist-circ', 0.4]]
@@ -206,17 +234,23 @@ const BREAST_KEYS = ['breastFirm', 'breastHeight', 'breastSpacing', 'breastFulln
 
 /**
  * Butt types, after the four shapes used by plastic surgeons and fitness guides (round "O",
- * heart "A", square "H", inverted "V"), plus the high, projecting "bubble" shape.
+ * heart "A", square "H", inverted "V"), the high, projecting "bubble" shape, and the owner's
+ * phone session's library presets (upper-full, teardrop, wide, high and lifted, natural).
  */
 export const BUTT_TYPES = {
-	Round: { glutes: 0.6, buttOut: 0.4, buttFullness: 0, buttWidth: 0.1, buttLift: 0.2 },
-	Heart: { glutes: 0.5, buttFullness: -0.8, buttWidth: 0.35, hips: 0.4, buttOut: 0.2 },
+	Round: { glutes: 0.7, buttOut: 0.6, buttLift: 0.2, gluteUpper: 0.5, gluteLower: 0.5, gluteOuter: 0.3 },
+	Heart: { glutes: 0.6, hips: 0.5, buttWidth: 0.3, gluteLower: 1, gluteOuter: 0.6, iliacWidth: 0.6, thighOuter: 0.3 },
+	'Upper-full': { glutes: 0.6, buttOut: 0.5, buttLift: 0.5, gluteShelf: 1, gluteUpper: 0.8, pelvicTilt: 0.5 },
+	Teardrop: { glutes: 0.6, buttLift: -0.3, gluteLower: 1.2, gluteThighBlend: 0.8, gluteInner: 0.5 },
+	Wide: { glutes: 0.5, hips: 0.9, buttWidth: 0.8, gluteOuter: 1, iliacWidth: 0.8, thighOuter: 0.7 },
+	'High and lifted': { glutes: 0.7, buttOut: 0.8, buttLift: 0.8, gluteUpper: 1, gluteShelf: 0.5, gluteFold: 0.8, pelvicTilt: 0.6 },
+	Natural: { glutes: 0.2, buttOut: 0.1, gluteLower: 0.2, thighUpper: 0.2 },
 	Square: { glutes: 0.1, buttWidth: 0.5, buttFullness: 0.1, buttOut: -0.2, buttLift: -0.2 },
 	'Inverted V': { glutes: 0.2, buttFullness: 0.8, buttWidth: -0.3, buttLift: 0.1, buttOut: -0.1 },
 	Bubble: { glutes: 0.8, buttOut: 1, buttLift: 0.7, buttFullness: 0.3 },
 	Flat: { glutes: -0.7, buttOut: -0.8, buttLift: -0.3 }
 };
-const BUTT_KEYS = ['glutes', 'buttOut', 'buttFullness', 'buttWidth', 'buttLift', 'hips'];
+const BUTT_KEYS = ['glutes', 'buttOut', 'buttFullness', 'buttWidth', 'buttLift', 'hips', 'gluteUpper', 'gluteLower', 'gluteShelf', 'gluteInner', 'gluteOuter', 'gluteThighBlend', 'gluteFold', 'iliacWidth', 'pelvicTilt', 'thighUpper', 'thighOuter', 'thighInner'];
 
 /** Apply a breast or butt type: its sliders take the type's values, the others in that set reset. */
 export function applyType(values, kind, name) {
@@ -292,6 +326,9 @@ export function weights(v) {
 	};
 	placed('hip-dips', at('hipDips'), v.hipDipHeight);
 	placed('fupa', at('fupa'), v.fupaHeight);
+	// One glute fuller than the other: + her left, - her right.
+	const asym = Math.max(-1, Math.min(1, Number(v.gluteAsym) || 0));
+	if (asym > 0) add('glutes-L-up', asym); else if (asym < 0) add('glutes-R-up', -asym);
 	add('navel-in', 0.8); // a visible belly button, so its height can be seen and set
 	if (HEAD_SHAPES[v.headShape]) add(HEAD_SHAPES[v.headShape], HEAD_AMOUNT);
 	return w;

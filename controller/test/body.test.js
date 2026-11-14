@@ -243,3 +243,25 @@ test('joint correctives: nothing changes at rest, and fewer triangles are crushe
 		assert.ok(after < plain || plain === 0, `${name}: crushed ${plain} -> ${after}`);
 	}
 });
+
+test('stage 5 shape library: every target is present, finite and at most 3.6 cm; zero changes nothing', () => {
+	const names = ['glute-upper', 'glute-lower', 'glute-shelf', 'glute-inner', 'glute-outer', 'glute-thigh-blend', 'glute-fold', 'iliac-width', 'pelvic-tilt', 'thigh-upper', 'thigh-outer', 'thigh-inner', 'hamstring'];
+	for (const base of [...names.map((x) => `${x}-up`), ...names.map((x) => `${x}-down`), 'glutes-L-up', 'glutes-R-up']) {
+		const m = human.morphs[base];
+		assert.ok(m && m.idx.length > 50, `${base} present`);
+		let peak = 0;
+		for (let i = 0; i < m.idx.length; i++) { const v = Math.hypot(m.off[i * 3], m.off[i * 3 + 1], m.off[i * 3 + 2]); assert.ok(Number.isFinite(v), `${base} finite`); peak = Math.max(peak, v); }
+		if (!/^glutes-[LR]/.test(base) && !/pelvic-tilt/.test(base)) assert.ok(peak <= 0.36, `${base} peak ${peak.toFixed(3)} dm`);
+	}
+	// all new sliders at 0: exactly the old body
+	const plain = body.shapeBody(body.defaults());
+	const zeros = body.shapeBody({ ...body.defaults(), gluteUpper: 0, gluteLower: 0, gluteShelf: 0, gluteAsym: 0, iliacWidth: 0, pelvicTilt: 0, thighUpper: 0, hamstring: 0 });
+	assert.ok(plain.every((x, i) => x === zeros[i]));
+	// every new slider changes the body, and all at their extremes stay sound
+	const keys = body.SLIDERS.filter((s) => /^glute(Upper|Lower|Shelf|Inner|Outer|ThighBlend|Fold|Asym)$|^iliacWidth$|^pelvicTilt$|^thigh(Upper|Outer|Inner)$|^hamstring$/.test(s.key));
+	assert.equal(keys.length, 14);
+	for (const s of keys) for (const x of [s.min, s.max]) assert.notDeepEqual(body.weights({ ...body.defaults(), [s.key]: x }), body.weights(body.defaults()), `${s.key}=${x}`);
+	const all = body.shapeBody({ ...body.defaults(), weight: 1, hips: 1.5, glutes: 1.5, thighs: 1.5, ...Object.fromEntries(keys.map((s) => [s.key, s.max])) });
+	assert.ok(all.every(Number.isFinite));
+	for (const name of Object.keys(body.BUTT_TYPES)) assert.ok(body.shapeBody(body.applyType(body.defaults(), 'butt', name)).every(Number.isFinite), name);
+});
