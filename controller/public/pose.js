@@ -356,3 +356,74 @@ export function solveRig(rest, pose, goals, { feetPlanted = true, iterations = 1
 	}
 	return cleanPose(cur);
 }
+
+// ---------- joint correctives ----------
+// Linear-blend skinning thins and creases the skin where a joint bends (knee, elbow, groin,
+// armpit, waist). After posing, skin shared by a part and its parent is pushed out along its
+// normal, in proportion to how far that joint bends from rest. Exactly nothing at rest. Measured
+// by the owner's phone session (crushed triangles, rest -> posed): deep squat 79 -> 39, knee 155
+// 44 -> 4, elbow 150 10 -> 0, arms up 50 -> 14, waist and chest bend 56 -> 36. Twists are left
+// out (they got slightly worse with it). Thighs pressing together is collision, not handled here.
+
+/** Push per part type, per unit of sin²(bend / 2). */
+export const CORRECTIVE_GAINS = { thigh: 0.8, shin: 0.3, upperArm: 0.5, forearm: 0.3, waist: 2.5, chest: 2.5 };
+/** The push uses distance to the joint, capped here (model units; skin near a joint is well inside it). */
+const CORRECTIVE_CAP = 8;
+const tr = (m) => [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
+const angleOf = (m) => Math.acos(Math.max(-1, Math.min(1, (m[0] + m[4] + m[8] - 1) / 2)));
+const noTwist = (pose) => Object.fromEntries(Object.entries(pose || {}).map(([k, a]) => [k, Object.fromEntries(Object.entries(a || {}).filter(([axis]) => axis !== 'twist' && axis !== 'turn'))]));
+
+/** Unit vertex normals of the first n vertices of p, for the triangles in idx. */
+export function vertexNormals(p, idx, n) {
+	const N = new Float32Array(n * 3);
+	for (let t = 0; t < idx.length; t += 3) {
+		const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+		if (a >= n || b >= n || c >= n) continue;
+		const A = a * 3, B = b * 3, C = c * 3;
+		const ux = p[B] - p[A], uy = p[B + 1] - p[A + 1], uz = p[B + 2] - p[A + 2];
+		const vx = p[C] - p[A], vy = p[C + 1] - p[A + 1], vz = p[C + 2] - p[A + 2];
+		const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+		for (const k of [A, B, C]) { N[k] += x; N[k + 1] += y; N[k + 2] += z; }
+	}
+	for (let i = 0; i < n; i++) { const l = Math.hypot(N[i * 3], N[i * 3 + 1], N[i * 3 + 2]) || 1; N[i * 3] /= l; N[i * 3 + 1] /= l; N[i * 3 + 2] /= l; }
+	return N;
+}
+
+/**
+ * Correct the posed skin `p` in place (model units). `rest` and `f` are the rig rest and the
+ * frames `p` was posed with; `pose` is that pose. `skin` = how many vertices are skin.
+ */
+export function correctRig(d, p, rest, f, pose, skin, gains = CORRECTIVE_GAINS) {
+	const { joints, w } = d.rig;
+	const f0 = rigFrames(rest, {}), fb = rigFrames(rest, noTwist(pose));
+	const amt = rest.names.map((name, i) => {
+		const par = rest.parents[i];
+		if (par < 0) return 0;
+		const g = gains[name.split('.')[0]] || 0;
+		if (!g) return 0;
+		const r0 = mul(tr(f0.Q[par]), f0.Q[i]), r = mul(tr(fb.Q[par]), fb.Q[i]);
+		const s = Math.sin(angleOf(mul(r, tr(r0))) / 2);
+		return g * s * s;
+	});
+	if (!amt.some((a) => a > 1e-6)) return p;
+	const N = vertexNormals(p, d.index, skin);
+	const push = new Float32Array(skin);
+	for (let v = 0; v < skin; v++) {
+		let total = 0;
+		for (let a = 0; a < 4; a++) {
+			const j = joints[v * 4 + a], wj = w[v * 4 + a];
+			if (!wj || !amt[j]) continue;
+			const pj = rest.parents[j];
+			let wp = 0;
+			for (let b = 0; b < 4; b++) if (joints[v * 4 + b] === pj) wp = w[v * 4 + b];
+			if (!wp) continue;
+			const blend = ((4 * wj * wp) / ((wj + wp) ** 2)) * (wj + wp);
+			const c = f.pp[j];
+			const dist = Math.hypot(p[v * 3] - c[0], p[v * 3 + 1] - c[1], p[v * 3 + 2] - c[2]);
+			total += amt[j] * blend * Math.min(dist, CORRECTIVE_CAP);
+		}
+		push[v] = total;
+	}
+	for (let v = 0; v < skin; v++) if (push[v]) { p[v * 3] += N[v * 3] * push[v]; p[v * 3 + 1] += N[v * 3 + 1] * push[v]; p[v * 3 + 2] += N[v * 3 + 2] * push[v]; }
+	return p;
+}

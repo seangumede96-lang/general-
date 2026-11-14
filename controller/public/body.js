@@ -2,7 +2,7 @@
 // with its morph targets. Sliders blend the targets on the phone, so every change is instant.
 // The finished figure is in centimetres, +Y up, facing +Z, soles on y = 0.
 import * as THREE from './vendor/three/three.module.js';
-import { cleanPose, DEFAULT_POSE, rigRest, rigFrames, skinRig, effectorAt, solveRig, footPins, HANDLES } from './pose.js';
+import { cleanPose, DEFAULT_POSE, rigRest, rigFrames, skinRig, effectorAt, solveRig, footPins, HANDLES, correctRig } from './pose.js';
 
 export { POSE_PARTS, POSE_PRESETS, DEFAULT_POSE, HANDLES, cleanPose, mirrorPose } from './pose.js';
 
@@ -364,7 +364,9 @@ export function shapeBody(v, out) {
 	const s = prepare(v, p);
 	if (isPosing(v)) {
 		const rest = rigRest(meshData, p);
-		skinRig(meshData, p, rest, rigFrames(rest, v.pose, 1 / s.k));
+		const f = rigFrames(rest, v.pose, 1 / s.k);
+		skinRig(meshData, p, rest, f);
+		if (v.correctives !== false) correctRig(meshData, p, rest, f, v.pose, meshData.eyes[0][0]);
 		s.minY = floorOf(p);
 	}
 	return finish(p, s);
@@ -387,7 +389,9 @@ export function createPoser(v) {
 		/** Pose into `out` (centimetres). `floor` keeps the floor level from before (while dragging). */
 		apply(pose, out, floor = null) {
 			out.set(raw);
-			skinRig(meshData, out, rest, rigFrames(rest, pose, upc));
+			const fr = rigFrames(rest, pose, upc);
+			skinRig(meshData, out, rest, fr);
+			correctRig(meshData, out, rest, fr, pose, meshData.eyes[0][0]);
 			const f = floor ?? floorOf(out);
 			finish(out, { ...s, minY: f });
 			return f;

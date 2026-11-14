@@ -219,3 +219,27 @@ test('dragging a point: the hand reaches a target, planted feet stay put when th
 	assert.ok((crouch['shin.L']?.bend || 0) > 20, 'knees bent');
 	for (const f of ['foot.L', 'foot.R']) assert.ok(Math.hypot(...after[f].map((x, k) => x - before[f][k])) < 2.5, `${f} stayed planted`);
 });
+
+test('joint correctives: nothing changes at rest, and fewer triangles are crushed at bent joints', () => {
+	if (!human.rig) return; // a model without the rig: nothing to correct
+	const skin = human.eyes[0][0];
+	const idx = human.index;
+	const restP = body.shapeBody({ ...body.defaults(), posing: true, pose: {} });
+	const area = (p, t) => { const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3; const u = [p[b] - p[a], p[b + 1] - p[a + 1], p[b + 2] - p[a + 2]], v = [p[c] - p[a], p[c + 1] - p[a + 1], p[c + 2] - p[a + 2]]; return Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]); };
+	const crushed = (p) => { let n = 0; for (let t = 0; t < idx.length; t += 3) { if (idx[t] >= skin || idx[t + 1] >= skin || idx[t + 2] >= skin) continue; const r = area(restP, t); if (r > 1e-6 && area(p, t) < 0.3 * r) n++; } return n; };
+	// at rest the correctives do nothing
+	const off = body.shapeBody({ ...body.defaults(), posing: true, pose: {}, correctives: false });
+	assert.ok(restP.every((x, i) => Math.abs(x - off[i]) < 1e-6), 'no change at rest');
+	const cases = {
+		'deep squat': { 'thigh.L': { forward: 130 }, 'thigh.R': { forward: 130 }, 'shin.L': { bend: 150 }, 'shin.R': { bend: 150 } },
+		'knee 155': { 'shin.L': { bend: 155 } },
+		'elbow 150': { 'forearm.L': { bend: 150 } }
+	};
+	for (const [name, pose] of Object.entries(cases)) {
+		const plain = crushed(body.shapeBody({ ...body.defaults(), posing: true, pose, correctives: false }));
+		const fixed = body.shapeBody({ ...body.defaults(), posing: true, pose });
+		assert.ok(fixed.every(Number.isFinite), `${name}: finite`);
+		const after = crushed(fixed);
+		assert.ok(after < plain || plain === 0, `${name}: crushed ${plain} -> ${after}`);
+	}
+});
