@@ -1202,6 +1202,8 @@ const chars = {
 			if (g.params.asked && g.params.asked !== g.prompt) card.append(el('div', { className: 'small', style: 'margin-bottom:4px', textContent: `You asked: ${g.params.asked}` }));
 			card.append(el('div', { className: 'gen-prompt', textContent: g.prompt }));
 			if (g.params.note) card.append(el('div', { className: 'approval-note', style: 'padding:0 0 8px', textContent: g.params.note }));
+			// Exactly what the engine was given, when it differs from what is shown above (trigger words, reference hints).
+			if (g.params.sent && g.params.sent !== g.prompt) card.append(el('details', { className: 'small muted', style: 'margin-bottom:6px' }, el('summary', { textContent: 'Sent to the engine' }), el('div', { textContent: g.params.sent })));
 			if (g.status === 'running') {
 				card.append(el('div', { className: 'brain-state starting', textContent: `Making ${g.params.count} picture${g.params.count > 1 ? 's' : ''}${g.params.quality === 'max' ? ' at max quality' : ''}… ${g.params.quality === 'max' ? 'this can take a few minutes' : 'usually under a minute'}.` }));
 				const live = el('div', { className: 'gen-live' }, el('div', { className: 'bar' }, el('div', { style: 'width:4%' })), el('div', { className: 'boot-meta' }));

@@ -25,7 +25,7 @@ const PROMPT_WRITER = `You write prompts for the Krea 2 image model. The user gi
 Rules:
 - One paragraph of long, natural sentences, 80 to 160 words.
 - Start with the framing (for example "Full-body picture of", "Close-up portrait of") and the body type and build, then face, hair, skin, then clothing, pose, expression, lighting.
-- Always state the clothing explicitly, item by item. Follow the user's wishes about clothing and nudity exactly; if they say nothing about clothing, give a complete outfit.
+- Follow the user's wishes about clothing and nudity exactly. If they ask for nudity, say plainly that the person is fully nude ("completely nude, wearing nothing") and do not mention or invent any clothing, underwear, cover or censoring. Otherwise state the clothing explicitly, item by item; if they say nothing about clothing, give a complete outfit.
 - Unless the user names a setting, the background is a plain pure white void.
 - Characters are fictional adults. Keep every detail the user gave; invent sensible specifics for what they left out. Do not add text, logos or watermarks.
 - If reference pictures are mentioned, do not describe the face or body they will supply; describe everything else.`;
@@ -68,7 +68,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 	/** Live progress of running pictures, from the engine's messages: { stage, step, steps, at }. */
 	const live = new Map();
-	const view = (g) => ({ id: g.id, status: g.status, detail: g.detail, prompt: g.prompt, params: JSON.parse(g.params), images: JSON.parse(g.images), created_at: g.created_at, progress: g.status === 'running' ? live.get(g.id) || { stage: 'Starting', at: g.created_at } : null });
+	const view = (g) => ({ id: g.id, status: g.status, detail: g.detail, prompt: g.prompt, params: JSON.parse(g.params), images: JSON.parse(g.images), created_at: g.created_at, ended_at: g.ended_at ?? null, progress: g.status === 'running' ? live.get(g.id) || { stage: 'Starting', at: g.created_at } : null });
 
 	let lorasListedAt = 0;
 	/** Show what is in the Backblaze loras/ folder even before a session, refreshed at most every 5 minutes. */
@@ -128,10 +128,11 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		try {
 			const out = (await llm([{ role: 'system', content: PROMPT_WRITER }, { role: 'user', content: text + refNote }])).replace(/^["'\s]+|["'\s]+$/g, '');
 			const declined = /^(i('m| am)? (sorry|unable|not able)|i can('|no)t|sorry|as an ai|i won't)/i.test(out);
-			if (declined) return { prompt: text, enhanced: false, why: 'The chat model declined to write this prompt, so your own words were used. An uncensored private brain would write it.' };
-			if (out.length < text.length) return { prompt: text, enhanced: false, why: '' };
-			return { prompt: out.slice(0, 4000), enhanced: true, why: '' };
-		} catch (err) { return { prompt: text, enhanced: false, why: `The prompt could not be written automatically (${err.message.slice(0, 120)}), so your own words were used.` }; }
+			if (declined) return { prompt: text, enhanced: false, writer: 'declined', why: 'The chat model declined to write this prompt, so your own words were used. An uncensored private brain would write it.' };
+			// A rewrite shorter than the request usually dropped something (often the explicit part).
+			if (out.length < text.length) return { prompt: text, enhanced: false, writer: 'kept yours (its version was shorter)', why: 'The prompt writer\'s version was shorter than yours (it may have left things out), so your own words were used.', rejected: out.slice(0, 1000) };
+			return { prompt: out.slice(0, 4000), enhanced: true, writer: 'rewrote', why: '' };
+		} catch (err) { return { prompt: text, enhanced: false, writer: 'failed', why: `The prompt could not be written automatically (${err.message.slice(0, 120)}), so your own words were used.` }; }
 	}
 
 	/** Setup is reserved on top of the minutes asked for, so a 30-minute session gives 30 minutes of pictures. */
@@ -213,7 +214,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			if (v.enhance) {
 				const e = await enhance(v.prompt, v.refs);
 				v.prompt = e.prompt;
-				const params = { ...JSON.parse(db.getGeneration(id).params), note: e.why };
+				const params = { ...JSON.parse(db.getGeneration(id).params), note: e.why, writer: e.writer, ...(e.rejected ? { writerVersion: e.rejected } : {}) };
 				db.updateGeneration(id, { prompt: v.prompt, params: JSON.stringify(params) });
 			}
 			// LoRA trigger words go first, outside the written prompt, so they are never reworded.
@@ -231,6 +232,12 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 				if (m.type === 'executing' && d.node && graph[d.node]) live.set(id, { stage: STAGES[graph[d.node].class_type] || 'Working', at: clock() });
 				else if (m.type === 'progress' && d.max > 0) live.set(id, { stage: 'Drawing', step: d.value, steps: d.max, at: clock() });
 			});
+			// Record exactly what the engine is given (trigger words, written prompt, reference hints).
+			{
+				const pos = graph['5']?.inputs || {};
+				const params = { ...JSON.parse(db.getGeneration(id).params), sent: String(pos.text ?? pos.prompt ?? v.prompt), enhance: v.enhance, prefix: v.prefix, ...(v.enhance ? {} : { writer: 'off' }) };
+				db.updateGeneration(id, { params: JSON.stringify(params) });
+			}
 			const promptId = await comfy.queue(graph, id);
 			let files;
 			// A job the engine has lost, or one far past any normal time, must not keep the GPU

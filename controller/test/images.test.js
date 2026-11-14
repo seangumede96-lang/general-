@@ -231,7 +231,7 @@ test('a casual request is written up into a detailed prompt; a refusal falls bac
 		assert.equal(g.params.asked, 'cool silver haired girl');
 		assert.match(comfy.state.prompts[0].prompt['5'].inputs.text, /^gta6game_ Full-body picture/, 'the trigger word is added after writing, never reworded');
 		const asked = writer.state.requests[0].messages;
-		assert.match(asked[0].content, /framing[\s\S]*clothing explicitly[\s\S]*white void/);
+		assert.match(asked[0].content, /framing[\s\S]*fully nude[\s\S]*clothing explicitly[\s\S]*white void/);
 		assert.equal(asked[1].content, 'cool silver haired girl');
 
 		writer.state.chunks = ["I'm sorry, but I can't help with that."];
@@ -356,4 +356,25 @@ test('live progress from the engine is shown while a picture is drawn', async ()
 	assert.ok(g.progress?.stage, JSON.stringify(g.progress));
 	now += 11 * 60000; // let it end
 	for (let i = 0; i < 300 && (await api('GET', '/api/images')).body.generations.find((x) => x.id === r.body.id).status === 'running'; i++) await new Promise((res) => setTimeout(res, 10));
+});
+
+test('each picture records the exact prompt sent, what the prompt writer did, and when it ended', async () => {
+	await startSession();
+	await api('GET', '/api/images');
+	const plain = await generate({ prompt: 'a woman, full body', size: 'portrait', count: 1, prefix: 'gta6game_', loras: [{ name: 'loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors', strength: 0.4 }] });
+	assert.equal(plain.status, 'done');
+	assert.equal(plain.params.sent, 'gta6game_ a woman, full body');
+	assert.equal(plain.params.writer, 'off');
+	assert.equal(plain.params.prefix, 'gta6game_');
+	assert.ok(plain.ended_at > 0);
+	// a writer whose version comes back shorter is not used silently
+	const writer = await startMockModel({ chunks: ['A woman.'] });
+	await api('PUT', '/api/settings', { baseUrl: writer.baseUrl, model: 'mock-model' });
+	comfy.state.historyChecks = 0;
+	const short = await generate({ prompt: 'a woman with long dark hair, full body, studio light', size: 'portrait', count: 1, enhance: true });
+	await writer.close();
+	assert.equal(short.params.writer, 'kept yours (its version was shorter)');
+	assert.match(short.params.note, /shorter than yours/);
+	assert.equal(short.params.writerVersion, 'A woman.');
+	assert.equal(short.params.sent, 'a woman with long dark hair, full body, studio light');
 });
