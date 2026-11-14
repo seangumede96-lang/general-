@@ -57,7 +57,7 @@ const titleFrom = (text) => {
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase, mocapRetryMs, stopRetryMs }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase, mocapRetryMs, stopRetryMs, imageStartRetryMs }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
 	const gpu = createGpuManager({ db, clock });
@@ -68,7 +68,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 	mocap.recover().catch((err) => console.error('[mocap]', err.message));
 	// A plain question-and-answer call to the brain in use, for helpers such as the prompt writer.
 	const llm = async (messages) => (await complete({ messages, temperature: 0.7, signal: AbortSignal.timeout(60000) })).content.trim();
-	const images = createImageStudio({ db, gpu, uploadsDir, clock, pollMs: imagePollMs, llm, stopRetryMs });
+	const images = createImageStudio({ db, gpu, uploadsDir, clock, pollMs: imagePollMs, llm, stopRetryMs, startRetryMs: imageStartRetryMs });
 	images.recover();
 	const studioCall = async (fn) => {
 		try { return await fn(); }

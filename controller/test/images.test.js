@@ -60,7 +60,7 @@ beforeEach(async () => {
 	now = Date.UTC(2026, 10, 12, 12, 0, 0);
 	Object.assign(rp.state, { noCapacity: new Set(), pods: new Map(), created: [], deleted: [], seq: 0, balance: 61.38 });
 	Object.assign(comfy.state, { ready: true, pollsUntilDone: 1, outcome: 'ok', images: 2, uploads: [], prompts: [], historyChecks: 0, setupLog: 'STEP 2/3 Downloading models\n' });
-	app = createApp({ dataDir: join(root, `d${++n}`), clock: () => now, watchdogMs: 0, imagePollMs: 5, stopRetryMs: 20 });
+	app = createApp({ dataDir: join(root, `d${++n}`), clock: () => now, watchdogMs: 0, imagePollMs: 5, stopRetryMs: 20, imageStartRetryMs: 30 });
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
 	await api('PUT', '/api/settings', { maxPodMinutes: '90', runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, b2KeyId: 'kid', b2AppKey: 'secret-app-key', b2Bucket: 'mybucket', b2ApiBase: b2Url });
 });
@@ -421,4 +421,22 @@ test('stopping a session while RunPod cannot be reached keeps trying in the back
 	await api('PUT', '/api/settings', { runpodBaseUrl: realBase }); // the connection comes back
 	for (let i = 0; i < 300 && !rp.state.deleted.length; i++) await new Promise((res) => setTimeout(res, 20));
 	assert.deepEqual(rp.state.deleted, ['pod1'], 'deleted once RunPod could be reached');
+});
+
+test('a session start that finds no free GPU tries again shortly before giving up', async () => {
+	const all = rp.state.gpus.map((g) => g.id);
+	for (const id of all) rp.state.noCapacity.add(id);
+	setTimeout(() => rp.state.noCapacity.clear(), 40); // a GPU frees up before the second try
+	const r = await startSession();
+	assert.equal(r.status, 200, JSON.stringify(r.body));
+	assert.ok(rp.state.created.length > 1, 'more than one attempt');
+	// none ever frees up: a plain error after three tries
+	for (const id of all) rp.state.noCapacity.add(id);
+	await api('DELETE', '/api/images/session');
+	const before = rp.state.created.length;
+	const fail = await startSession();
+	assert.notEqual(fail.status, 200);
+	assert.match(fail.body.error, /None of the available GPUs could be started/);
+	assert.ok(rp.state.created.length - before >= 3);
+	rp.state.noCapacity.clear();
 });

@@ -30,7 +30,10 @@ Rules:
 - Characters are fictional adults. Keep every detail the user gave; invent sensible specifics for what they left out. Do not add text, logos or watermarks.
 - If reference pictures are mentioned, do not describe the face or body they will supply; describe everything else.`;
 
-export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000, llm = null, stopRetryMs = 15000 }) {
+/** Tries at starting a session's GPU when none of the listed ones can be placed. */
+const START_ATTEMPTS = 3;
+
+export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000, llm = null, stopRetryMs = 15000, startRetryMs = 20000 }) {
 	const progress = new Map(); // podId -> latest setup step
 	const tracker = createTracker(clock);
 	const pod = () => db.listPods().find((p) => !p.ended_at && p.kind === 'image') || null;
@@ -150,7 +153,16 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const files = (await b2.list('loras/')).filter((f) => f.name.endsWith('.safetensors'));
 			loras = await Promise.all(files.map(async (f) => ({ name: f.name, size: f.size, url: await b2.link(f.name) })));
 		}
-		const started = await gpu.start({ minutes: Number(minutes) + SETUP_MINUTES, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(loras, db.getSettings().imageEngineImage) });
+		// The list of free GPUs can be a moment out of date ("no longer any instances"): try again
+		// shortly, with a fresh list, before giving up.
+		let started;
+		for (let attempt = 1; ; attempt++) {
+			try { started = await gpu.start({ minutes: Number(minutes) + SETUP_MINUTES, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(loras, db.getSettings().imageEngineImage) }); break; }
+			catch (err) {
+				if (err.code !== 'unavailable' || attempt >= START_ATTEMPTS) throw err;
+				await sleep(startRetryMs);
+			}
+		}
 		db.setSettings({ imageLoras: JSON.stringify(loras.map(({ name, size }) => ({ name, size }))) });
 		return started.id;
 	}
