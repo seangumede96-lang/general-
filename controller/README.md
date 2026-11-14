@@ -41,6 +41,16 @@ Built and tested against a mock model:
   this body" renders it at the picture's size and the next pictures start from that shape,
   partly repainted ("Follow shape" sets how tightly). Proportions carry over closely, not
   exactly. Uses three.js (MIT), included in `public/vendor/three`.
+- **Pose mode (Body page):** an on/off switch (the "Pose" chip on the figure, or the Pose tab).
+  When on, the mannequin is a jointed puppet with 19 parts (hips, waist, chest, neck, head, and
+  per side collarbone, upper arm, elbow, wrist, thigh, knee, ankle) inside human joint limits.
+  Drag the orange dots (hands, elbows, feet, knees, head, chest, hips) and the body follows: near
+  joints give first, the torso only when a limb runs out of reach, and with "Keep feet planted"
+  the feet stay put while the hips or torso move. The Pose tab has presets (standing, relaxed,
+  hands on hips, arms crossed, arms up, arms out, waving, walking, running, sitting, kneeling,
+  crouching, lying), Mirror, Reset and a slider for every joint axis. The pose is part of the body
+  code and is used by "Use this body" and the depth API. Turning it off brings back the simple
+  arm buttons and keeps the pose for later. Skinning uses MakeHuman's own rig weights (CC0).
 - **Model picker:** a chip in the message box shows which model will answer. Tapping it
   lists the free everyday models from the Settings endpoint and four private models; a
   private model shows its worst-case price and wakes only on a second tap.
@@ -111,6 +121,30 @@ running, and `keep-running.sh` starts the new version.
 If the engine is down anyway, the page shows "The assistant is not running" with an
 Open Termux button instead of a browser error, and reloads by itself when it is back.
 
+## Posing remotely (for Claude or any script)
+
+The editor shares its body with the server, so whatever drives the app can see and set the pose
+on the open Body page (it picks up a change within about 2 seconds). Angles are in degrees;
+points in centimetres with x towards her left, y up from the floor and z towards her front.
+L and R are her own left and right.
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/body/pose/guide` | Every part and axis with its limits and meaning, the draggable points, the presets |
+| `GET /api/body/current` | The body on the editor now (`values`, `rev`, `source`) |
+| `PUT /api/body/current` `{ values, source }` | Show a body (with `"posing": true` and a `pose`) on the editor |
+| `POST /api/body/pose/points` `{ values }` | Where every point (hands, elbows, feet, knees, head…) is for a pose |
+| `POST /api/body/pose/solve` `{ values, goals, feetPlanted }` | Turn joints so points reach targets, e.g. `{ "hand.R": [-25, 175, -5] }`; returns the new body code, the points and how far each goal was missed |
+| `POST /api/body/depth` `{ values, angle, size }` | Depth map and shaded preview of the posed body, saved as uploads |
+
+A pose is `{ part: { axis: degrees } }`, for example
+`{ "upperArm.R": { "lift": 96, "toward": 49 }, "forearm.R": { "bend": 76 } }` (axes left out are 0).
+A good loop: start from a preset, set big angles directly, use `solve` to place hands and feet
+exactly, check with `points` or the `depth` preview, then `PUT /api/body/current` to show it.
+
+To rebuild the mannequin data (only needed if the rig changes): `python3 tools/build-human.py
+<makehuman>/makehuman/data public/vendor/makehuman` with MakeHuman's repository checked out.
+
 ## Test
 
 ```sh
@@ -122,6 +156,10 @@ reasoning separation, stop, reconnecting mid-reply, restart persistence, error r
 API-key handling, multi-step tool use, approvals, folder limits, memory, and the pod
 lifecycle (budget refusals, idle and deadline shutdown, billing reconciliation) against a
 mock RunPod API.
+
+Phone-screen checks in a real browser (need Playwright): `node test/ui/body-editor.mjs` and
+`node test/ui/pose.mjs` (Pose mode: switch, dragging hands and hips, presets, mirror, sliders,
+and a pose sent through the API reaching the open editor).
 
 ## Layout
 
@@ -135,6 +173,8 @@ mock RunPod API.
   setup and workflow it uses, and the client for the video engine's API
 - `src/db.js`: SQLite storage
 - `public/`: the chat page (plain HTML, CSS and JS, no build step)
+- `public/body.js`, `public/pose.js`: the body editor's mannequin, and Pose mode's rig, joint
+  limits, presets and drag solver (shared with the server for `/api/body/*`)
 
 ## Video engine sources
 

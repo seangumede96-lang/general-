@@ -2,6 +2,9 @@
 // with its morph targets. Sliders blend the targets on the phone, so every change is instant.
 // The finished figure is in centimetres, +Y up, facing +Z, soles on y = 0.
 import * as THREE from './vendor/three/three.module.js';
+import { cleanPose, DEFAULT_POSE, rigRest, rigFrames, skinRig, effectorAt, solveRig, footPins, HANDLES } from './pose.js';
+
+export { POSE_PARTS, POSE_PRESETS, DEFAULT_POSE, HANDLES, cleanPose, mirrorPose } from './pose.js';
 
 /** Layout version of saved values; older saves (from the first, drawn mannequin) are converted. */
 const VERSION = 2;
@@ -117,7 +120,7 @@ const BASE_HEIGHT = { female: 168, male: 178 };
 
 /** Default values for a base body (0 means "average"). */
 export function defaults(base = 'female') {
-	const v = { version: VERSION, base: base === 'male' ? 'male' : 'female', headShape: 'oval', armL: 'down', armR: 'down' };
+	const v = { version: VERSION, base: base === 'male' ? 'male' : 'female', headShape: 'oval', armL: 'down', armR: 'down', posing: false, pose: structuredClone(DEFAULT_POSE) };
 	for (const s of SLIDERS) v[s.key] = s.key === 'height' ? BASE_HEIGHT[v.base] : 0;
 	return v;
 }
@@ -141,6 +144,9 @@ export function migrate(values) {
 	}
 	if (values.headShape in HEAD_SHAPES) out.headShape = values.headShape;
 	for (const k of ['armL', 'armR']) if (values[k] in ARM_POSES) out[k] = values[k];
+	// Pose mode: on or off, and the pose itself (kept while off, so switching back restores it).
+	out.posing = values.posing === true;
+	if (values.pose && typeof values.pose === 'object') out.pose = cleanPose(values.pose);
 	if (values.name) out.name = values.name;
 	return out;
 }
@@ -251,6 +257,12 @@ export async function loadHuman(url = new URL('./vendor/makehuman/', import.meta
 			weights: new Float32Array(bin, layout.subdiv.weights, layout.subdiv.nnz),
 			index: new (layout.subdiv.indexType === 'uint32' ? Uint32Array : Uint16Array)(bin, layout.subdiv.indices, layout.subdiv.triangles * 3)
 		},
+		rig: layout.rig && {
+			parts: layout.rig.parts,
+			parents: layout.rig.parents,
+			joints: new Uint8Array(bin, layout.rig.joints, layout.vertices * 4),
+			w: new Float32Array(bin, layout.rig.weights, layout.vertices * 4)
+		},
 		skin: Object.fromEntries(Object.entries(layout.skin || {}).map(([k, e]) => [k, { idx: new Index(bin, e.indices, e.count), w: new Float32Array(bin, e.weights, e.count) }])),
 		morphs
 	};
@@ -285,10 +297,15 @@ export function weights(v) {
 	return w;
 }
 
-/** Positions (centimetres, standing on y = 0, exactly v.height tall) for the given values. */
-export function shapeBody(v, out) {
+/** Whether a body is posed with the rig (Pose mode) rather than the simple arm and stance settings. */
+export const isPosing = (v) => Boolean(v?.posing && meshData?.rig);
+
+/**
+ * Morphs applied (and, outside Pose mode, the arm and stance settings), in model units, plus what
+ * it takes to stand the figure in centimetres: scale k (cm per unit), the centre, the floor.
+ */
+function prepare(v, p) {
 	const d = meshData;
-	const p = out || new Float32Array(d.count * 3);
 	p.set(d.base);
 	const w = weights(v);
 	const addMorph = (name, k) => {
@@ -305,8 +322,10 @@ export function shapeBody(v, out) {
 	// figure taller or shorter instead of shortening the legs to compensate.
 	const after = (name) => name.startsWith('midsection-long');
 	for (const [name, k] of Object.entries(w)) if (!after(name)) addMorph(name, k);
-	poseArms(p, v.armPose || 0, { L: v.armL, R: v.armR });
-	poseLegs(p, v.stance || 0);
+	if (!isPosing(v)) {
+		poseArms(p, v.armPose || 0, { L: v.armL, R: v.armR });
+		poseLegs(p, v.stance || 0);
+	}
 	// Measure the drawn skin only (the eye markers sit inside the head), then scale to the height.
 	const skin = d.eyes[0][0];
 	let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
@@ -319,12 +338,77 @@ export function shapeBody(v, out) {
 	cx /= skin; cz /= skin;
 	const k = (v.height || BASE_HEIGHT[v.base] || 170) / (maxY - minY);
 	for (const [name, x] of Object.entries(w)) if (after(name)) addMorph(name, x);
-	for (let i = 0; i < d.count; i++) {
+	return { k, cx, cz, minY };
+}
+
+/** The lowest point of the drawn skin, so a posed body stands (or lies) on the floor. */
+function floorOf(p) {
+	let minY = Infinity;
+	for (let i = 0; i < meshData.eyes[0][0]; i++) if (p[i * 3 + 1] < minY) minY = p[i * 3 + 1];
+	return minY;
+}
+
+/** Model units to centimetres: centred, standing on y = 0. */
+function finish(p, { k, cx, cz, minY }) {
+	for (let i = 0; i < meshData.count; i++) {
 		p[i * 3] = (p[i * 3] - cx) * k;
 		p[i * 3 + 1] = (p[i * 3 + 1] - minY) * k;
 		p[i * 3 + 2] = (p[i * 3 + 2] - cz) * k;
 	}
 	return p;
+}
+
+/** Positions (centimetres, standing on y = 0, exactly v.height tall) for the given values. */
+export function shapeBody(v, out) {
+	const p = out || new Float32Array(meshData.count * 3);
+	const s = prepare(v, p);
+	if (isPosing(v)) {
+		const rest = rigRest(meshData, p);
+		skinRig(meshData, p, rest, rigFrames(rest, v.pose, 1 / s.k));
+		s.minY = floorOf(p);
+	}
+	return finish(p, s);
+}
+
+/**
+ * Posing one body shape over and over (dragging, or solving a pose on the server): the shaped,
+ * unposed body is kept, so each new pose only re-poses it. Points are in centimetres as drawn.
+ */
+export function createPoser(v) {
+	const raw = new Float32Array(meshData.count * 3);
+	const s = prepare({ ...v, posing: true }, raw);
+	const rest = rigRest(meshData, raw);
+	const upc = 1 / s.k;
+	const ground = (pose) => { const p = new Float32Array(raw); skinRig(meshData, p, rest, rigFrames(rest, pose, upc)); return floorOf(p); };
+	const toCm = (x, floor) => [(x[0] - s.cx) * s.k, (x[1] - floor) * s.k, (x[2] - s.cz) * s.k];
+	const toUnits = (x, floor) => [x[0] / s.k + s.cx, x[1] / s.k + floor, x[2] / s.k + s.cz];
+	return {
+		rest,
+		/** Pose into `out` (centimetres). `floor` keeps the floor level from before (while dragging). */
+		apply(pose, out, floor = null) {
+			out.set(raw);
+			skinRig(meshData, out, rest, rigFrames(rest, pose, upc));
+			const f = floor ?? floorOf(out);
+			finish(out, { ...s, minY: f });
+			return f;
+		},
+		floor: ground,
+		/** Every draggable point and joint for a pose, in centimetres. */
+		points(pose, floor = ground(pose)) {
+			const f = rigFrames(rest, pose, upc);
+			return Object.fromEntries(Object.keys(rest.effectors).map((e) => [e, toCm(effectorAt(rest, f, e), floor).map((x) => Math.round(x * 10) / 10)]));
+		},
+		/**
+		 * Turn joints so the named points reach targets (centimetres): goals { 'hand.L': [x, y, z] }.
+		 * The floor stays where it is for `pose`, so heights are from the floor as it stands now.
+		 */
+		solve(pose, goals, { feetPlanted = true, iterations = 12, floor = ground(pose), pins = null, anchor = null } = {}) {
+			const list = Object.entries(goals).map(([effector, target]) => ({ effector, target: toUnits(target, floor) }));
+			return solveRig(rest, pose, list, { feetPlanted, iterations, unitsPerCm: upc, pinTargets: pins, anchor });
+		},
+		pins: (pose) => footPins(rest, pose, upc),
+		toUnits
+	};
 }
 
 /**
@@ -547,21 +631,53 @@ export function createViewer(container) {
 	let yaw = 0;
 	let height = 170;
 	let reach = 40;
+	// On screen in Pose mode the framing only grows, so the figure does not jump in and out as a
+	// pose changes under the finger. Pictures are always framed to the figure itself.
+	let viewH = 170, viewR = 40, posingView = false;
 	let geometry = null;
 	let basePos = null;
 	let baseNrm = null;
 	const eyes = [];
 	let ready = null;
 	let current = null;
+	// Pose mode: dots on the draggable points; dragging one poses the body like a puppet.
+	const handleMat = new THREE.MeshBasicMaterial({ color: '#ff7a3d', depthTest: false, transparent: true, opacity: 0.9 });
+	const handleOn = new THREE.MeshBasicMaterial({ color: '#2f80ff', depthTest: false, transparent: true, opacity: 0.95 });
+	const handles = {};
+	for (const name of HANDLES) {
+		const h = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), handleMat);
+		h.renderOrder = 10;
+		h.visible = false;
+		handles[name] = h;
+		group.add(h);
+	}
+	let poser = null, poserKey = '';
+	let feetPlanted = true;
+	let onPose = null;
+	let drag = null; // { name, plane, floor, pins }
+	const shapeKey = (v) => JSON.stringify({ ...v, pose: undefined, posing: undefined, name: undefined });
+	const getPoser = (v) => { const k = shapeKey(v); if (k !== poserKey) { poser = createPoser(v); poserKey = k; } return poser; };
+	function placeHandles() {
+		const on = Boolean(current && isPosing(current));
+		const pts = on ? getPoser(current).points(current.pose, drag?.floor ?? undefined) : null;
+		for (const [name, h] of Object.entries(handles)) {
+			h.visible = on;
+			if (!on) continue;
+			h.position.set(...pts[name]);
+			h.scale.setScalar(height * (name === 'hips' || name === 'chest' ? 0.016 : 0.013));
+			h.material = drag?.name === name ? handleOn : handleMat;
+		}
+	}
 
-	function frame(cam, aspect) {
+	function frame(cam, aspect, screen = false) {
+		const height_ = screen ? viewH : height, reach_ = screen ? viewR : reach;
 		// Fit the figure's height and its widest reach (whichever turn it is at), so it fills
 		// a narrow column as well as a wide one.
 		const t = Math.tan((cam.fov * Math.PI) / 360);
-		const distance = Math.max((height / 0.88 / 2) / t, (reach / 0.92) / (t * aspect)) + 20;
+		const distance = Math.max((height_ / 0.88 / 2) / t, (reach_ / 0.92) / (t * aspect)) + 20;
 		cam.aspect = aspect;
-		cam.position.set(0, height * 0.5, distance);
-		cam.lookAt(0, height * 0.49, 0);
+		cam.position.set(0, height_ * 0.5, distance);
+		cam.lookAt(0, height_ * 0.49, 0);
 		cam.updateProjectionMatrix();
 	}
 
@@ -569,7 +685,7 @@ export function createViewer(container) {
 		const w = container.clientWidth || 300;
 		const h = container.clientHeight || 400;
 		renderer.setSize(w, h, false);
-		frame(camera, w / h);
+		frame(camera, w / h, true);
 		draw();
 	}
 
@@ -632,20 +748,111 @@ export function createViewer(container) {
 		reach = 0;
 		const arr = basePos;
 		for (let i = 0; i < meshData.eyes[0][0]; i++) reach = Math.max(reach, Math.hypot(arr[i * 3], arr[i * 3 + 2]));
+		const posing = isPosing(values);
+		if (posing && posingView) { viewH = Math.max(viewH, height); viewR = Math.max(viewR, reach); } else { viewH = height; viewR = reach; }
+		posingView = posing;
 		const r = height * 0.0068;
 		meshData.eyes.forEach((e, i) => {
 			eyes[i].position.copy(eyeCentre(basePos, e));
 			eyes[i].scale.setScalar(r);
 		});
+		placeHandles();
 		resize();
 	}
 
-	// Turn by dragging; tap the view buttons to snap.
+	/** While dragging: re-pose the kept body shape only, with the floor held where it was. */
+	function repose(values, floor) {
+		current = values;
+		getPoser(values).apply(values.pose, basePos, floor);
+		const pos = geometry.attributes.position;
+		subdivide(basePos, pos.array);
+		const nrm = geometry.attributes.normal;
+		subdivide(baseNormals(basePos, baseNrm), nrm.array);
+		normalize(nrm.array);
+		nrm.needsUpdate = true;
+		pos.needsUpdate = true;
+		geometry.computeBoundingSphere();
+		meshData.eyes.forEach((e, i) => eyes[i].position.copy(eyeCentre(basePos, e)));
+		placeHandles();
+		draw();
+	}
+
+	// Pointer position to a ray, and the ray to the point where it meets the drag plane (figure space).
+	const raycaster = new THREE.Raycaster();
+	function pointerRay(e) {
+		const rect = renderer.domElement.getBoundingClientRect();
+		raycaster.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+		return raycaster.ray;
+	}
+	/** The handle nearest the finger (within about a fingertip), or null. */
+	function pick(e) {
+		if (!current || !isPosing(current) || !meshData?.subdiv) return null;
+		const rect = renderer.domElement.getBoundingClientRect();
+		group.updateMatrixWorld(true);
+		let best = null, bestD = Math.max(26, rect.width * 0.07);
+		for (const name of HANDLES) {
+			const p = handles[name].getWorldPosition(new THREE.Vector3()).project(camera);
+			const x = rect.left + ((p.x + 1) / 2) * rect.width, y = rect.top + ((1 - p.y) / 2) * rect.height;
+			const dd = Math.hypot(x - e.clientX, y - e.clientY);
+			if (dd < bestD) { bestD = dd; best = name; }
+		}
+		return best;
+	}
+	// Where a dot is on the screen (client pixels), for tests that drag it like a finger would.
+	renderer.domElement.poseHandle = (name) => {
+		const rect = renderer.domElement.getBoundingClientRect();
+		group.updateMatrixWorld(true);
+		const p = handles[name].getWorldPosition(new THREE.Vector3()).project(camera);
+		return handles[name].visible ? { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height } : null;
+	};
+	let solving = null;
+	function dragTo(e) {
+		const hit = pointerRay(e).intersectPlane(drag.plane, new THREE.Vector3());
+		if (!hit) return;
+		const local = group.worldToLocal(hit.clone());
+		drag.target = [local.x, local.y, local.z];
+		if (solving) return;
+		solving = requestAnimationFrame(() => {
+			solving = null;
+			const values = { ...current, pose: getPoser(current).solve(current.pose, { [drag.name]: drag.target }, { feetPlanted, floor: drag.floor, pins: drag.pins, anchor: drag.start, iterations: 10 }) };
+			repose(values, drag.floor);
+			onPose?.(values.pose, false);
+		});
+	}
+
+	// Turn by dragging; tap the view buttons to snap. In Pose mode, dragging a dot poses the body.
 	let dragging = null;
-	renderer.domElement.addEventListener('pointerdown', (e) => { dragging = e.clientX; renderer.domElement.setPointerCapture(e.pointerId); });
-	renderer.domElement.addEventListener('pointermove', (e) => { if (dragging === null) return; yaw += (e.clientX - dragging) * 0.012; dragging = e.clientX; draw(); });
-	renderer.domElement.addEventListener('pointerup', () => { dragging = null; });
-	renderer.domElement.addEventListener('pointercancel', () => { dragging = null; });
+	renderer.domElement.addEventListener('pointerdown', (e) => {
+		renderer.domElement.setPointerCapture(e.pointerId);
+		const name = pick(e);
+		if (name) {
+			const P = getPoser(current);
+			const floor = P.floor(current.pose);
+			const at = handles[name].getWorldPosition(new THREE.Vector3());
+			drag = { name, floor, start: current.pose, pins: P.pins(current.pose), plane: new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), at) };
+			placeHandles(); draw();
+			return;
+		}
+		dragging = e.clientX;
+	});
+	renderer.domElement.addEventListener('pointermove', (e) => {
+		if (drag) { dragTo(e); return; }
+		if (dragging === null) return; yaw += (e.clientX - dragging) * 0.012; dragging = e.clientX; draw();
+	});
+	const endDrag = () => {
+		dragging = null;
+		if (!drag) return;
+		if (solving) { cancelAnimationFrame(solving); solving = null; }
+		// Finish following the finger to where it was lifted, then let go.
+		if (drag.target) current = { ...current, pose: getPoser(current).solve(current.pose, { [drag.name]: drag.target }, { feetPlanted, floor: drag.floor, pins: drag.pins, anchor: drag.start, iterations: 40 }) };
+		drag = null;
+		// Let go: the body settles back onto the floor.
+		reshape(current);
+		onPose?.(current.pose, true);
+	};
+	renderer.domElement.addEventListener('pointerup', endDrag);
+	renderer.domElement.addEventListener('pointercancel', endDrag);
+	// The page scrolls with up-and-down swipes outside Pose mode; in Pose mode the view takes every gesture.
 	renderer.domElement.style.touchAction = 'pan-y';
 	new ResizeObserver(resize).observe(container);
 
@@ -653,6 +860,16 @@ export function createViewer(container) {
 		update,
 		ready: () => ready,
 		setView(angle) { yaw = angle; draw(); },
+		/** Pose mode on the screen: the dots, and whether the view keeps every gesture for dragging. */
+		setPoseMode(on, options = {}) {
+			if ('feetPlanted' in options) feetPlanted = options.feetPlanted;
+			renderer.domElement.style.touchAction = on ? 'none' : 'pan-y';
+			if (current) { placeHandles(); draw(); }
+		},
+		/** Called with (pose, finished) as a drag poses the body (finished when the finger lifts). */
+		onPose(fn) { onPose = fn; },
+		/** Draggable points of the body as drawn now, in centimetres (figure space, before turning). */
+		points: () => (current && meshData?.rig ? getPoser(current).points(current.pose) : null),
 		/** The angle the figure is turned to now (radians), for 'Use this body'. */
 		view: () => yaw,
 		/**

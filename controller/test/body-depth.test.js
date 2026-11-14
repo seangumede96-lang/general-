@@ -46,3 +46,39 @@ test('the server makes the body editor\'s depth map from a body code and an angl
 	assert.equal((await api('POST', '/api/body/depth', { width: 99999, height: 10 })).status, 400);
 	assert.equal((await api('POST', '/api/body/depth', { values: [1, 2] })).status, 400);
 });
+
+test('pose points and solving through the server helpers', async () => {
+	const { posePoints, solvePose, renderBody } = await import('../src/body-depth.js');
+	const { points } = await posePoints({});
+	assert.ok(points['hand.L'][0] > 10 && points.head[1] > 140);
+	const r = await solvePose({ pose: { 'upperArm.R': { lift: 90 } } }, { 'hand.R': [-30, 165, 0] });
+	assert.equal(r.values.posing, true);
+	assert.ok(r.missed['hand.R'] < 3, `missed by ${r.missed['hand.R']}`);
+	await assert.rejects(solvePose({}, { tail: [0, 0, 0] }), /Unknown point/);
+	const still = await renderBody({}, { width: 256, height: 384 });
+	const posedOut = await renderBody({ posing: true, pose: { 'upperArm.L': { lift: 170 } } }, { width: 256, height: 384 });
+	assert.notDeepEqual(still.depth, posedOut.depth);
+});
+
+test('remote control API: guide, points, solve, and the shared current body', async () => {
+	const guide = await api('GET', '/api/body/pose/guide');
+	assert.equal(guide.status, 200);
+	assert.ok(guide.body.parts.some((p) => p.key === 'upperArm.L' && p.axes.some((a) => a.key === 'lift')));
+	assert.ok(guide.body.presets.Waving);
+	const points = await api('POST', '/api/body/pose/points', { values: { posing: true, pose: guide.body.presets['Arms up'] } });
+	assert.ok(points.body.points['hand.L'][1] > 180, 'hands overhead');
+	const solved = await api('POST', '/api/body/pose/solve', { values: {}, goals: { 'hand.L': [30, 160, 5] } });
+	assert.equal(solved.status, 200);
+	assert.ok(solved.body.missed['hand.L'] < 3);
+	assert.equal((await api('POST', '/api/body/pose/solve', { goals: { 'hand.L': [1, 2] } })).status, 400);
+	assert.equal((await api('POST', '/api/body/pose/solve', { goals: { wing: [1, 2, 3] } })).status, 400);
+	assert.equal((await api('PUT', '/api/body/current', { values: 'x' })).status, 400);
+	const first = await api('GET', '/api/body/current');
+	const put = await api('PUT', '/api/body/current', { values: solved.body.values, source: 'claude' });
+	assert.equal(put.body.rev, first.body.rev + 1);
+	const now = await api('GET', '/api/body/current');
+	assert.equal(now.body.source, 'claude');
+	assert.deepEqual(now.body.values.pose, solved.body.values.pose);
+	const depth = await api('POST', '/api/body/depth', { values: now.body.values, size: 'square' });
+	assert.equal(depth.status, 200);
+});

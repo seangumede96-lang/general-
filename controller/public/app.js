@@ -1663,8 +1663,11 @@ const bodyEditor = {
 			try { current = JSON.parse(localStorage.getItem('bodyCurrent') || 'null'); } catch { current = null; }
 			this.values = this.module.migrate(current || this.module.defaults('female'));
 			this.build();
+			setInterval(() => this.pull(), 2000);
+			this.share();
 		}
 		this.refresh();
+		this.pull();
 	},
 
 	/** Saved bodies; anything damaged in storage is skipped rather than breaking the editor. */
@@ -1738,6 +1741,7 @@ const bodyEditor = {
 			$('body-code').value = code;
 			try { await navigator.clipboard.writeText(code); $('body-code-status').textContent = 'Copied.'; } catch { $('body-code').select(); $('body-code-status').textContent = 'Selected: copy it from the box.'; }
 		});
+		this.buildPose();
 		$('body-code-load').addEventListener('click', () => {
 			let parsed;
 			try { parsed = JSON.parse($('body-code').value); } catch { $('body-code-status').textContent = 'That is not a body code (it should start with {).'; return; }
@@ -1751,7 +1755,88 @@ const bodyEditor = {
 	changed(redraw = false) {
 		localStorage.setItem('bodyCurrent', JSON.stringify(this.values));
 		this.viewer.update(this.values);
+		this.share();
 		if (redraw) this.refresh();
+	},
+
+	/** Pose mode: the on/off switches, presets, mirror and reset, and a slider for every joint axis. */
+	buildPose() {
+		const m = this.module;
+		const setPosing = (on) => { this.values.posing = on; this.changed(true); };
+		$('body-pose-toggle').addEventListener('click', () => setPosing(!this.values.posing));
+		$('body-posing').addEventListener('change', (e) => setPosing(e.target.checked));
+		$('body-feet').checked = localStorage.getItem('bodyFeetPlanted') !== 'no';
+		$('body-feet').addEventListener('change', (e) => { localStorage.setItem('bodyFeetPlanted', e.target.checked ? 'yes' : 'no'); this.viewer.setPoseMode(this.values.posing, { feetPlanted: e.target.checked }); });
+		$('body-pose-presets').replaceChildren(...Object.entries(m.POSE_PRESETS).map(([name, pose]) => {
+			const b = el('button', { type: 'button', textContent: name });
+			b.addEventListener('click', () => { this.values.pose = structuredClone(pose); this.values.posing = true; this.changed(true); });
+			return b;
+		}));
+		$('body-pose-mirror').addEventListener('click', () => { this.values.pose = m.mirrorPose(this.values.pose); this.changed(true); });
+		$('body-pose-reset').addEventListener('click', () => { this.values.pose = structuredClone(m.DEFAULT_POSE); this.changed(true); });
+		this.poseControls = [];
+		const rows = [];
+		for (const part of m.POSE_PARTS) {
+			rows.push(el('div', { className: 'card-cap pose-part', textContent: part.label }));
+			for (const ax of part.axes) {
+				if (part.key === 'hips' && ['x', 'y', 'z'].includes(ax.key)) continue; // moved by dragging the hips
+				const input = el('input', { type: 'range', min: ax.min, max: ax.max, step: 1, ariaLabel: `${part.label} ${ax.key}` });
+				const out = el('span');
+				input.addEventListener('input', () => {
+					const pose = (this.values.pose ||= {});
+					(pose[part.key] ||= {})[ax.key] = Number(input.value);
+					out.textContent = `${input.value}°`;
+					this.changed();
+				});
+				const track = el('div', { className: 'hs-track' }, input);
+				scrollFriendlySlider(track, input);
+				rows.push(el('div', { className: 'hslider', title: ax.meaning }, el('b', { textContent: `${ax.key[0].toUpperCase()}${ax.key.slice(1)} (${ax.meaning})` }), track, out));
+				this.poseControls.push({ input, out, part: part.key, axis: ax.key });
+			}
+		}
+		$('body-pose-sliders').replaceChildren(...rows);
+		// Dragging on the figure: keep the values and the sliders in step (sliders once the finger lifts).
+		this.viewer.onPose((pose, done) => {
+			this.values.pose = pose;
+			if (done) { localStorage.setItem('bodyCurrent', JSON.stringify(this.values)); this.share(); this.refreshPose(); }
+		});
+	},
+
+	refreshPose() {
+		const on = Boolean(this.values.posing);
+		$('body-pose-toggle').textContent = on ? 'Pose: on' : 'Pose: off';
+		$('body-pose-toggle').setAttribute('aria-pressed', String(on));
+		$('body-posing').checked = on;
+		$('body-arms-posing').hidden = !on;
+		for (const row of document.querySelectorAll('#body .arm-row')) row.hidden = on;
+		for (const c of this.poseControls || []) { const v = this.values.pose?.[c.part]?.[c.axis] || 0; c.input.value = v; c.out.textContent = `${Math.round(v)}°`; }
+		this.viewer.setPoseMode(on, { feetPlanted: $('body-feet').checked });
+	},
+
+	/**
+	 * Share the body with the app's server, so whatever drives the app remotely sees the body on the
+	 * editor, and pick up a body sent from there (checked every 2 seconds while the editor is open).
+	 */
+	source: `editor-${Math.random().toString(36).slice(2, 10)}`,
+	rev: 0,
+	share() {
+		clearTimeout(this.shareTimer);
+		this.shareTimer = setTimeout(async () => {
+			try { const r = await api('PUT', '/api/body/current', { values: this.values, source: this.source }); this.rev = r.rev; } catch { /* offline: kept on the phone */ }
+		}, 500);
+	},
+	async pull() {
+		if (nav.page !== 'body' || document.hidden) return;
+		try {
+			const r = await api('GET', '/api/body/current');
+			if (r.values && r.rev > this.rev && r.source !== this.source) {
+				this.rev = r.rev;
+				this.values = this.module.migrate({ version: 2, ...r.values });
+				localStorage.setItem('bodyCurrent', JSON.stringify(this.values));
+				this.viewer.update(this.values);
+				this.refresh();
+			} else if (r.rev > this.rev) this.rev = r.rev;
+		} catch { /* offline */ }
 	},
 
 	refresh() {
@@ -1763,7 +1848,7 @@ const bodyEditor = {
 		for (const seg of document.querySelectorAll('#body .arm-row .seg')) for (const b of seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.pose === (this.values[seg.dataset.arm] || 'down'));
 		$('body-presets').replaceChildren(...Object.entries(m.PRESETS[this.values.base]).map(([name, preset]) => {
 			const b = el('button', { type: 'button', textContent: name });
-			b.addEventListener('click', () => { this.values = { ...m.defaults(this.values.base), headShape: this.values.headShape, ...preset }; this.changed(true); });
+			b.addEventListener('click', () => { this.values = { ...m.defaults(this.values.base), headShape: this.values.headShape, posing: this.values.posing, pose: this.values.pose, ...preset }; this.changed(true); });
 			return b;
 		}));
 		const saved = this.saved();
@@ -1774,6 +1859,7 @@ const bodyEditor = {
 			x.addEventListener('click', () => { if (confirm(`Delete "${t.name}"?`)) { localStorage.setItem('bodyTemplates', JSON.stringify(this.saved().filter((s) => s.name !== t.name))); this.refresh(); } });
 			return el('span', { className: 'saved-chip' }, b, x);
 		}) : [el('span', { className: 'muted small', textContent: 'Saved bodies appear here.' })]));
+		this.refreshPose();
 		this.viewer.update(this.values);
 	},
 

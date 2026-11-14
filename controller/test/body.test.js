@@ -150,3 +150,72 @@ test('arm poses: a hand on the hip or behind the head, each arm on its own; kept
 	const v = body.migrate({ version: 2, base: 'female', armL: 'hip', armR: 'nonsense' });
 	assert.deepEqual([v.armL, v.armR], ['hip', 'down']);
 });
+
+// ---------- Pose mode ----------
+
+const pts = (v) => body.createPoser(v).points(v.pose);
+const posed = (pose) => ({ ...body.defaults(), posing: true, pose });
+
+test('Pose mode off draws the body exactly as before; on, the default pose stands on the floor at full height', () => {
+	const v = body.defaults();
+	assert.deepEqual(body.shapeBody({ ...v, posing: false, pose: body.POSE_PRESETS.Running }), body.shapeBody(v));
+	const e = extent(body.shapeBody({ ...v, posing: true }), skin());
+	assert.ok(Math.abs(e.lo) < 0.01, 'stands on the floor');
+	assert.ok(Math.abs(e.hi - v.height) < 2, `height ${e.hi}`);
+});
+
+test('every preset poses cleanly: finite, on the floor, limits respected', () => {
+	for (const [name, pose] of Object.entries(body.POSE_PRESETS)) {
+		assert.deepEqual(body.cleanPose(pose), pose, `${name} is within limits`);
+		const p = body.shapeBody(posed(pose));
+		assert.ok(p.every(Number.isFinite), `${name} finite`);
+		assert.ok(Math.abs(extent(p, skin()).lo) < 0.01, `${name} on the floor`);
+	}
+	const sit = extent(body.shapeBody(posed(body.POSE_PRESETS['Sitting (chair)'])), skin()).hi;
+	const lie = extent(body.shapeBody(posed(body.POSE_PRESETS['Lying on back'])), skin()).hi;
+	assert.ok(sit < 140 && sit > 100, `sitting height ${sit}`);
+	assert.ok(lie < 45, `lying height ${lie}`);
+});
+
+test('joint axes move the body the way their meanings say (her left is +x, her front +z)', () => {
+	const base = pts(posed({}));
+	const at = (pose, k) => pts(posed(pose))[k];
+	assert.ok(at({ 'upperArm.L': { lift: 90 } }, 'hand.L')[0] > base['hand.L'][0] + 40, 'lift raises her left arm out to her left');
+	assert.ok(at({ 'upperArm.R': { lift: 90 } }, 'hand.R')[0] < base['hand.R'][0] - 40, 'and her right arm to her right');
+	assert.ok(at({ 'upperArm.L': { lift: 90, toward: 90 } }, 'hand.L')[2] > base['hand.L'][2] + 40, 'toward 90 is forward');
+	assert.ok(at({ 'forearm.L': { bend: 90 } }, 'hand.L')[2] > base['hand.L'][2] + 15, 'the elbow bends forward');
+	assert.ok(at({ 'thigh.L': { forward: 90 } }, 'knee.L')[2] > base['knee.L'][2] + 30, 'the thigh lifts forward');
+	assert.ok(at({ 'shin.L': { bend: 90 }, 'thigh.R': {} }, 'foot.L')[2] < base['foot.L'][2] - 25, 'the knee bends back');
+	assert.ok(at({ head: { turn: 45 } }, 'head')[0] > -5, 'head turn stays on the neck');
+	assert.ok(at({ waist: { lean: 20 } }, 'head')[0] > base.head[0] + 10, 'lean + goes to her left');
+});
+
+test('cleaning and mirroring poses', () => {
+	assert.deepEqual(body.cleanPose({ 'shin.L': { bend: 999, nonsense: 3 }, nope: { a: 1 }, 'forearm.R': { bend: 'x' } }), { 'shin.L': { bend: 155 } });
+	assert.deepEqual(body.mirrorPose({ 'upperArm.L': { lift: 50 }, head: { turn: 20, bend: 5 } }), { 'upperArm.R': { lift: 50 }, head: { bend: 5, turn: -20 } });
+	const v = body.migrate({ version: 2, posing: true, pose: { 'shin.L': { bend: 40 } } });
+	assert.equal(v.posing, true);
+	assert.deepEqual(v.pose, { 'shin.L': { bend: 40 } });
+	assert.equal(body.migrate({ version: 2 }).posing, false);
+});
+
+test('dragging a point: the hand reaches a target, planted feet stay put when the hips drop', () => {
+	const v = posed(body.DEFAULT_POSE);
+	const P = body.createPoser(v);
+	const goal = [-25, 175, -5];
+	let pose = v.pose;
+	for (let i = 0; i < 3; i++) pose = P.solve(pose, { 'hand.R': goal }, { iterations: 30, floor: P.floor(v.pose) });
+	const hand = P.points(pose, P.floor(v.pose))['hand.R'];
+	assert.ok(Math.hypot(hand[0] - goal[0], hand[1] - goal[1], hand[2] - goal[2]) < 3, `hand at ${hand}`);
+	for (const part of Object.keys(pose)) for (const [axis, x] of Object.entries(pose[part])) {
+		const spec = body.POSE_PARTS.find((p) => p.key === part).axes.find((a) => a.key === axis);
+		assert.ok(x >= spec.min && x <= spec.max, `${part}.${axis} within limits`);
+	}
+	const floor = P.floor(v.pose), pins = P.pins(v.pose), before = P.points(v.pose, floor);
+	let crouch = v.pose;
+	for (let i = 0; i < 4; i++) crouch = P.solve(crouch, { hips: [before.hips[0], before.hips[1] - 25, before.hips[2]] }, { iterations: 30, floor, pins, anchor: v.pose });
+	const after = P.points(crouch, floor);
+	assert.ok(after.hips[1] < before.hips[1] - 15, 'hips went down');
+	assert.ok((crouch['shin.L']?.bend || 0) > 20, 'knees bent');
+	for (const f of ['foot.L', 'foot.R']) assert.ok(Math.hypot(...after[f].map((x, k) => x - before[f][k])) < 2.5, `${f} stayed planted`);
+});

@@ -131,3 +131,31 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 	}
 	return { depth: pngGray(depth, width, height), preview: pngGray(preview, width, height) };
 }
+
+/** Every draggable point of a posed body (centimetres; x her left, y up from the floor, z her front). */
+export async function posePoints(values) {
+	await load();
+	const v = body.migrate({ version: 2, ...values, posing: true });
+	return { values: v, points: body.createPoser(v).points(v.pose) };
+}
+
+/**
+ * Pose a body so named points reach targets: goals { 'hand.L': [x, y, z], ... } in centimetres,
+ * heights from the floor as the body stands before solving. Starts from the body's own pose, so
+ * set a preset or rough angles first for big changes. Returns the body code (Pose mode on), where
+ * every point ended up, and how far each goal was missed (cm).
+ */
+export async function solvePose(values, goals, { feetPlanted = true } = {}) {
+	await load();
+	const v = body.migrate({ version: 2, ...values, posing: true });
+	const known = new Set(Object.keys(body.createPoser(v).rest.effectors));
+	for (const k of Object.keys(goals)) if (!known.has(k)) throw new Error(`Unknown point "${k}". Points: ${[...known].join(', ')}.`);
+	const P = body.createPoser(v);
+	const floor = P.floor(v.pose);
+	let pose = v.pose;
+	// A few rounds, each starting from the last, so far targets are reached step by step.
+	for (let i = 0; i < 4; i++) pose = P.solve(pose, goals, { feetPlanted, iterations: 30, floor, pins: P.pins(v.pose) });
+	const points = P.points(pose, floor);
+	const missed = Object.fromEntries(Object.entries(goals).map(([k, t]) => [k, Math.round(Math.hypot(points[k][0] - t[0], points[k][1] - t[1], points[k][2] - t[2]) * 10) / 10]));
+	return { values: { ...v, pose }, points: P.points(pose), missed };
+}

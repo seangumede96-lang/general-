@@ -140,6 +140,7 @@
 		<div class="creator">
 			<div class="creator-stage">
 				<div id="body-view" class="body-view"></div>
+				<button type="button" class="chip-btn pose-toggle" id="body-pose-toggle" aria-pressed="false">Pose: off</button>
 				<div class="stage-top seg" id="body-base"><button type="button" data-base="female">Female</button><button type="button" data-base="male">Male</button></div>
 				<div class="stage-bottom body-views">
 					<button type="button" class="chip-btn" data-angle="0">Front</button>
@@ -157,6 +158,7 @@
 					<button type="button" data-tab="butt">Butt</button>
 					<button type="button" data-tab="legs">Legs</button>
 					<button type="button" data-tab="head">Head</button>
+					<button type="button" data-tab="pose">Pose</button>
 					<button type="button" data-tab="saved">Saved</button>
 				</div>
 				<div class="creator-scroll" id="body-scroll">
@@ -165,6 +167,7 @@
 						<div class="chips" id="body-presets"></div>
 						<div id="body-group-shape" class="hsliders"></div>
 						<div class="card-cap">Arms</div>
+						<p class="muted small" id="body-arms-posing" hidden>Pose mode is on: arms and legs are set in the Pose tab.</p>
 						<div class="arm-row"><span class="muted small">Her left</span><div class="seg" data-arm="armL"><button type="button" data-pose="down">Down</button><button type="button" data-pose="hip">On hip</button><button type="button" data-pose="head">Behind head</button></div></div>
 						<div class="arm-row"><span class="muted small">Her right</span><div class="seg" data-arm="armR"><button type="button" data-pose="down">Down</button><button type="button" data-pose="hip">On hip</button><button type="button" data-pose="head">Behind head</button></div></div>
 					</div>
@@ -185,6 +188,15 @@
 						<div class="card-cap">Head shape</div>
 						<div class="chips" id="body-heads"></div>
 						<div id="body-group-head" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="pose" hidden>
+						<label class="switch-line"><input type="checkbox" id="body-posing"> <b>Pose mode</b></label>
+						<p class="muted small">When on, drag the orange dots on the figure (hands, elbows, feet, knees, head, chest, hips) and the body follows like a puppet, within human joint limits. Drag anywhere else to turn the figure. When off, the simple arm buttons are used and the pose is kept for later.</p>
+						<label class="switch-line"><input type="checkbox" id="body-feet" checked> Keep feet planted</label>
+						<div class="row"><span class="card-cap">Poses</span><span class="spacer"></span><button type="button" class="link" id="body-pose-mirror">Mirror</button><button type="button" class="link" id="body-pose-reset">Reset</button></div>
+						<div class="chips" id="body-pose-presets"></div>
+						<div class="card-cap" style="margin-top:6px">Joints (degrees)</div>
+						<div id="body-pose-sliders" class="hsliders"></div>
 					</div>
 					<div class="creator-pane" data-pane="saved" hidden>
 						<div class="chips" id="body-saved"></div>

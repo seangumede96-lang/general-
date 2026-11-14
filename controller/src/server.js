@@ -3,7 +3,7 @@
 // phone sleeps; a reconnecting client gets a snapshot of the reply so far, then live deltas.
 import { createServer } from 'node:http';
 import { readFile, mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, readFileSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import { join, normalize, extname, dirname } from 'node:path';
@@ -60,6 +60,8 @@ const titleFrom = (text) => {
 export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase, mocapRetryMs, stopRetryMs, imageStartRetryMs }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
+	let bodyState = { values: null, rev: 0, source: null, at: 0 };
+	try { bodyState = { ...bodyState, ...JSON.parse(readFileSync(join(dataDir, 'body-current.json'), 'utf8')) }; } catch { /* none yet */ }
 	const gpu = createGpuManager({ db, clock });
 	const tools = createTools({ db, gpu, uploadsDir });
 	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs, stallMs: videoStallMs, generateFactor: videoGenerateFactor });
@@ -444,6 +446,40 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 				saved[kind] = id;
 			}
 			return { depth: saved.depth, preview: saved.preview, angle, width: dw, height: dh };
+		}],
+		// The body on the editor right now, shared with whatever drives the app remotely: the editor
+		// sends its body here as it changes and picks up a body sent by someone else (a newer rev
+		// from a different source) within a couple of seconds.
+		['GET', /^\/api\/body\/current$/, () => bodyState],
+		['PUT', /^\/api\/body\/current$/, async (req) => {
+			const body = await readJson(req);
+			if (!body.values || typeof body.values !== 'object' || Array.isArray(body.values)) throw new HttpError(400, 'values must be an object of body settings (a body code).');
+			const bodyMod = await import('../public/body.js');
+			bodyState = { values: bodyMod.migrate({ version: 2, ...body.values }), rev: bodyState.rev + 1, source: typeof body.source === 'string' ? body.source.slice(0, 64) : 'api', at: Date.now() };
+			await writeFile(join(dataDir, 'body-current.json'), JSON.stringify(bodyState), { mode: 0o600 }).catch(() => {});
+			return bodyState;
+		}],
+		// Pose mode for remote control: what can be posed (parts, axes, limits, meanings, presets),
+		// where every draggable point of a body is, and solving a pose from where points should go.
+		['GET', /^\/api\/body\/pose\/guide$/, async () => {
+			const pose = await import('../public/pose.js');
+			return {
+				units: 'Angles in degrees; points in centimetres. x: her left +, y: up from the floor, z: her front +. L and R are her own left and right.',
+				parts: pose.POSE_PARTS,
+				points: [...pose.HANDLES, 'toe.L', 'toe.R', 'fingertip.L', 'fingertip.R', 'shoulder.L', 'shoulder.R'],
+				presets: pose.POSE_PRESETS,
+				use: 'A body code with "posing": true and "pose": { part: { axis: degrees } } is drawn in that pose by the editor (PUT /api/body/current) and by POST /api/body/depth. Axes left out are 0.'
+			};
+		}],
+		['POST', /^\/api\/body\/pose\/(points|solve)$/, async (req, action) => {
+			const body = await readJson(req);
+			if (body.values !== undefined && (typeof body.values !== 'object' || body.values === null || Array.isArray(body.values))) throw new HttpError(400, 'values must be an object of body settings.');
+			const { posePoints, solvePose } = await import('./body-depth.js');
+			if (action === 'points') return posePoints(body.values || {});
+			if (!body.goals || typeof body.goals !== 'object') throw new HttpError(400, 'goals must be an object like { "hand.L": [x, y, z] } in centimetres.');
+			for (const [k, t] of Object.entries(body.goals)) if (!Array.isArray(t) || t.length !== 3 || !t.every(Number.isFinite)) throw new HttpError(400, `goal ${k} must be [x, y, z] in centimetres.`);
+			try { return await solvePose(body.values || {}, body.goals, { feetPlanted: body.feetPlanted !== false }); }
+			catch (err) { throw new HttpError(400, err.message); }
 		}],
 		['GET', /^\/api\/mocap$/, () => ({ jobs: mocap.list(), limits: mocap.limits() })],
 		['POST', /^\/api\/mocap\/quote$/, async (req) => studioCall(async () => mocap.quote(await readJson(req)))],

@@ -38,6 +38,19 @@ for side in 'LR':
         idx = skel['joints'][f'{joint}.{side}____head']
         markers[f'{joint}.{side}'] = [len(used), len(idx)]
         used += idx
+# More joints for the posing rig (Pose mode): the spine, neck and head, collarbones, knees, and
+# the ends of the hands, feet and head (for dragging them). Added after the others, so the
+# layout above is unchanged.
+POSE_MARKERS = {'spine04': 'spine04____head', 'spine02': 'spine02____head', 'neck01': 'neck01____head',
+                'head': 'head____head', 'head.top': 'head____tail'}
+for side in 'LR':
+    POSE_MARKERS.update({f'clavicle.{side}': f'clavicle.{side}____head', f'lowerleg01.{side}': f'lowerleg01.{side}____head',
+                         f'hand.{side}': f'finger3-1.{side}____head', f'fingertip.{side}': f'finger3-3.{side}____tail',
+                         f'toe.{side}': f'toe3-1.{side}____head'})
+for name, joint in POSE_MARKERS.items():
+    idx = skel['joints'][joint]
+    markers[name] = [len(used), len(idx)]
+    used += idx
 remap = {old: new for new, old in enumerate(used)}
 tris = []
 for f in faces:
@@ -327,6 +340,49 @@ for side in 'LR':
         entry['weights'] = len(blob)
         blob += struct.pack(f'<{len(keys)}f', *[min(1.0, w[k]) for k in keys])
         layout['skin'][f'{part}.{side}'] = entry
+# The posing rig: MakeHuman's 163 bones gathered into 19 body parts, each turning about its own
+# joint. Every bone belongs to the part of its nearest ancestor that starts a part, so the face
+# goes with the head, fingers with the hand, toes with the foot. Per vertex: up to 4 parts and
+# their weights (summing to 1). Joint markers follow the part above their joint.
+PARTS = [('hips', 'root'), ('waist', 'spine04'), ('chest', 'spine02'), ('neck', 'neck01'), ('head', 'head')]
+for side in 'LR':
+    PARTS += [(f'clavicle.{side}', f'clavicle.{side}'), (f'upperArm.{side}', f'upperarm01.{side}'), (f'forearm.{side}', f'lowerarm01.{side}'),
+              (f'hand.{side}', f'wrist.{side}'), (f'thigh.{side}', f'upperleg01.{side}'), (f'shin.{side}', f'lowerleg01.{side}'), (f'foot.{side}', f'foot.{side}')]
+part_of_start = {bone: i for i, (_, bone) in enumerate(PARTS)}
+def part_of(bone):
+    for b in ancestors(bone):
+        if b in part_of_start: return part_of_start[b]
+    return 0
+vw = [dict() for _ in range(n)]
+for bone, lst in weights.items():
+    pi = part_of(bone)
+    for i, x in lst:
+        if i in remap: vw[remap[i]][pi] = vw[remap[i]].get(pi, 0) + x
+for k in range(eye_start, eye_start + len(eyes['joint-l-eye']) + len(eyes['joint-r-eye'])):
+    if not vw[k]: vw[k] = {part_of_start['head']: 1.0}
+# A joint marker sits where its part meets the part above: it moves with the part above.
+MARKER_PART = {'spine04': 'hips', 'spine02': 'waist', 'neck01': 'chest', 'head': 'neck', 'head.top': 'head'}
+for side in 'LR':
+    MARKER_PART.update({f'shoulder01.{side}': f'clavicle.{side}', f'upperarm01.{side}': f'clavicle.{side}', f'lowerarm01.{side}': f'upperArm.{side}',
+                        f'wrist.{side}': f'forearm.{side}', f'hand.{side}': f'hand.{side}', f'fingertip.{side}': f'hand.{side}',
+                        f'upperleg01.{side}': 'hips', f'clavicle.{side}': 'chest', f'lowerleg01.{side}': f'thigh.{side}',
+                        f'foot.{side}': f'shin.{side}', f'toe.{side}': f'foot.{side}'})
+names = [p for p, _ in PARTS]
+for m, (st, c) in markers.items():
+    for k in range(st, st + c): vw[k] = {names.index(MARKER_PART[m]): 1.0}
+J = bytearray(); Wt = []
+for k in range(n):
+    top = sorted(vw[k].items(), key=lambda t: -t[1])[:4]
+    s = sum(w for _, w in top) or 1.0
+    if not top: top = [(0, 1.0)]; s = 1.0
+    top += [(0, 0.0)] * (4 - len(top))
+    J += bytes(j for j, _ in top); Wt += [w / s for _, w in top]
+while len(blob) % 4: blob += b'\0'
+layout['rig'] = {'parts': names, 'parents': [names.index(p) if p else -1 for p in
+                 [None, 'hips', 'waist', 'chest', 'neck'] + [x for side in 'LR' for x in ['chest', f'clavicle.{side}', f'upperArm.{side}', f'forearm.{side}', 'hips', f'thigh.{side}', f'shin.{side}']]]}
+layout['rig']['joints'] = len(blob); blob += bytes(J)
+while len(blob) % 4: blob += b'\0'
+layout['rig']['weights'] = len(blob); blob += struct.pack(f'<{n * 4}f', *Wt)
 # Smoothing: one level of Catmull-Clark subdivision, stored as fixed weights over the base
 # vertices. The phone shapes and poses the base mesh, then applies these weights to draw a
 # four-times finer, smoother surface (the same idea as a subdivision modifier in Blender).

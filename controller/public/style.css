@@ -472,3 +472,10 @@ main > section#body { overflow: hidden; }
 .creator-foot { padding: 8px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
 .creator-foot button { width: 100%; }
 @media (min-width: 760px) { .creator-stage { flex: 1 1 auto; } .creator-panel { flex: 0 0 380px; } }
+
+/* Pose mode: an on/off chip on the figure, and switch rows in the Pose tab. */
+.pose-toggle { position: absolute; top: 52px; right: 8px; z-index: 3; padding: 5px 10px; font-size: 12.5px; background: rgba(20, 20, 22, .55); color: #fff; border-color: transparent; }
+.pose-toggle[aria-pressed="true"] { background: #ff7a3d; color: #111; font-weight: 600; }
+.switch-line { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; }
+.switch-line input { width: 18px; height: 18px; accent-color: #ff7a3d; }
+.pose-part { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); text-transform: none; }
