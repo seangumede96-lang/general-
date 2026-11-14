@@ -1190,7 +1190,7 @@ const chars = {
 		// Remember the strengths used, so next time each LoRA starts where you left it.
 		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
 		try {
-			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, size: $('img-size').value, quality: $('img-quality').value, count: Number($('img-count').value), refs, refCounts, depth: this.shape?.id || '', depthStrength: this.depthStrength() });
+			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, stylePass: $('img-style-pass').checked, styleDenoise: Number($('img-style-denoise').value), size: $('img-size').value, quality: $('img-quality').value, count: Number($('img-count').value), refs, refCounts, depth: this.shape?.id || '', depthStrength: this.depthStrength() });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -1255,6 +1255,18 @@ function qualityChanged() {
 }
 $('img-quality').value = localStorage.getItem('imgQuality') === 'max' ? 'max' : 'standard';
 $('img-quality').addEventListener('change', qualityChanged);
+/** The keep-it-nude style pass: remembered, with a plain reading of its strength. */
+function stylePassChanged() {
+	const on = $('img-style-pass').checked;
+	const v = Number($('img-style-denoise').value);
+	$('img-style-row').hidden = !on;
+	$('img-style-text').textContent = `${v.toFixed(2)}: ${v < 0.4 ? 'little style' : v <= 0.5 ? 'style, content kept (0.45 tested best)' : 'strong style; clothes may come back'}`;
+	localStorage.setItem('imgStylePass', JSON.stringify({ on, v }));
+}
+try { const saved = JSON.parse(localStorage.getItem('imgStylePass') || 'null'); if (saved) { $('img-style-pass').checked = Boolean(saved.on); $('img-style-denoise').value = String(saved.v ?? 0.45); } } catch { /* first visit */ }
+$('img-style-pass').addEventListener('change', stylePassChanged);
+$('img-style-denoise').addEventListener('input', stylePassChanged);
+stylePassChanged();
 $('img-size').addEventListener('change', qualityChanged);
 $('img-count').addEventListener('change', () => { const n = Math.min(Number($('img-count').max), Math.max(1, Math.round(Number($('img-count').value) || 1))); $('img-count').value = String(n); });
 qualityChanged();

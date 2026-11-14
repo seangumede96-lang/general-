@@ -87,7 +87,14 @@ export const referenceMegapixels = (r) => REFERENCE_ROLES[r.role].megapixels * M
  * nodes plus the re-identification LoRA), otherwise plain text-to-image. `loras` is a list
  * of [{ name, strength }] applied one after another.
  */
-export function buildImageGraph({ prompt, negative = '', width, height, count, seed, loras = [], refs = [], prefix, shape = null, shapeDenoise = 0.72, depth = null, depthStrength = 0.9 }) {
+/**
+ * `stylePass` ({ denoise, plainPrompt }): with style LoRAs that pull the picture towards their
+ * training pictures (a game-character LoRA dresses everyone), first make the picture without
+ * them from `plainPrompt` (no trigger words), then redraw it lightly with them. Tested on the
+ * owner's GTA VI LoRA: at 0.45 the style comes through and the content stays; at 0.55 and
+ * above the LoRA's clothing came back.
+ */
+export function buildImageGraph({ prompt, negative = '', width, height, count, seed, loras = [], refs = [], prefix, shape = null, shapeDenoise = 0.72, depth = null, depthStrength = 0.9, stylePass = null }) {
 	const useRefs = refs.length > 0;
 	const text = useRefs ? `${prompt} ${referenceHints(refs)}` : prompt;
 	const g = {
@@ -145,5 +152,31 @@ export function buildImageGraph({ prompt, negative = '', width, height, count, s
 		delete g[7];
 	}
 	g[8].inputs.model = model;
+	if (stylePass && loras.length) {
+		// Pass 1: the same graph without the style LoRAs (and their trigger words).
+		let plain = useRefs ? ['30', 0] : ['1', 0];
+		if (depth) {
+			g['52p'] = { class_type: 'Krea2ControlLoRALoader', inputs: { model: plain, lora_name: DEPTH_LORA, strength: depthStrength } };
+			g['53p'] = { class_type: 'Krea2ControlApply', inputs: { model: ['52p', 0], control_latent: ['51', 0] } };
+			plain = ['53p', 0];
+		}
+		if (useRefs) {
+			g['31p'] = { class_type: 'Krea2OstrisEditModelPatch', inputs: { model: plain, kv_cache: true } };
+			plain = ['31p', 0];
+		}
+		const plainText = useRefs ? `${stylePass.plainPrompt} ${referenceHints(refs)}` : stylePass.plainPrompt;
+		let positive;
+		if (useRefs) {
+			g['5p'] = { class_type: 'TextEncodeKrea2OstrisEdit', inputs: { ...g[5].inputs, prompt: plainText } };
+			g['45p'] = { class_type: 'FluxKontextMultiReferenceLatentMethod', inputs: { conditioning: ['5p', 0], reference_latents_method: 'index_timestep_zero' } };
+			positive = ['45p', 0];
+		} else {
+			g['5p'] = { class_type: 'CLIPTextEncode', inputs: { clip: ['2', 0], text: plainText } };
+			positive = ['5p', 0];
+		}
+		g['8p'] = { class_type: 'KSampler', inputs: { ...g[8].inputs, model: plain, positive } };
+		// Pass 2: the full graph with the LoRAs, redrawing pass 1's picture only lightly.
+		Object.assign(g[8].inputs, { latent_image: ['8p', 0], denoise: stylePass.denoise });
+	}
 	return g;
 }

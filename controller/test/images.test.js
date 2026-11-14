@@ -378,3 +378,32 @@ test('each picture records the exact prompt sent, what the prompt writer did, an
 	assert.equal(short.params.writerVersion, 'A woman.');
 	assert.equal(short.params.sent, 'a woman with long dark hair, full body, studio light');
 });
+
+test('keep-it-nude style pass: drawn without the LoRA and trigger word first, then redrawn lightly with them', async () => {
+	await startSession();
+	await api('GET', '/api/images');
+	const lora = { name: 'loras/GTA_VI_3D_Style_krea2_3313988_epoch_10.safetensors', strength: 0.9 };
+	const before = comfy.state.prompts.length;
+	const g = await generate({ prompt: 'a fictional adult woman, completely nude, full body', size: 'portrait', count: 1, prefix: 'gta6game_', loras: [lora], stylePass: true, styleDenoise: 0.45 });
+	assert.equal(g.status, 'done', g.detail);
+	const graph = comfy.state.prompts[before].prompt;
+	// pass 1: plain Krea 2, no LoRA, no trigger word, full denoise
+	assert.equal(graph['5p'].inputs.text, 'a fictional adult woman, completely nude, full body');
+	assert.deepEqual(graph['8p'].inputs.model, ['1', 0]);
+	assert.equal(graph['8p'].inputs.denoise, 1);
+	assert.deepEqual(graph['8p'].inputs.latent_image, ['7', 0]);
+	// pass 2: the LoRA and trigger word, redrawing pass 1 at 0.45
+	assert.equal(graph['5'].inputs.text, 'gta6game_ a fictional adult woman, completely nude, full body');
+	assert.deepEqual(graph['8'].inputs.model, ['4', 0]);
+	assert.deepEqual(graph['8'].inputs.latent_image, ['8p', 0]);
+	assert.equal(graph['8'].inputs.denoise, 0.45);
+	assert.equal(graph['8'].inputs.seed, graph['8p'].inputs.seed);
+	assert.equal(g.params.stylePass, 0.45);
+	assert.equal(g.params.sentFirstPass, 'a fictional adult woman, completely nude, full body');
+	// strength is kept in a sensible range, and the option does nothing without a LoRA
+	const wild = await generate({ prompt: 'x', size: 'portrait', count: 1, loras: [lora], stylePass: true, styleDenoise: 0.95 });
+	assert.equal(comfy.state.prompts.at(-1).prompt['8'].inputs.denoise, 0.6);
+	assert.equal(wild.params.stylePass, 0.6);
+	await generate({ prompt: 'x', size: 'portrait', count: 1, stylePass: true });
+	assert.equal(comfy.state.prompts.at(-1).prompt['8p'], undefined);
+});

@@ -197,8 +197,10 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (!p?.ready_at) throw new ImageError(p ? 'The image engine is still starting.' : 'Start a session first.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
-		const params = { size: v.size, quality: v.quality, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, depth: v.depth?.id || '', depthStrength: v.depth ? v.depthStrength : null, asked: v.prompt, note: '' };
+		const params = { size: v.size, quality: v.quality, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, depth: v.depth?.id || '', depthStrength: v.depth ? v.depthStrength : null, asked: v.prompt, note: '', stylePass: req.stylePass === true && v.loras.length > 0 ? Math.min(0.6, Math.max(0.3, Number(req.styleDenoise) || 0.45)) : null };
 		v.enhance = req.enhance === true;
+		// Keep-it-nude style pass: only meaningful with a style LoRA.
+		v.stylePass = req.stylePass === true && v.loras.length > 0 ? { denoise: Math.min(0.6, Math.max(0.3, Number(req.styleDenoise) || 0.45)) } : null;
 		v.prefix = String(req.prefix || '').trim().slice(0, 100);
 		db.insertGeneration({ id, prompt: v.prompt, params, created_at: clock() });
 		run(id, p, v).catch((err) => console.error('[images]', err));
@@ -218,6 +220,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 				db.updateGeneration(id, { prompt: v.prompt, params: JSON.stringify(params) });
 			}
 			// LoRA trigger words go first, outside the written prompt, so they are never reworded.
+			if (v.stylePass) v.stylePass.plainPrompt = v.prompt; // pass 1: no trigger words
 			if (v.prefix && !v.prompt.includes(v.prefix)) v.prompt = `${v.prefix} ${v.prompt}`;
 			const refs = [];
 			for (const r of v.refs) refs.push({ role: r.role, count: r.count, file: await comfy.upload(r.upload.path, `${r.role}-${r.upload.id}-${r.upload.name}`, r.upload.type) });
@@ -235,7 +238,8 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			// Record exactly what the engine is given (trigger words, written prompt, reference hints).
 			{
 				const pos = graph['5']?.inputs || {};
-				const params = { ...JSON.parse(db.getGeneration(id).params), sent: String(pos.text ?? pos.prompt ?? v.prompt), enhance: v.enhance, prefix: v.prefix, ...(v.enhance ? {} : { writer: 'off' }) };
+				const first = graph['5p']?.inputs;
+				const params = { ...JSON.parse(db.getGeneration(id).params), sent: String(pos.text ?? pos.prompt ?? v.prompt), ...(first ? { sentFirstPass: String(first.text ?? first.prompt) } : {}), enhance: v.enhance, prefix: v.prefix, ...(v.enhance ? {} : { writer: 'off' }) };
 				db.updateGeneration(id, { params: JSON.stringify(params) });
 			}
 			const promptId = await comfy.queue(graph, id);
