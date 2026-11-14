@@ -84,8 +84,8 @@ await wait(800);
 
 // ---- view buttons and turning by drag
 let before = await figure();
-for (const name of ['Side', 'Back', 'Front']) {
-	await tap(page.locator('.body-views button', { hasText: name }));
+for (const name of ['Side', '¾ back', 'Back', 'Front']) {
+	await tap(page.locator('.body-views button', { hasText: new RegExp(`^${name}$`) }));
 	const now = await figure();
 	if (now === before) fail(`${name} view button did not turn the figure`);
 	before = now;
@@ -95,7 +95,7 @@ let y0 = await scrollY();
 await touchDrag(view.x + view.width * 0.3, view.y + view.height / 2, view.x + view.width * 0.75, view.y + view.height / 2);
 if ((await figure()) === before) fail('dragging sideways on the figure did not turn it');
 if ((await scrollY()) !== y0) fail('dragging sideways on the figure scrolled the page');
-await tap(page.locator('.body-views button', { hasText: 'Front' }));
+await tap(page.locator('.body-views button', { hasText: /^Front$/ }));
 // the figure stays in view: the page itself does not scroll in the creator layout
 await touchDrag(view.x + view.width / 2, view.y + view.height * 0.8, view.x + view.width / 2, view.y + view.height * 0.2);
 const v2 = await page.locator('#body-view').boundingBox();
@@ -254,6 +254,29 @@ for (let i = 0; i < 60; i++) {
 await wait(800);
 if (!(await visible('body'))) fail('rapid tapping left the body editor');
 if ((await page.locator('#body-view canvas').screenshot()).length < 20000) fail('figure blank after rapid tapping');
+
+// ---- arm poses, and the body code (copy, edit, load)
+await tap(page.locator('#menu, #open-drawer, [aria-label="Menu"]').first()).catch(() => {});
+if (!(await visible('body'))) { await tap(page.locator('#open-characters')); await tap(page.locator('#img-shape-open')); await wait(1500); }
+await showTab('shape');
+for (const [arm, pose] of [['armL', 'hip'], ['armR', 'head'], ['armL', 'down']]) {
+	before = await figure();
+	await tap(page.locator(`#body .seg[data-arm=${arm}] button[data-pose=${pose}]`));
+	if ((await values())[arm] !== pose) fail(`${arm} ${pose} not set`);
+	if ((await figure()) === before) fail(`${arm} ${pose} did not change the figure`);
+	if (!(await page.locator(`#body .seg[data-arm=${arm}] button[data-pose=${pose}]`).evaluate((b) => b.classList.contains('on')))) fail(`${arm} ${pose} not shown as chosen`);
+}
+await showTab('saved');
+await tap(page.locator('#body-code-copy'));
+const code = await page.locator('#body-code').inputValue();
+if (!code.startsWith('{') || JSON.parse(code).armR !== 'head') fail(`body code wrong: ${code.slice(0, 80)}`);
+await page.locator('#body-code').fill(JSON.stringify({ ...JSON.parse(code), weight: 0.5, armR: 'hip' }));
+await tap(page.locator('#body-code-load'));
+const loadedCode = await values();
+if (loadedCode.weight !== 0.5 || loadedCode.armR !== 'hip') fail(`loading a body code gave ${JSON.stringify(loadedCode).slice(0, 120)}`);
+await page.locator('#body-code').fill('not json');
+await tap(page.locator('#body-code-load'));
+if (!/not a body code/.test(await page.locator('#body-code-status').textContent())) fail('bad body code not reported');
 
 // ---- every slider at its maximum, then its minimum, then rapid random changes: no errors,
 // the figure is still drawn, and Use this body still works

@@ -117,7 +117,7 @@ const BASE_HEIGHT = { female: 168, male: 178 };
 
 /** Default values for a base body (0 means "average"). */
 export function defaults(base = 'female') {
-	const v = { version: VERSION, base: base === 'male' ? 'male' : 'female', headShape: 'oval' };
+	const v = { version: VERSION, base: base === 'male' ? 'male' : 'female', headShape: 'oval', armL: 'down', armR: 'down' };
 	for (const s of SLIDERS) v[s.key] = s.key === 'height' ? BASE_HEIGHT[v.base] : 0;
 	return v;
 }
@@ -140,6 +140,7 @@ export function migrate(values) {
 		}
 	}
 	if (values.headShape in HEAD_SHAPES) out.headShape = values.headShape;
+	for (const k of ['armL', 'armR']) if (values[k] in ARM_POSES) out[k] = values[k];
 	if (values.name) out.name = values.name;
 	return out;
 }
@@ -225,12 +226,15 @@ export function applyType(values, kind, name) {
 let meshData = null;
 
 /** Load the converted MakeHuman body once: base positions, triangles and sparse morph targets. */
-export async function loadHuman(url = new URL('./vendor/makehuman/', import.meta.url)) {
+/** `read(url)` (optional) returns the file's bytes, for loading without fetch (the server). */
+export async function loadHuman(url = new URL('./vendor/makehuman/', import.meta.url), read = null) {
 	if (meshData) return meshData;
-	const [layout, bin] = await Promise.all([
-		fetch(new URL('human.json', url)).then((r) => { if (!r.ok) throw new Error(`body model: HTTP ${r.status}`); return r.json(); }),
-		fetch(new URL('human.bin', url)).then((r) => { if (!r.ok) throw new Error(`body model: HTTP ${r.status}`); return r.arrayBuffer(); })
-	]);
+	const [layout, bin] = read
+		? await Promise.all([read(new URL('human.json', url)).then((b) => JSON.parse(Buffer.from(b).toString('utf8'))), read(new URL('human.bin', url)).then((b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))])
+		: await Promise.all([
+			fetch(new URL('human.json', url)).then((r) => { if (!r.ok) throw new Error(`body model: HTTP ${r.status}`); return r.json(); }),
+			fetch(new URL('human.bin', url)).then((r) => { if (!r.ok) throw new Error(`body model: HTTP ${r.status}`); return r.arrayBuffer(); })
+		]);
 	const Index = layout.indexType === 'uint32' ? Uint32Array : Uint16Array;
 	const morphs = {};
 	for (const m of layout.morphs) morphs[m.name] = { idx: new Index(bin, m.indices, m.count), off: new Float32Array(bin, m.offsets, m.count * 3) };
@@ -301,7 +305,7 @@ export function shapeBody(v, out) {
 	// figure taller or shorter instead of shortening the legs to compensate.
 	const after = (name) => name.startsWith('midsection-long');
 	for (const [name, k] of Object.entries(w)) if (!after(name)) addMorph(name, k);
-	poseArms(p, v.armPose || 0);
+	poseArms(p, v.armPose || 0, { L: v.armL, R: v.armR });
 	poseLegs(p, v.stance || 0);
 	// Measure the drawn skin only (the eye markers sit inside the head), then scale to the height.
 	const skin = d.eyes[0][0];
@@ -327,20 +331,24 @@ export function shapeBody(v, out) {
  * Camera distances to the front of the torso and to behind the body's middle. The front is taken
  * from the trunk only (hands and fingers reach forward in this pose and have many vertices).
  */
-function depthRange(p, skin, angle, cameraZ) {
+export function depthRange(p, count, angle, cameraZ) {
+	let skin = count;
+	// Depth along the view for every vertex (the figure is turned about its vertical axis).
 	const sin = Math.sin(angle), cos = Math.cos(angle);
-	let top = 0;
-	for (let i = 0; i < skin; i++) top = Math.max(top, p[i * 3 + 1]);
-	let front = -Infinity, back = Infinity, sum = 0;
-	for (let i = 0; i < skin; i++) {
-		const x = p[i * 3], y = p[i * 3 + 1];
-		const z = -x * sin + p[i * 3 + 2] * cos;
-		sum += z;
-		if (z < back) back = z;
-		if (Math.abs(x) < top * 0.12 && y > top * 0.45 && y < top * 0.8 && z > front) front = z;
-	}
-	// Only the front half shows from the camera, so the range ends a little behind the body's
-	// middle plane: limbs stay mid-grey and the torso's curves get most of the contrast.
+	// Forearms and hands are left out of the range (fingers alone are a large share of the mesh's
+	// points, and hands reaching towards the camera would set "near"); they are clamped instead.
+	const skip = new Set();
+	for (const side of ['L', 'R']) { const e = meshData?.skin?.[`forearm.${side}`]; if (e) for (let i = 0; i < e.idx.length; i++) if (e.w[i] > 0.3) skip.add(e.idx[i]); }
+	const z = [];
+	let sum = 0;
+	for (let i = 0; i < skin; i++) { if (skip.has(i)) continue; const d = -p[i * 3] * sin + p[i * 3 + 2] * cos; z.push(d); sum += d; }
+	const sorted = Float32Array.from(z).sort();
+	skin = sorted.length;
+	// Nearest: the 97th percentile, so a hand or the near arm reaching towards the camera is
+	// clamped to white instead of squeezing the whole body into grey. This works from any side.
+	const front = sorted[Math.floor(skin * 0.97)];
+	const back = sorted[0];
+	// Only the near half shows, so the range ends a little behind the body's middle plane.
 	const middle = sum / skin;
 	return [cameraZ - front - 1, cameraZ - middle + (middle - back) * 0.7];
 }
@@ -368,42 +376,56 @@ function marker(p, [start, count]) {
  * modelled. Linear blend skinning with MakeHuman's own weights: the shoulder bone turns a
  * fifth of the way, the whole arm below it the rest, each about its own joint.
  */
-function poseArms(p, amount) {
+/**
+ * Arm poses besides "down/out": each arm can rest a hand on the hip or behind the head. The
+ * upper arm turns in the body's front plane to `upper` degrees from straight down, and the
+ * forearm folds at the elbow by `bend` degrees (positive folds a hanging arm in towards the body),
+ * and with `back` (decimetres) the hand also moves back by up to that much, so it can go behind the head.
+ */
+export const ARM_POSES = { down: null, hip: { upper: 48, bend: 78 }, head: { upper: 168, bend: -100, back: 2.1 } };
+
+function poseArms(p, amount, poses = {}) {
 	const d = meshData;
-	if (amount >= 1 || !d.skin['arm.L'] || !d.markers['upperarm01.L']) return;
+	if (!d.skin['arm.L'] || !d.markers['upperarm01.L']) return;
 	for (const side of ['L', 'R']) {
+		const preset = ARM_POSES[poses[side]] || null;
+		if (amount >= 1 && !preset) continue;
 		const shoulder = marker(p, d.markers[`shoulder01.${side}`]);
 		const upper = marker(p, d.markers[`upperarm01.${side}`]);
 		const wrist = marker(p, d.markers[`wrist.${side}`]);
 		const out = Math.sign(wrist[0] - upper[0]) || 1;
 		const now = Math.atan2(Math.abs(wrist[0] - upper[0]), upper[1] - wrist[1]);
 		const down = (ARMS_DOWN_DEGREES * Math.PI) / 180;
-		const turn = (now - (down + amount * (now - down))) * out; // lower the arm towards the body
-		if (Math.abs(turn) < 1e-4) continue;
+		const target = preset ? (preset.upper * Math.PI) / 180 : down + amount * (now - down);
+		const turn = (now - target) * out; // positive lowers the arm towards the body
+		const bend = preset && d.markers[`lowerarm01.${side}`] && d.skin[`forearm.${side}`] ? ((preset.bend * Math.PI) / 180) * out : 0;
+		if (Math.abs(turn) < 1e-4 && !bend) continue;
 		const rot = (angle, [px, py]) => { const c = Math.cos(angle), s = Math.sin(angle); return (x, y) => [px + (x - px) * c + (y - py) * s, py - (x - px) * s + (y - py) * c]; };
 		const rs = rot(turn * 0.2, shoulder);
 		const ru = rot(turn * 0.8, upper);
-		const sw = new Map();
-		const sk = d.skin[`shoulder.${side}`];
-		for (let i = 0; i < sk.idx.length; i++) sw.set(sk.idx[i], sk.w[i]);
-		const arm = d.skin[`arm.${side}`];
-		const armW = new Map();
-		for (let i = 0; i < arm.idx.length; i++) armW.set(arm.idx[i], arm.w[i]);
-		const moved = new Set([...sw.keys(), ...armW.keys()]);
-		for (const i of moved) {
+		const elbow = d.markers[`lowerarm01.${side}`] ? marker(p, d.markers[`lowerarm01.${side}`]) : null;
+		const re = bend ? rot(bend, elbow) : (x, y) => [x, y];
+		const reach = elbow ? Math.hypot(wrist[0] - elbow[0], wrist[1] - elbow[1]) || 1 : 1;
+		const weights = (name) => { const m = new Map(), e = d.skin[name]; if (e) for (let i = 0; i < e.idx.length; i++) m.set(e.idx[i], e.w[i]); return m; };
+		const sw = weights(`shoulder.${side}`), armW = weights(`arm.${side}`), foreW = bend ? weights(`forearm.${side}`) : new Map();
+		for (const i of new Set([...sw.keys(), ...armW.keys()])) {
 			const x = p[i * 3], y = p[i * 3 + 1];
-			const ws = sw.get(i) || 0, wa = armW.get(i) || 0;
+			const ws = sw.get(i) || 0, wa = armW.get(i) || 0, wf = Math.min(wa, foreW.get(i) || 0);
 			const [sx, sy] = rs(x, y);
-			const [ux, uy] = ru(x, y);
-			const [ax, ay] = rs(ux, uy);
+			const [ax, ay] = rs(...ru(x, y));
+			const [fx, fy] = rs(...ru(...re(x, y)));
 			const keep = Math.max(0, 1 - ws - wa);
-			p[i * 3] = keep * x + ws * sx + wa * ax;
-			p[i * 3 + 1] = keep * y + ws * sy + wa * ay;
+			p[i * 3] = keep * x + ws * sx + (wa - wf) * ax + wf * fx;
+			p[i * 3 + 1] = keep * y + ws * sy + (wa - wf) * ay + wf * fy;
+			// Back towards the head: more the further along the forearm (the elbow itself stays).
+			if (preset?.back && wf) p[i * 3 + 2] -= preset.back * wf * Math.min(1.2, Math.hypot(x - elbow[0], y - elbow[1]) / reach);
 		}
 		// Move the joint markers too, so they stay where the posed arm is.
 		const move = ([start, count], f) => { for (let i = start; i < start + count; i++) { const [x, y] = f(p[i * 3], p[i * 3 + 1]); p[i * 3] = x; p[i * 3 + 1] = y; } };
 		move(d.markers[`upperarm01.${side}`], rs);
-		move(d.markers[`wrist.${side}`], (x, y) => rs(...ru(x, y)));
+		if (d.markers[`lowerarm01.${side}`]) move(d.markers[`lowerarm01.${side}`], (x, y) => rs(...ru(x, y)));
+		move(d.markers[`wrist.${side}`], (x, y) => rs(...ru(...re(x, y))));
+		if (preset?.back) { const [start, count] = d.markers[`wrist.${side}`]; for (let i = start; i < start + count; i++) p[i * 3 + 2] -= preset.back; }
 	}
 }
 
@@ -631,6 +653,8 @@ export function createViewer(container) {
 		update,
 		ready: () => ready,
 		setView(angle) { yaw = angle; draw(); },
+		/** The angle the figure is turned to now (radians), for 'Use this body'. */
+		view: () => yaw,
 		/**
 		 * A front (or chosen) view at exactly w by h pixels as a PNG blob. 'shape' is the shaded
 		 * figure on white; 'depth' is a depth map (near = white, far and background = black), the
@@ -654,7 +678,7 @@ export function createViewer(container) {
 				// Linear depth over the body's own front-to-back range: the front of the torso is
 				// white and the back is dark. The hands reach a little forward in this pose; they
 				// are simply clamped to white so they do not squash the body's range into grey.
-				const [near, far] = depthRange(geometry.attributes.position.array, geometry.attributes.position.count, angle, cam.position.z);
+				const [near, far] = depthRange(basePos, meshData.eyes[0][0], angle, cam.position.z);
 				scene.overrideMaterial = depthMaterial(near, far);
 			}
 			const tone = renderer.toneMapping;

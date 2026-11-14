@@ -34,7 +34,7 @@ used += sorted(eyes['joint-l-eye']) + sorted(eyes['joint-r-eye'])
 skel = json.load(open(data / 'rigs' / 'default.mhskel'))
 markers = {}
 for side in 'LR':
-    for joint in ('shoulder01', 'upperarm01', 'wrist', 'upperleg01', 'foot'):
+    for joint in ('shoulder01', 'upperarm01', 'lowerarm01', 'wrist', 'upperleg01', 'foot'):
         idx = skel['joints'][f'{joint}.{side}____head']
         markers[f'{joint}.{side}'] = [len(used), len(idx)]
         used += idx
@@ -314,7 +314,7 @@ layout['skin'] = {}
 for side in 'LR':
     foot = below(f'foot.{side}')
     leg = [b for b in below(f'upperleg01.{side}') if b not in foot]
-    for part, names in (('shoulder', [f'shoulder01.{side}']), ('arm', below(f'upperarm01.{side}')), ('leg', leg), ('foot', foot)):
+    for part, names in (('shoulder', [f'shoulder01.{side}']), ('arm', below(f'upperarm01.{side}')), ('forearm', below(f'lowerarm01.{side}')), ('leg', leg), ('foot', foot)):
         w = {}
         for name in names:
             for i, x in weights.get(name, []):

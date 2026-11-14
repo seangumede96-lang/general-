@@ -2,7 +2,7 @@
 // A turn runs detached from any browser request, so it keeps going (and is saved) when the
 // phone sleeps; a reconnecting client gets a snapshot of the reply so far, then live deltas.
 import { createServer } from 'node:http';
-import { readFile, mkdir, rm, stat } from 'node:fs/promises';
+import { readFile, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
@@ -421,6 +421,29 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			const job = studio.cancel(jobId);
 			if (!job) throw new HttpError(404, 'Job not found');
 			return job;
+		}],
+		// The body editor's depth map made here, for driving the app without a browser: values are
+		// the editor's slider values (a "body code"), angle in degrees (0 front, 90 side, 180 back).
+		['POST', /^\/api\/body\/depth$/, async (req) => {
+			const body = await readJson(req);
+			const SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] };
+			const [dw, dh] = SIZES[body.size] || [Number(body.width) || 1024, Number(body.height) || 1536];
+			if (!(dw >= 256 && dw <= 2048 && dh >= 256 && dh <= 2048)) throw new HttpError(400, 'Width and height must be 256 to 2048.');
+			if (body.values !== undefined && (typeof body.values !== 'object' || body.values === null || Array.isArray(body.values))) throw new HttpError(400, 'values must be an object of body settings.');
+			const { renderBody } = await import('./body-depth.js');
+			const angle = Number(body.angle) || 0;
+			const out = await renderBody(body.values || {}, { angleDeg: angle, width: Math.round(dw), height: Math.round(dh) });
+			const saved = {};
+			for (const [kind, png] of Object.entries(out)) {
+				const id = randomUUID();
+				const dir = join(uploadsDir, id);
+				await mkdir(dir, { recursive: true, mode: 0o700 });
+				const name = `body-${kind}-${Math.round(angle)}deg.png`;
+				await writeFile(join(dir, name), png, { mode: 0o600 });
+				db.insertUpload({ id, name, type: 'image/png', size: png.length, path: join(dir, name), created_at: Date.now() });
+				saved[kind] = id;
+			}
+			return { depth: saved.depth, preview: saved.preview, angle, width: dw, height: dh };
 		}],
 		['GET', /^\/api\/mocap$/, () => ({ jobs: mocap.list(), limits: mocap.limits() })],
 		['POST', /^\/api\/mocap\/quote$/, async (req) => studioCall(async () => mocap.quote(await readJson(req)))],

@@ -144,6 +144,7 @@
 				<div class="stage-bottom body-views">
 					<button type="button" class="chip-btn" data-angle="0">Front</button>
 					<button type="button" class="chip-btn" data-angle="1.5708">Side</button>
+					<button type="button" class="chip-btn" data-angle="2.3562">¾ back</button>
 					<button type="button" class="chip-btn" data-angle="3.1416">Back</button>
 				</div>
 			</div>
@@ -163,6 +164,9 @@
 						<div class="row"><span class="card-cap">Body types</span><span class="spacer"></span><button type="button" class="link" id="body-reset">Reset</button></div>
 						<div class="chips" id="body-presets"></div>
 						<div id="body-group-shape" class="hsliders"></div>
+						<div class="card-cap">Arms</div>
+						<div class="arm-row"><span class="muted small">Her left</span><div class="seg" data-arm="armL"><button type="button" data-pose="down">Down</button><button type="button" data-pose="hip">On hip</button><button type="button" data-pose="head">Behind head</button></div></div>
+						<div class="arm-row"><span class="muted small">Her right</span><div class="seg" data-arm="armR"><button type="button" data-pose="down">Down</button><button type="button" data-pose="hip">On hip</button><button type="button" data-pose="head">Behind head</button></div></div>
 					</div>
 					<div class="creator-pane" data-pane="lengths" hidden><div class="vsliders" id="body-vsliders"></div></div>
 					<div class="creator-pane" data-pane="torso" hidden><div id="body-group-torso" class="hsliders"></div></div>
@@ -185,6 +189,11 @@
 					<div class="creator-pane" data-pane="saved" hidden>
 						<div class="chips" id="body-saved"></div>
 						<div class="save-row"><input id="body-name" type="text" placeholder="Name this body" maxlength="40"><button type="button" class="btn-ghost" id="body-save">Save</button></div>
+						<div class="card-cap" style="margin-top:6px">Body code</div>
+						<p class="muted small">Copy this body as text, or paste a code to load one (for sharing exact settings).</p>
+						<textarea id="body-code" rows="3" spellcheck="false" style="width:100%; font-size:12px"></textarea>
+						<div class="save-row"><button type="button" class="btn-ghost" id="body-code-copy">Copy</button><button type="button" class="btn-ghost" id="body-code-load">Load pasted code</button></div>
+						<small class="muted" id="body-code-status"></small>
 						<p class="muted small">Your pictures follow this body's 3D shape and pose, using a depth map of it. The model follows it closely, not exactly: tighter keeps the shape, looser looks more natural.</p>
 					</div>
 				</div>

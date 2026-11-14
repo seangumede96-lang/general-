@@ -1097,11 +1097,12 @@ const chars = {
 	},
 	shapeText() {
 		const v = Number($('img-shape-strength').value);
-		$('img-shape-strength-text').textContent = v >= 70 ? ' Tight: shape followed closely, may look stiff' : v >= 30 ? ' Balanced' : ' Loose: more natural, shape only roughly';
+		$('img-shape-strength-text').textContent = ` ${this.depthStrength().toFixed(2)}: ${v >= 70 ? 'tight, pose followed closely' : v >= 30 ? 'balanced' : 'loose, the prompt can change arms and head'}`;
 	},
 	/** Slider 0-100 (right = follow tighter) to the depth add-on's strength. */
+	/** 0.40 (loose: the prompt can change arms and head) to 1.00 (tight: follows the mannequin). */
 	depthStrength() {
-		return Math.round((0.55 + Number($('img-shape-strength').value) / 100 * 0.55) * 100) / 100;
+		return Math.round((0.4 + Number($('img-shape-strength').value) / 100 * 0.6) * 100) / 100;
 	},
 
 	/** Reference pictures per role: { face: [{ id, src }], body: [...], look: [...] }, up to 3 in each box. */
@@ -1731,6 +1732,20 @@ const bodyEditor = {
 			this.refresh();
 		});
 		$('body-use').addEventListener('click', () => this.use());
+		for (const seg of document.querySelectorAll('#body .arm-row .seg')) for (const b of seg.querySelectorAll('button')) b.addEventListener('click', () => { this.values[seg.dataset.arm] = b.dataset.pose; this.changed(true); });
+		$('body-code-copy').addEventListener('click', async () => {
+			const code = JSON.stringify(this.values);
+			$('body-code').value = code;
+			try { await navigator.clipboard.writeText(code); $('body-code-status').textContent = 'Copied.'; } catch { $('body-code').select(); $('body-code-status').textContent = 'Selected: copy it from the box.'; }
+		});
+		$('body-code-load').addEventListener('click', () => {
+			let parsed;
+			try { parsed = JSON.parse($('body-code').value); } catch { $('body-code-status').textContent = 'That is not a body code (it should start with {).'; return; }
+			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { $('body-code-status').textContent = 'That is not a body code.'; return; }
+			this.values = m.migrate({ version: 2, ...parsed });
+			this.changed(true);
+			$('body-code-status').textContent = 'Loaded.';
+		});
 	},
 
 	changed(redraw = false) {
@@ -1745,6 +1760,7 @@ const bodyEditor = {
 		for (const c of this.controls) { c.input.value = this.values[c.sl.key]; c.out.textContent = this.labelOf(c.sl, this.values[c.sl.key]); }
 		for (const b of $('body-base').querySelectorAll('button')) b.classList.toggle('on', b.dataset.base === this.values.base);
 		for (const b of $('body-heads').querySelectorAll('button')) b.classList.toggle('on', b.dataset.shape === this.values.headShape);
+		for (const seg of document.querySelectorAll('#body .arm-row .seg')) for (const b of seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.pose === (this.values[seg.dataset.arm] || 'down'));
 		$('body-presets').replaceChildren(...Object.entries(m.PRESETS[this.values.base]).map(([name, preset]) => {
 			const b = el('button', { type: 'button', textContent: name });
 			b.addEventListener('click', () => { this.values = { ...m.defaults(this.values.base), headShape: this.values.headShape, ...preset }; this.changed(true); });
@@ -1769,8 +1785,10 @@ const bodyEditor = {
 		try {
 			const [w, h] = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] }[$('img-size').value] || [1024, 1536];
 			// The depth map is what the image engine follows; the shaded view is only the thumbnail.
-			const depth = await this.viewer.snapshot(w, h, 0, 'depth');
-			const preview = await this.viewer.snapshot(w, h, 0, 'shape');
+			// The view on screen is the one used: turn the figure (or tap Side, ¾ back, Back) first.
+			const angle = this.viewer.view();
+			const depth = await this.viewer.snapshot(w, h, angle, 'depth');
+			const preview = await this.viewer.snapshot(w, h, angle, 'shape');
 			const up = await uploadWithProgress(new File([depth], 'body-depth.png', { type: 'image/png' }), () => {});
 			chars.setShape(up.id, URL.createObjectURL(preview));
 			if (nav.stack.at(-1) === 'characters') goBack(); else openPage('characters');

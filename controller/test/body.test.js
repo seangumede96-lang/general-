@@ -136,3 +136,17 @@ test('waist-to-chest length makes the figure taller or shorter; width and belly 
 	assert.ok(w['fupa-3-up'] > 0);
 	for (let n = 0; n < 5; n++) assert.ok(human.morphs[`fupa-${n}-up`]?.idx.length > 10, `fupa ${n}`);
 });
+
+test('arm poses: a hand on the hip or behind the head, each arm on its own; kept in saved bodies', () => {
+	const marker = (p, [start, count]) => { let x = 0, y = 0, z = 0; for (let i = start; i < start + count; i++) { x += p[i * 3]; y += p[i * 3 + 1]; z += p[i * 3 + 2]; } return [x / count, y / count, z / count]; };
+	const p = body.shapeBody({ ...body.defaults(), armL: 'hip', armR: 'head' });
+	const top = Math.max(...Array.from({ length: human.eyes[0][0] }, (_, i) => p[i * 3 + 1]));
+	const hipWrist = marker(p, human.markers['wrist.L']), headWrist = marker(p, human.markers['wrist.R']);
+	assert.ok(hipWrist[1] > top * 0.5 && hipWrist[1] < top * 0.65, `hand on hip at ${(hipWrist[1] / top).toFixed(2)} of height`);
+	assert.ok(headWrist[1] > top * 0.85, `hand behind head at ${(headWrist[1] / top).toFixed(2)} of height`);
+	const eye = marker(p, human.eyes[0]);
+	assert.ok(headWrist[2] < eye[2] - 3, 'the hand is behind the face');
+	assert.ok(p.every(Number.isFinite));
+	const v = body.migrate({ version: 2, base: 'female', armL: 'hip', armR: 'nonsense' });
+	assert.deepEqual([v.armL, v.armR], ['hip', 'down']);
+});

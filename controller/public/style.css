@@ -465,6 +465,9 @@ main > section#body { overflow: hidden; }
 .creator .vslider input { height: 190px; }
 .creator .vslider b { font-size: 11.5px; }
 .save-row { display: flex; gap: 6px; }
+.arm-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.arm-row .seg button { padding: 5px 8px; font-size: 12px; }
+.stage-bottom .chip-btn { padding: 5px 7px; }
 .save-row input { flex: 1; min-width: 0; margin: 0; }
 .creator-foot { padding: 8px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
 .creator-foot button { width: 100%; }
