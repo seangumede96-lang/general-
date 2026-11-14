@@ -30,7 +30,7 @@ Rules:
 - Characters are fictional adults. Keep every detail the user gave; invent sensible specifics for what they left out. Do not add text, logos or watermarks.
 - If reference pictures are mentioned, do not describe the face or body they will supply; describe everything else.`;
 
-export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000, llm = null }) {
+export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000, llm = null, stopRetryMs = 15000 }) {
 	const progress = new Map(); // podId -> latest setup step
 	const tracker = createTracker(clock);
 	const pod = () => db.listPods().find((p) => !p.ended_at && p.kind === 'image') || null;
@@ -104,7 +104,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		const last = db.listPods().find((x) => x.kind === 'image');
 		return {
 			session: {
-				state: !p ? 'off' : p.ready_at ? 'ready' : 'starting',
+				state: !p ? 'off' : gpu.stopping?.(p.id) ? 'stopping' : p.ready_at ? 'ready' : 'starting',
 				detail: p ? progress.get(p.id) || '' : '',
 				progress: p && !p.ready_at ? computeProgress('image', p.created_at, tracker.get(p.id), clock(), imagePlan(sessionGb())) : null,
 				podId: p?.id || null,
@@ -195,9 +195,11 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		const v = validate(req);
 		const p = pod();
 		if (!p?.ready_at) throw new ImageError(p ? 'The image engine is still starting.' : 'Start a session first.');
+		if (gpu.stopping?.(p.id)) throw new ImageError('The session is stopping.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
 		const params = { size: v.size, quality: v.quality, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, depth: v.depth?.id || '', depthStrength: v.depth ? v.depthStrength : null, asked: v.prompt, note: '', stylePass: req.stylePass === true && v.loras.length > 0 ? Math.min(0.6, Math.max(0.3, Number(req.styleDenoise) || 0.45)) : null };
+		params.styleDenoise = params.stylePass; // the second pass's denoise (null: no style pass)
 		v.enhance = req.enhance === true;
 		// Keep-it-nude style pass: only meaningful with a style LoRA.
 		v.stylePass = req.stylePass === true && v.loras.length > 0 ? { denoise: Math.min(0.6, Math.max(0.3, Number(req.styleDenoise) || 0.45)) } : null;
@@ -298,5 +300,5 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		for (const g of db.listGenerations().filter((x) => x.status === 'running')) db.updateGeneration(g.id, { status: 'failed', detail: 'The app was restarted while this was being made.', ended_at: clock() });
 	}
 
-	return { status, quote, start, generate, remove, recover, enhance, stop: async () => { const p = pod(); if (p) await gpu.stop(p.id, 'stopped by you'); } };
+	return { status, quote, start, generate, remove, recover, enhance, stop: async () => { const p = pod(); return p ? gpu.stopSoon(p.id, 'stopped by you', stopRetryMs) : { stopped: true }; } };
 }

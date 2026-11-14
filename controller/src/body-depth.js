@@ -81,7 +81,7 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 	const [near, far] = body.depthRange(base, skin, angle, distance);
 	// Project every vertex once.
 	const n = positions.length / 3;
-	const sx = new Float32Array(n), sy = new Float32Array(n), zv = new Float32Array(n), shade = new Float32Array(n);
+	const sx = new Float32Array(n), sy = new Float32Array(n), zv = new Float32Array(n), shade = new Float32Array(n), facing = new Float32Array(n);
 	const cos = Math.cos(angle), sin = Math.sin(angle);
 	const light = [-0.45, 0.6, 0.66];
 	for (let i = 0; i < n; i++) {
@@ -94,7 +94,10 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 		zv[i] = zz;
 		sx[i] = ((xv / (zz * t * aspect)) * 0.5 + 0.5) * width;
 		sy[i] = (1 - ((yv / (zz * t)) * 0.5 + 0.5)) * height;
-		const nx = norms[i * 3] * cos + norms[i * 3 + 2] * sin, ny = norms[i * 3 + 1], nz = -norms[i * 3] * sin + norms[i * 3 + 2] * cos;
+		let nx = norms[i * 3] * cos + norms[i * 3 + 2] * sin, ny = norms[i * 3 + 1], nz = -norms[i * 3] * sin + norms[i * 3 + 2] * cos;
+		const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+		// Towards the camera or away from it (for skipping the far side of the body).
+		facing[i] = -(nx * d[0] + ny * d[1] + nz * d[2]);
 		shade[i] = 0.3 + 0.7 * Math.max(0, nx * light[0] + ny * light[1] + nz * light[2]);
 	}
 	// Z-buffered triangles; depth interpolated perspective-correctly (through 1/z).
@@ -104,6 +107,7 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 	for (let k = 0; k < tris.length; k += 3) {
 		const a = tris[k], b = tris[k + 1], c = tris[k + 2];
 		if (zv[a] <= 1 || zv[b] <= 1 || zv[c] <= 1) continue;
+		if (facing[a] < 0 && facing[b] < 0 && facing[c] < 0) continue; // the far side of the body: hidden anyway
 		const x0 = sx[a], y0 = sy[a], x1 = sx[b], y1 = sy[b], x2 = sx[c], y2 = sy[c];
 		const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
 		if (Math.abs(area) < 1e-9) continue;

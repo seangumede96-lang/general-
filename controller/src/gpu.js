@@ -255,6 +255,31 @@ export function createGpuManager({ db, clock = Date.now }) {
 		}
 	}
 
+	/**
+	 * Stop a pod even when RunPod cannot be reached right now (a phone's connection can drop
+	 * for minutes): the stop is retried in the background every `retryMs` until it goes
+	 * through, and stopping(id) says so meanwhile. The pod's own self-delete timer is the backstop.
+	 */
+	const pendingStops = new Map();
+	async function stopSoon(id, reason, retryMs = 15000) {
+		try { await stop(id, reason); pendingStops.delete(id); return { stopped: true }; }
+		catch (err) {
+			if (err.code !== 'network') throw err;
+			if (!pendingStops.has(id)) {
+				const attempt = () => {
+					stop(id, reason).then(() => pendingStops.delete(id)).catch((e) => {
+						if (e.code === 'network' && pendingStops.has(id)) { const t = setTimeout(attempt, retryMs); t.unref?.(); pendingStops.set(id, t); }
+						else pendingStops.delete(id);
+					});
+				};
+				const t = setTimeout(attempt, retryMs); t.unref?.();
+				pendingStops.set(id, t);
+			}
+			return { stopped: false, stopping: true };
+		}
+	}
+	const stopping = (id) => pendingStops.has(id);
+
 	/** Delete a pod. `reasonIfGone` is recorded instead when RunPod says it no longer exists. */
 	async function stop(id, reason, reasonIfGone = reason) {
 		const pod = db.getPod(id);
@@ -406,7 +431,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return out;
 	}
 
-	return { quote, start, stop, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, brainStage: () => brainStage,
+	return { quote, start, stop, stopSoon, stopping, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, brainStage: () => brainStage,
 		brainProgress: (p, model) => computeProgress('brain', p.created_at, brainTracker.get(p.id), clock(), brainPlan(model)), activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
 

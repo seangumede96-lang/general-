@@ -60,7 +60,7 @@ beforeEach(async () => {
 	now = Date.UTC(2026, 10, 12, 12, 0, 0);
 	Object.assign(rp.state, { noCapacity: new Set(), pods: new Map(), created: [], deleted: [], seq: 0, balance: 61.38 });
 	Object.assign(comfy.state, { ready: true, pollsUntilDone: 1, outcome: 'ok', images: 2, uploads: [], prompts: [], historyChecks: 0, setupLog: 'STEP 2/3 Downloading models\n' });
-	app = createApp({ dataDir: join(root, `d${++n}`), clock: () => now, watchdogMs: 0, imagePollMs: 5 });
+	app = createApp({ dataDir: join(root, `d${++n}`), clock: () => now, watchdogMs: 0, imagePollMs: 5, stopRetryMs: 20 });
 	base = `http://127.0.0.1:${(await app.listen(0, '127.0.0.1')).port}`;
 	await api('PUT', '/api/settings', { maxPodMinutes: '90', runpodApiKey: rp.state.key, runpodBaseUrl: rp.baseUrl, runpodGraphqlUrl: rp.graphqlUrl, podCloud: 'COMMUNITY', podProxyTemplate: comfy.baseUrl, b2KeyId: 'kid', b2AppKey: 'secret-app-key', b2Bucket: 'mybucket', b2ApiBase: b2Url });
 });
@@ -406,4 +406,19 @@ test('keep-it-nude style pass: drawn without the LoRA and trigger word first, th
 	assert.equal(wild.params.stylePass, 0.6);
 	await generate({ prompt: 'x', size: 'portrait', count: 1, stylePass: true });
 	assert.equal(comfy.state.prompts.at(-1).prompt['8p'], undefined);
+});
+
+test('stopping a session while RunPod cannot be reached keeps trying in the background', async () => {
+	await startSession();
+	await api('GET', '/api/images');
+	const realBase = (await api('GET', '/api/settings')).body.runpodBaseUrl;
+	await api('PUT', '/api/settings', { runpodBaseUrl: 'http://127.0.0.1:9' }); // nothing listens: connection refused
+	const r = await api('DELETE', '/api/images/session');
+	assert.equal(r.status, 200);
+	assert.equal(r.body.stopping, true);
+	assert.equal((await api('GET', '/api/images')).body.session.state, 'stopping');
+	assert.match((await api('POST', '/api/images/generate', { prompt: 'x', size: 'portrait', count: 1 })).body.error, /stopping/);
+	await api('PUT', '/api/settings', { runpodBaseUrl: realBase }); // the connection comes back
+	for (let i = 0; i < 300 && !rp.state.deleted.length; i++) await new Promise((res) => setTimeout(res, 20));
+	assert.deepEqual(rp.state.deleted, ['pod1'], 'deleted once RunPod could be reached');
 });

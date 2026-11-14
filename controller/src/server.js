@@ -57,7 +57,7 @@ const titleFrom = (text) => {
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase, mocapRetryMs }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase, mocapRetryMs, stopRetryMs }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
 	const gpu = createGpuManager({ db, clock });
@@ -68,7 +68,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 	mocap.recover().catch((err) => console.error('[mocap]', err.message));
 	// A plain question-and-answer call to the brain in use, for helpers such as the prompt writer.
 	const llm = async (messages) => (await complete({ messages, temperature: 0.7, signal: AbortSignal.timeout(60000) })).content.trim();
-	const images = createImageStudio({ db, gpu, uploadsDir, clock, pollMs: imagePollMs, llm });
+	const images = createImageStudio({ db, gpu, uploadsDir, clock, pollMs: imagePollMs, llm, stopRetryMs });
 	images.recover();
 	const studioCall = async (fn) => {
 		try { return await fn(); }
@@ -408,7 +408,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		['GET', /^\/api\/images$/, () => images.status()],
 		['POST', /^\/api\/images\/quote$/, async (req) => studioCall(async () => images.quote((await readJson(req)).minutes))],
 		['POST', /^\/api\/images\/session$/, async (req) => studioCall(async () => ({ podId: await images.start(await readJson(req)) }))],
-		['DELETE', /^\/api\/images\/session$/, async () => { await gpuCall(() => images.stop()); return { ok: true }; }],
+		['DELETE', /^\/api\/images\/session$/, async () => { const r = await gpuCall(() => images.stop()); return { ok: true, ...(r || {}) }; }],
 		['POST', /^\/api\/images\/generate$/, async (req) => studioCall(async () => images.generate(await readJson(req)))],
 		['DELETE', /^\/api\/images\/([\w-]+)$/, async (_req, genId) => {
 			if (!await images.remove(genId)) throw new HttpError(404, 'Not found, or still being made');

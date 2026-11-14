@@ -1019,7 +1019,7 @@ const chars = {
 
 	renderSession() {
 		const { session, loras, b2 } = this.data;
-		const text = { off: 'Off. Nothing is being charged.', starting: `Starting up${session.detail ? `: ${session.detail}` : ''}. About 6 minutes.`, ready: `Ready. ${clock(session.secondsLeft)} left; it also stops after 10 quiet minutes.` };
+		const text = { off: 'Off. Nothing is being charged.', starting: `Starting up${session.detail ? `: ${session.detail}` : ''}. About 6 minutes.`, ready: `Ready. ${clock(session.secondsLeft)} left; it also stops after 10 quiet minutes.`, stopping: 'Stopping. RunPod could not be reached just now; the app keeps trying every 15 seconds until the GPU is deleted.' };
 		Object.assign($('img-state'), { className: `brain-state ${session.state}`, textContent: session.state === 'starting' ? 'Starting up' : text[session.state] });
 		if (session.state === 'starting') $('img-state').append(progressNode(session.progress));
 		const box = $('img-session');
