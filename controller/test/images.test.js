@@ -426,8 +426,11 @@ test('stopping a session while RunPod cannot be reached keeps trying in the back
 test('a session start that finds no free GPU tries again shortly before giving up', async () => {
 	const all = rp.state.gpus.map((g) => g.id);
 	for (const id of all) rp.state.noCapacity.add(id);
-	setTimeout(() => rp.state.noCapacity.clear(), 40); // a GPU frees up before the second try
+	// A GPU frees up only after the first attempt has failed (however long that takes).
+	const firstTry = rp.state.created.length;
+	const watch = setInterval(() => { if (rp.state.created.length > firstTry) { rp.state.noCapacity.clear(); clearInterval(watch); } }, 2);
 	const r = await startSession();
+	clearInterval(watch);
 	assert.equal(r.status, 200, JSON.stringify(r.body));
 	assert.ok(rp.state.created.length > 1, 'more than one attempt');
 	// none ever frees up: a plain error after three tries
