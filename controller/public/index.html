@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#212121">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Assistant</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="js-error" hidden></div>
+<div id="scrim" hidden></div>
+<aside id="sidebar" aria-label="Conversations">
+	<div class="side-top">
+		<button id="new-chat" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+			New chat
+		</button>
+	</div>
+	<nav id="conversations"></nav>
+	<div class="side-bottom">
+		<button id="open-characters" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+			Characters
+		</button>
+		<button id="open-mocap" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M12 7v6M12 9l-5 3M12 9l5-2M12 13l-4 7M12 13l4 7"/></svg>
+			Motion capture
+		</button>
+		<button id="open-video" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>
+			Video
+		</button>
+		<button id="open-system" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+			System
+		</button>
+		<button id="open-settings" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
+			Settings
+		</button>
+	</div>
+</aside>
+
+<main>
+	<header>
+		<button id="back" class="icon-btn" aria-label="Back to chat" hidden>
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+		</button>
+		<button id="menu" class="icon-btn" aria-label="Open conversations">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+		</button>
+		<div id="title">New chat</div>
+		<button id="header-new" class="icon-btn" aria-label="New chat">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+		</button>
+	</header>
+
+	<div id="scroller">
+		<div id="thread"></div>
+		<div id="empty">
+			<h1>What can I help with?</h1>
+		</div>
+	</div>
+
+	<section id="system" hidden>
+		<div class="sys-wrap">
+			<p id="sys-error" class="sys-alert" role="alert" hidden></p>
+
+			<div class="card">
+				<div class="card-cap">GPU money</div>
+				<div class="budget-row"><span id="sys-remaining" class="big">–</span><span class="muted">left</span></div>
+				<div class="meter" role="img" aria-label="Budget used"><div id="sys-meter"></div></div>
+				<div id="sys-spent" class="muted small"></div>
+			</div>
+
+			<div id="sys-unknown"></div>
+
+			<div class="card">
+				<div class="card-cap">Running now</div>
+				<div id="sys-active"></div>
+			</div>
+
+			<div class="card">
+				<div class="card-cap">Private brain</div>
+				<div id="sys-brain-state" class="brain-state"></div>
+				<p class="muted small">Runs an open model on a rented GPU. While it is awake, chat uses it; when it is off, chat uses the endpoint in Settings. It shuts down by itself after the idle time below.</p>
+				<label>Model <input id="sys-brain-model" type="text" autocapitalize="off" spellcheck="false" placeholder="owner/repository:QUANT">
+					<small>A GGUF model on Hugging Face. Downloaded fresh each time the brain wakes.</small>
+				</label>
+				<div class="row">
+					<label class="inline">Minutes <input id="sys-brain-minutes" type="number" min="1" value="30" inputmode="numeric"></label>
+					<button id="sys-brain-quote" type="button" class="btn-ghost">Get price</button>
+				</div>
+				<div id="sys-brain-out" class="quote-out"></div>
+			</div>
+
+			<div class="card" id="sys-start-card">
+				<div class="card-cap">Test pod</div>
+				<p class="muted small">Rents the cheapest GPU available and does nothing with it. Use it once to prove start, cost tracking and automatic shutdown.</p>
+				<div class="row">
+					<label class="inline">Minutes <input id="sys-minutes" type="number" min="1" value="5" inputmode="numeric"></label>
+					<button id="sys-quote" type="button" class="btn-ghost">Get price</button>
+				</div>
+				<div id="sys-quote-out" class="quote-out"></div>
+			</div>
+
+			<form class="card" id="sys-form">
+				<div class="card-cap">RunPod</div>
+				<label>API key
+					<input name="runpodApiKey" type="password" autocomplete="off" placeholder="Not set">
+					<small>Stored on this device only. Leave blank to keep the saved key.</small>
+				</label>
+				<label>Hugging Face token
+					<input name="hfToken" type="password" autocomplete="off" placeholder="Not set">
+					<small>For gated models (motion capture uses SAM 3 and SAM 3D Body). Stored on this device only; GPUs get one-hour download links, never the token.</small>
+				</label>
+				<div class="grid3">
+					<label>Spending cap (USD) <input name="budgetTotal" type="number" min="0" step="0.01" placeholder="None"></label>
+					<label>Max minutes per pod <input name="maxPodMinutes" type="number" min="1"></label>
+					<label>Stop when idle (min) <input name="idleMinutes" type="number" min="1"></label>
+				</div>
+				<small>Leave the cap empty to be limited only by your real RunPod balance.</small>
+				<div class="row"><span id="sys-form-status" class="muted small" role="status"></span><span class="spacer"></span><button type="submit" class="btn-primary">Save</button></div>
+			</form>
+
+			<div class="card">
+				<div class="card-cap">History</div>
+				<div id="sys-history"></div>
+			</div>
+		</div>
+	</section>
+
+	<section id="body" hidden>
+		<!-- Character-creator layout: the figure stays in view beside the controls, which scroll on their own. -->
+		<div class="creator">
+			<div class="creator-stage">
+				<div id="body-view" class="body-view"></div>
+				<button type="button" class="chip-btn pose-toggle" id="body-pose-toggle" aria-pressed="false">Pose: off</button>
+				<div class="stage-top seg" id="body-base"><button type="button" data-base="female">Female</button><button type="button" data-base="male">Male</button></div>
+				<div class="stage-bottom body-views">
+					<button type="button" class="chip-btn" data-angle="0">Front</button>
+					<button type="button" class="chip-btn" data-angle="1.5708">Side</button>
+					<button type="button" class="chip-btn" data-angle="2.3562">¾ back</button>
+					<button type="button" class="chip-btn" data-angle="3.1416">Back</button>
+				</div>
+			</div>
+			<div class="creator-panel">
+				<div class="creator-tabs" id="body-tabs" role="tablist">
+					<button type="button" data-tab="shape" class="on">Body</button>
+					<button type="button" data-tab="lengths">Lengths</button>
+					<button type="button" data-tab="torso">Torso</button>
+					<button type="button" data-tab="chest">Chest</button>
+					<button type="button" data-tab="butt">Butt</button>
+					<button type="button" data-tab="legs">Legs</button>
+					<button type="button" data-tab="head">Head</button>
+					<button type="button" data-tab="pose">Pose</button>
+					<button type="button" data-tab="saved">Saved</button>
+				</div>
+				<div class="creator-scroll" id="body-scroll">
+					<div class="creator-pane" data-pane="shape">
+						<div class="row"><span class="card-cap">Body types</span><span class="spacer"></span><button type="button" class="link" id="body-reset">Reset</button></div>
+						<div class="chips" id="body-presets"></div>
+						<div id="body-group-shape" class="hsliders"></div>
+						<div class="card-cap">Arms</div>
+						<p class="muted small" id="body-arms-posing" hidden>Pose mode is on: arms and legs are set in the Pose tab.</p>
+						<div class="arm-row"><span class="muted small">Her left</span><div class="seg" data-arm="armL"><button type="button" data-pose="down">Down</button><button type="button" data-pose="hip">On hip</button><button type="button" data-pose="head">Behind head</button></div></div>
+						<div class="arm-row"><span class="muted small">Her right</span><div class="seg" data-arm="armR"><button type="button" data-pose="down">Down</button><button type="button" data-pose="hip">On hip</button><button type="button" data-pose="head">Behind head</button></div></div>
+					</div>
+					<div class="creator-pane" data-pane="lengths" hidden><div class="vsliders" id="body-vsliders"></div></div>
+					<div class="creator-pane" data-pane="torso" hidden><div id="body-group-torso" class="hsliders"></div></div>
+					<div class="creator-pane" data-pane="chest" hidden>
+						<div class="card-cap">Breast type</div>
+						<div class="chips" id="body-breast-types"></div>
+						<div id="body-group-chest" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="butt" hidden>
+						<div class="card-cap">Butt type</div>
+						<div class="chips" id="body-butt-types"></div>
+						<div id="body-group-butt" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="legs" hidden><div id="body-group-legs" class="hsliders"></div></div>
+					<div class="creator-pane" data-pane="head" hidden>
+						<div class="card-cap">Head shape</div>
+						<div class="chips" id="body-heads"></div>
+						<div id="body-group-head" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="pose" hidden>
+						<label class="switch-line"><input type="checkbox" id="body-posing"> <b>Pose mode</b></label>
+						<p class="muted small">When on, drag the orange dots on the figure (hands, elbows, feet, knees, head, chest, hips) and the body follows like a puppet, within human joint limits. Drag anywhere else to turn the figure. When off, the simple arm buttons are used and the pose is kept for later.</p>
+						<label class="switch-line"><input type="checkbox" id="body-feet" checked> Keep feet planted</label>
+						<div class="row"><span class="card-cap">Poses</span><span class="spacer"></span><button type="button" class="link" id="body-pose-mirror">Mirror</button><button type="button" class="link" id="body-pose-reset">Reset</button></div>
+						<div class="chips" id="body-pose-presets"></div>
+						<div class="card-cap" style="margin-top:6px">Joints (degrees)</div>
+						<div id="body-pose-sliders" class="hsliders"></div>
+					</div>
+					<div class="creator-pane" data-pane="saved" hidden>
+						<div class="chips" id="body-saved"></div>
+						<div class="save-row"><input id="body-name" type="text" placeholder="Name this body" maxlength="40"><button type="button" class="btn-ghost" id="body-save">Save</button></div>
+						<div class="card-cap" style="margin-top:6px">Body code</div>
+						<p class="muted small">Copy this body as text, or paste a code to load one (for sharing exact settings).</p>
+						<textarea id="body-code" rows="3" spellcheck="false" style="width:100%; font-size:12px"></textarea>
+						<div class="save-row"><button type="button" class="btn-ghost" id="body-code-copy">Copy</button><button type="button" class="btn-ghost" id="body-code-load">Load pasted code</button></div>
+						<small class="muted" id="body-code-status"></small>
+						<p class="muted small">Your pictures follow this body's 3D shape and pose, using a depth map of it. The model follows it closely, not exactly: tighter keeps the shape, looser looks more natural.</p>
+					</div>
+				</div>
+				<div class="creator-foot"><button type="button" class="btn-primary" id="body-use">Use this body</button></div>
+			</div>
+		</div>
+	</section>
+
+	<section id="characters" hidden>
+		<div class="sys-wrap">
+			<div class="card">
+				<div class="card-cap">Image session</div>
+				<div id="img-state" class="brain-state"></div>
+				<div id="img-session"></div>
+			</div>
+
+			<form class="card" id="img-form">
+				<div class="card-cap">New picture</div>
+				<label>Describe it
+					<textarea id="img-prompt" rows="5" placeholder="a tall woman with silver hair in a leather jacket"></textarea>
+					<small>Say it however you like, even a few words.</small>
+				</label>
+				<label class="check" style="margin-bottom:12px"><input id="img-enhance" type="checkbox" checked> <span>Write the detailed prompt for me from what I typed</span></label>
+				<div class="card-cap" style="margin-top:4px">LoRAs</div>
+				<div id="img-loras"></div>
+				<small id="img-lora-note"></small>
+				<label class="check" style="margin-top:8px"><input id="img-style-pass" type="checkbox"> <span>Keep it nude: draw without the LoRA first, then add its style lightly (for LoRAs trained on dressed characters)</span></label>
+				<div id="img-style-row" hidden>
+					<label class="inline">Style strength <input id="img-style-denoise" type="range" min="0.3" max="0.6" step="0.01" value="0.45"></label>
+					<span class="muted small" id="img-style-text"></span>
+				</div>
+
+				<div class="card-cap" style="margin-top:14px">Reference pictures (optional)</div>
+				<div class="pick-row three">
+					<div class="pick ref" data-role="face"><span class="pick-cap">Face</span><div class="pick-body"></div></div>
+					<div class="pick ref" data-role="body"><span class="pick-cap">Body</span><div class="pick-body"></div></div>
+					<div class="pick ref" data-role="look"><span class="pick-cap">Outfit / makeup</span><div class="pick-body"></div></div>
+				</div>
+				<input id="img-ref-face" data-role="face" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1"><input id="img-ref-body" data-role="body" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1"><input id="img-ref-look" data-role="look" class="file-hidden ref-input" type="file" accept="image/*" multiple tabindex="-1">
+				<small id="img-ref-note"></small>
+
+				<div class="card-cap" style="margin-top:14px">Body shape (optional)</div>
+				<div class="row" id="img-shape-row">
+					<div id="img-shape-thumb" class="shape-thumb">None</div>
+					<div style="flex:1;min-width:150px">
+						<button type="button" class="btn-ghost" id="img-shape-open">Open body editor</button>
+						<div id="img-shape-strength-row" hidden>
+							<label class="inline" style="margin-top:10px">Follow shape <input id="img-shape-strength" type="range" min="0" max="100" step="1" value="45"></label>
+							<span class="muted small" id="img-shape-strength-text"></span>
+							<button type="button" class="link" id="img-shape-clear">Remove</button>
+						</div>
+					</div>
+				</div>
+				<label style="margin-top:14px">Shape <select id="img-size"><option value="portrait">Portrait</option><option value="square">Square</option><option value="landscape">Landscape</option></select></label>
+				<label>Quality <select id="img-quality"><option value="standard">Standard: 1.5 MP, fastest</option><option value="max">Max 2K: 4 MP, sharpest (up to 2 pictures)</option></select></label>
+				<p class="muted small" id="img-quality-note" style="margin:-6px 0 10px"></p>
+				<div class="row">
+					<label class="inline">Pictures <input id="img-count" type="number" min="1" max="4" value="2" inputmode="numeric"></label>
+					<span class="spacer"></span><button type="submit" id="img-go" class="btn-primary">Generate</button>
+				</div>
+				<div id="img-out" class="quote-out"></div>
+			</form>
+
+			<div id="img-gallery"></div>
+		</div>
+	</section>
+
+	<section id="mocap" hidden>
+		<div class="sys-wrap">
+			<div id="mc-active"></div>
+			<div id="mc-result"></div>
+			<form class="card" id="mc-form">
+				<div class="card-cap">Motion capture</div>
+				<p class="muted small">Turns how the people in a clip move into joint data (numbers) for animating 3D characters. The GPU works blind: it never makes a picture or video of the result. Only you see your clip, here, to mark who is who.</p>
+				<label class="pick" id="mc-pick" for="mc-video-input" role="button" tabindex="0"><span class="pick-cap">Your clip</span><span class="pick-body" id="mc-video-slot">Choose a video</span></label>
+				<input id="mc-video-input" class="file-hidden" type="file" accept="video/*" tabindex="-1">
+
+				<div id="mc-marker" hidden>
+					<div class="card-cap" style="margin-top:12px">Mark each person</div>
+					<div class="mc-stage"><video id="mc-video" playsinline muted preload="auto"></video><canvas id="mc-overlay"></canvas></div>
+					<div class="mc-scrub"><input id="mc-scrub" type="range" min="0" max="1" step="0.01" value="0" aria-label="Position in the clip"><span id="mc-time" class="muted small">0:00.0</span></div>
+					<div class="chips" id="mc-people"></div>
+					<div class="row" style="margin-top:8px">
+						<div class="seg" id="mc-mode"><button type="button" data-mode="1" class="on">This person</button><button type="button" data-mode="0">Not this person</button></div>
+						<span class="spacer"></span>
+						<button type="button" class="link" id="mc-undo">Undo</button>
+					</div>
+					<div id="mc-marks" class="muted small" style="margin-top:8px"></div>
+					<p class="muted small">Tap the chosen person on the clip (head, chest and hips work well). Where people overlap, switch to "Not this person" and tap the other one. If someone is lost later in the clip, move to that moment and tap them again.</p>
+				</div>
+
+				<div class="row" style="margin-top:12px; gap:8px; flex-wrap:wrap">
+					<label class="inline">Use from <input id="mc-start" type="number" min="0" step="0.1" value="0" inputmode="decimal" style="width:5.5em"> s</label>
+					<label class="inline">for <input id="mc-length" type="number" min="0.5" step="0.5" value="5" inputmode="decimal" style="width:5em"> s</label>
+					<button type="button" class="link" id="mc-here">From here</button>
+					<button type="button" class="link" id="mc-whole">Whole clip</button>
+				</div>
+				<small class="muted" id="mc-range-note">Try a short part first: time and cost grow with length.</small>
+				<label class="check"><input id="mc-auto" type="checkbox"> <span>Find people automatically instead (only when they are clearly apart)</span></label>
+				<p class="sys-alert" id="mc-auto-warn" hidden>Automatic detection often merges people who touch or overlap into one track. For two or more people close together, mark each one instead.</p>
+				<label>How long the GPU may run
+					<select id="mc-run"><option value="auto">Automatic: estimated for this clip</option><option value="until-done">Until it is done (stops if nothing changes for 20 minutes)</option></select>
+				</label>
+				<label class="check"><input id="mc-rights" type="checkbox"> <span>This footage is mine or licensed to me, and everyone in it is an adult who agreed to it being used this way.</span></label>
+				<div class="row"><span id="mc-note" class="muted small"></span><span class="spacer"></span><button type="submit" class="btn-ghost">Get price</button></div>
+				<div id="mc-quote-out" class="quote-out"></div>
+			</form>
+			<div class="card">
+				<div class="card-cap">Earlier motion captures</div>
+				<div id="mc-history"></div>
+			</div>
+		</div>
+	</section>
+
+	<section id="video" hidden>
+		<div class="sys-wrap">
+			<div id="vid-active"></div>
+			<div id="vid-result"></div>
+
+			<form class="card" id="vid-form">
+				<div class="card-cap">Replace a character</div>
+				<p class="muted small">Pick a short clip and a picture of the character you want in it. The person in the clip is replaced; the movement, camera and background stay.</p>
+
+				<div class="pick-row">
+					<label class="pick" id="vid-pick-video" for="vid-video-input" role="button" tabindex="0"><span class="pick-cap">1 · Your clip</span><span class="pick-body" id="vid-video-slot">Choose a video</span></label>
+					<label class="pick" id="vid-pick-image" for="vid-image-input" role="button" tabindex="0"><span class="pick-cap">2 · The character</span><span class="pick-body" id="vid-image-slot">Choose a picture</span></label>
+				</div>
+				<input id="vid-video-input" class="file-hidden" type="file" accept="video/*" tabindex="-1">
+				<input id="vid-image-input" class="file-hidden" type="file" accept="image/*" tabindex="-1">
+
+				<label>Describe the character (optional)
+					<input id="vid-prompt" type="text" maxlength="500" placeholder="a woman with short silver hair, black jacket">
+					<small>A few words help the model keep details the picture does not show.</small>
+				</label>
+
+				<label>How long the GPU may run
+					<select id="vid-run">
+						<option value="auto">Automatic: estimated for this clip</option>
+						<option value="30">30 minutes</option>
+						<option value="45">45 minutes</option>
+						<option value="60">1 hour</option>
+						<option value="90">1.5 hours</option>
+						<option value="120">2 hours</option>
+						<option value="180">3 hours</option>
+						<option value="until-done">Until the video is done (no time limit)</option>
+					</select>
+					<small id="vid-run-note">You pay only for the minutes used: the GPU is deleted as soon as the video is done, whatever you pick.</small>
+				</label>
+
+				<label class="check"><input id="vid-rights" type="checkbox"> <span>This footage is mine or licensed to me, and everyone in it is an adult who agreed to this use. The character picture is a made-up character, or a real adult who agreed.</span></label>
+
+				<div class="row"><span id="vid-note" class="muted small"></span><span class="spacer"></span><button type="submit" id="vid-quote" class="btn-ghost">Get price</button></div>
+				<div id="vid-quote-out" class="quote-out"></div>
+			</form>
+
+			<div class="card">
+				<div class="card-cap">Change the style</div>
+				<p class="muted small">Restyling a clip (for example into animation) is not built yet.</p>
+			</div>
+
+			<div class="card">
+				<div class="card-cap">Earlier videos</div>
+				<div id="vid-history"></div>
+			</div>
+		</div>
+	</section>
+
+	<form id="composer">
+		<div class="composer-box">
+			<div id="tray" class="tray"></div>
+			<textarea id="input" rows="1" placeholder="Message" autocomplete="off"></textarea>
+			<div class="composer-row">
+				<label id="attach" class="attach" for="file-input" role="button" tabindex="0" aria-label="Attach photos, videos or files">
+					<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+				</label>
+				<input id="file-input" class="file-hidden" type="file" multiple tabindex="-1">
+				<button id="model-chip" type="button" class="chip" aria-haspopup="dialog">
+					<span id="model-dot" class="dot"></span>
+					<span id="model-name">Choose a model</span>
+					<span id="model-tag" class="tag" hidden>Uncensored</span>
+					<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+				</button>
+				<button id="send" type="submit" aria-label="Send" disabled>
+					<svg class="i-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+					<svg class="i-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+				</button>
+			</div>
+		</div>
+	</form>
+</main>
+
+<dialog id="photo" class="photo-view" aria-label="Picture">
+	<div class="photo-bar">
+		<button type="button" id="photo-close" class="icon-btn always" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+		<span id="photo-count" class="muted small"></span>
+		<span class="spacer"></span>
+		<a id="photo-save" class="chip-btn" download>Save</a>
+	</div>
+	<div id="photo-stage" class="photo-stage"><img id="photo-img" alt="Generated picture"></div>
+	<button type="button" id="photo-prev" class="photo-nav prev" aria-label="Previous picture">&#8249;</button>
+	<button type="button" id="photo-next" class="photo-nav next" aria-label="Next picture">&#8250;</button>
+	<div class="photo-hint muted small">Tap to zoom · swipe for the next picture</div>
+</dialog>
+
+<dialog id="models" class="sheet" aria-label="Choose a model">
+	<div class="sheet-head"><h2>Model</h2><button type="button" id="models-close" class="icon-btn always" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+	<div id="models-body"></div>
+</dialog>
+
+<dialog id="settings">
+	<form method="dialog" id="settings-form">
+		<h2>Settings</h2>
+		<label>Model endpoint
+			<input name="baseUrl" type="url" inputmode="url" placeholder="http://127.0.0.1:8000/v1" required>
+			<small>Any OpenAI-compatible address, ending in /v1.</small>
+		</label>
+		<label>API key
+			<input name="apiKey" type="password" autocomplete="off" placeholder="Not set">
+			<small id="key-note">Stored on this device only. Leave blank to keep the saved key.</small>
+		</label>
+		<label>Model
+			<input name="model" list="model-list" placeholder="Use the endpoint's first model" autocomplete="off">
+			<datalist id="model-list"></datalist>
+		</label>
+		<label>System prompt
+			<textarea name="systemPrompt" rows="4"></textarea>
+		</label>
+		<label>Folders the assistant may use
+			<textarea name="allowedDirs" rows="2" placeholder="/storage/emulated/0/Download" autocapitalize="off" spellcheck="false"></textarea>
+			<small>One folder per line. It can read files there, and must ask before writing. Leave empty to share nothing.</small>
+		</label>
+		<label>Temperature
+			<input name="temperature" type="number" min="0" max="2" step="0.1">
+		</label>
+		<p id="settings-status" role="status"></p>
+		<div class="dialog-actions">
+			<button type="button" id="test-endpoint" class="btn-ghost">Test connection</button>
+			<span class="spacer"></span>
+			<button type="button" id="cancel-settings" class="btn-ghost">Cancel</button>
+			<button type="submit" class="btn-primary">Save</button>
+		</div>
+	</form>
+</dialog>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

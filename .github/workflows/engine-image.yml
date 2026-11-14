@@ -1,0 +1,31 @@
+# Builds the ready-made image engine and stores it on GitHub's container registry, free.
+# Runs when the engine's Dockerfile changes, or by hand from the Actions tab.
+name: Build image engine
+on:
+  push:
+    paths: ['controller/engine/**', '.github/workflows/engine-image.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space (the PyTorch base image is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+          df -h /
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/assistant-image-engine
+          docker build -t $IMAGE:latest -t $IMAGE:${GITHUB_SHA::7} controller/engine
+          docker push --all-tags $IMAGE
+          echo "Pushed $IMAGE:latest and $IMAGE:${GITHUB_SHA::7}"

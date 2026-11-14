@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+// Entry point. Listens on localhost only by default: the UI is opened in the phone's own
+// browser, and nothing else on the network should be able to reach it.
+import { homedir } from 'node:os';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createApp } from './server.js';
+
+const port = Number(process.env.PORT || 8400);
+const host = process.env.HOST || '127.0.0.1';
+const dataDir = process.env.ASSISTANT_DATA_DIR || join(homedir(), '.assistant-controller');
+
+const app = createApp({ dataDir });
+const addr = await app.listen(port, host);
+console.log(`Controller running at http://${addr.address}:${addr.port}`);
+console.log(`Data directory: ${dataDir}`);
+// The app's own PID, so scripts can check on it without guessing which process a shell started.
+writeFileSync(join(dataDir, 'controller.pid'), String(process.pid));
+if (host !== '127.0.0.1' && host !== 'localhost') {
+	console.warn('Warning: listening beyond localhost. There is no login yet, so anyone who can reach this port can use it.');
+}
+
+// Safe restarts: an update creates this file instead of killing the app. The app exits only
+// once nothing is running (no GPU, no job, no reply being written); keep-running.sh then starts
+// the new version. Exiting mid-job would cut off a video or leave a session unwatched.
+import { existsSync, rmSync } from 'node:fs';
+const restartFlag = join(dataDir, 'restart-when-idle');
+setInterval(() => {
+	if (!existsSync(restartFlag) || app.busy()) return;
+	rmSync(restartFlag, { force: true });
+	console.log(`${new Date().toISOString()} restarting for an update (nothing was running)`);
+	app.close().finally(() => process.exit(0));
+}, 10000).unref();
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+	process.on(sig, () => { app.close().finally(() => process.exit(0)); });
+}
