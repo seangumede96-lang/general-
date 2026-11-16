@@ -1,0 +1,4 @@
+<resources>
+    <style name="Theme.Roost" parent="Theme.Material3.DayNight" />
+    <style name="Theme.Roost.NoActionBar" parent="Theme.Material3.DayNight.NoActionBar" />
+</resources>

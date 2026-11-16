@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Roost</string>
+    <string name="app_lock">App lock</string>
+    <string name="add_account">Add account</string>
+    <string name="rename">Rename</string>
+    <string name="add_to_home">Add to home screen</string>
+    <string name="sign_out_delete">Sign out &amp; delete</string>
+    <string name="use_passcode">Use passcode</string>
+</resources>

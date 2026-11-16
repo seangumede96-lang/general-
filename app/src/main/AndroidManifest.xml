@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only used to ask the fingerprint sensor "is this the owner?". The app never uses
+         device-credential auth, the keyguard, or device-admin policies, so it cannot make
+         Android demand a screen lock. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <application
+        android:name=".App"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Roost">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- One task (one entry in Recents) per account, so accounts run side by side. -->
+        <activity
+            android:name=".BrowserActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode"
+            android:documentLaunchMode="intoExisting"
+            android:exported="false"
+            android:theme="@style/Theme.Roost.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".LockActivity"
+            android:excludeFromRecents="false"
+            android:exported="false"
+            android:theme="@style/Theme.Roost.NoActionBar" />
+
+        <activity
+            android:name=".LockSettingsActivity"
+            android:exported="false"
+            android:label="@string/app_lock" />
+    </application>
+</manifest>
