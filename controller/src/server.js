@@ -34,7 +34,7 @@ function bodyMeshVersion() {
 }
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.bin': 'application/octet-stream' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.bin': 'application/octet-stream' , '.wasm': 'application/wasm', '.mjs': 'text/javascript; charset=utf-8', '.task': 'application/octet-stream'};
 const MAX_BODY = 1024 * 1024;
 const MAX_STEPS = 12;
 const MAX_ATTACHMENTS = 10;
@@ -465,6 +465,15 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		}],
 		// Several named views of ONE body state (same mesh, scale and framing), with masks, a contact
 		// sheet and a manifest that records everything needed to make them again.
+		// Photo evidence (stage 3): landmarks, a small outline mask and measurements from a reference photo,
+		// made in the browser. No photo pixels are sent; this only stores the record for fitting later.
+		['POST', /^\/api\/body\/evidence$/, async (req) => {
+			const ev = await readJson(req);
+			if (ev?.format !== 'photo-evidence/1' || !Array.isArray(ev.landmarks)) throw new HttpError(400, 'Expected a photo-evidence/1 record.');
+			if (JSON.stringify(ev).length > 400_000) throw new HttpError(413, 'Evidence record too large.');
+			const id = await saveBodyPng(`photo-evidence-${ev.view || 'view'}.json`, Buffer.from(JSON.stringify(ev)), 'application/json');
+			return { id, observability: ev.observability };
+		}],
 		['POST', /^\/api\/body\/views$/, async (req) => {
 			const body = await readJson(req);
 			const { renderBody, VIEWS, contactSheet, pngGray } = await import('./body-depth.js');

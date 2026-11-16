@@ -1650,6 +1650,109 @@ function scrollFriendlySlider(track, input) {
 	track.addEventListener('pointercancel', () => { start = null; });
 }
 
+// ---- Photo tab (body editor stage 3): reference photo -> landmarks, outline, observability ----
+const photoPane = {
+	bitmap: null, crop: { left: 0, right: 0, top: 0, bottom: 0 }, found: null, hidden: [], edited: [], selected: -1, view: 'front', pose: 'standing', mod: null,
+	async init() {
+		if (this.mod) return;
+		this.mod = await import('./photo.js');
+		const fill = (sel, opts, cur) => { $(sel).replaceChildren(...opts.map(([v, t]) => el('option', { value: v, textContent: t, selected: v === cur }))); };
+		fill('photo-view', this.mod.VIEW_OPTIONS, this.view); fill('photo-pose', this.mod.POSE_OPTIONS, this.pose);
+		$('photo-view').addEventListener('change', (e) => { this.view = e.target.value; this.showRegions(); });
+		$('photo-pose').addEventListener('change', (e) => { this.pose = e.target.value; });
+		$('photo-crop').replaceChildren(...['left', 'right', 'top', 'bottom'].map((k) => {
+			const input = el('input', { type: 'range', min: 0, max: 45, step: 1, value: 0 });
+			input.addEventListener('input', () => { this.crop[k] = Number(input.value); this.found = null; this.draw(); this.showRegions(); });
+			return el('div', { className: 'hslider' }, el('b', { textContent: `Crop ${k}` }), el('div', { className: 'hs-track' }, input));
+		}));
+		$('photo-file').addEventListener('change', async (e) => {
+			const f = e.target.files?.[0]; if (!f) return;
+			try { this.bitmap = await createImageBitmap(f, { imageOrientation: 'from-image' }); } catch { this.bitmap = await createImageBitmap(f); }
+			this.found = null; this.hidden = []; this.edited = []; this.selected = -1;
+			$('photo-canvas').hidden = false; $('photo-detect').disabled = false; this.status(`Photo ${this.bitmap.width} × ${this.bitmap.height}. Crop if needed, set the view, then Find body.`);
+			this.draw(); this.showRegions();
+		});
+		$('photo-detect').addEventListener('click', () => this.find());
+		$('photo-hide').addEventListener('click', () => { if (this.selected < 0) return; const i = this.selected; this.hidden = this.hidden.includes(i) ? this.hidden.filter((x) => x !== i) : [...this.hidden, i]; this.draw(); this.showRegions(); });
+		$('photo-save').addEventListener('click', () => this.save());
+		const cv = $('photo-canvas');
+		const at = (e) => { const r = cv.getBoundingClientRect(); return [((e.clientX - r.left) / r.width) * cv.width, ((e.clientY - r.top) / r.height) * cv.height]; };
+		let dragging = false;
+		cv.addEventListener('pointerdown', (e) => {
+			if (!this.found?.landmarks) return;
+			const [x, y] = at(e); let best = -1, bd = (28 * cv.width) / cv.getBoundingClientRect().width;
+			this.found.landmarks.forEach((p, i) => { const d = Math.hypot(p.x * cv.width - x, p.y * cv.height - y); if (d < bd) { bd = d; best = i; } });
+			this.selected = best; $('photo-hide').disabled = best < 0; dragging = best >= 0; if (dragging) cv.setPointerCapture(e.pointerId); this.draw();
+		});
+		cv.addEventListener('pointermove', (e) => {
+			if (!dragging) return; const [x, y] = at(e); const p = this.found.landmarks[this.selected];
+			p.x = Math.max(0, Math.min(1, x / cv.width)); p.y = Math.max(0, Math.min(1, y / cv.height)); p.visibility = Math.max(p.visibility ?? 0, 0.99);
+			if (!this.edited.includes(this.selected)) this.edited.push(this.selected); this.draw();
+		});
+		cv.addEventListener('pointerup', () => { if (dragging) { dragging = false; this.showRegions(); } });
+	},
+	status(t) { $('photo-status').textContent = t; },
+	/** The cropped photo on its own canvas (at most 1024 px on the long side), the image the detector sees. */
+	cropped() {
+		const b = this.bitmap, c = this.crop;
+		const sx = (b.width * c.left) / 100, sy = (b.height * c.top) / 100, sw = Math.max(16, b.width * (1 - (c.left + c.right) / 100)), sh = Math.max(16, b.height * (1 - (c.top + c.bottom) / 100));
+		const k = Math.min(1, 1024 / Math.max(sw, sh)), out = document.createElement('canvas');
+		out.width = Math.round(sw * k); out.height = Math.round(sh * k);
+		out.getContext('2d').drawImage(b, sx, sy, sw, sh, 0, 0, out.width, out.height);
+		return out;
+	},
+	draw() {
+		if (!this.bitmap) return;
+		const src = this.cropped(), cv = $('photo-canvas'), g = cv.getContext('2d');
+		cv.width = src.width; cv.height = src.height; g.drawImage(src, 0, 0);
+		const f = this.found;
+		if (f?.mask) {
+			const m = f.mask, tint = g.createImageData(m.width, m.height);
+			for (let i = 0; i < m.data.length; i++) if (m.data[i] > 0.5) { tint.data[i * 4] = 255; tint.data[i * 4 + 1] = 140; tint.data[i * 4 + 3] = 70; }
+			const t = document.createElement('canvas'); t.width = m.width; t.height = m.height; t.getContext('2d').putImageData(tint, 0, 0); g.drawImage(t, 0, 0, cv.width, cv.height);
+		}
+		if (f?.landmarks) {
+			const r = Math.max(4, cv.width / 120);
+			f.landmarks.forEach((p, i) => {
+				const hid = this.hidden.includes(i), low = (p.visibility ?? 0) < this.mod.SEEN;
+				g.beginPath(); g.arc(p.x * cv.width, p.y * cv.height, i === this.selected ? r * 1.8 : r, 0, Math.PI * 2);
+				g.fillStyle = hid ? '#777' : low ? '#f5a623' : '#2ecc71'; g.fill();
+				if (i === this.selected) { g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
+			});
+		}
+	},
+	async find() {
+		$('photo-detect').disabled = true; this.status('Finding the body… (first time loads about 21 MB from the app, then it is cached)');
+		try {
+			const t = performance.now();
+			this.found = await this.mod.detect(this.cropped());
+			this.hidden = []; this.edited = []; this.selected = -1;
+			if (!this.found.landmarks) this.status('No body found. Try cropping closer to the person, or a clearer photo.');
+			else {
+				const low = this.found.landmarks.filter((p) => (p.visibility ?? 0) < this.mod.SEEN).length;
+				this.status(`Found the body in ${Math.round(performance.now() - t)} ms. Green = sure, orange = unsure (${low} points). Drag a point to fix it, or tap it and "Mark point hidden".`);
+				$('photo-save').disabled = false;
+			}
+		} catch (err) { this.status(`The body finder could not run here: ${err.message}`); }
+		$('photo-detect').disabled = false; this.draw(); this.showRegions();
+	},
+	showRegions() {
+		if (!this.mod) return;
+		const lm = this.found?.landmarks;
+		if (!lm) { $('photo-regions').replaceChildren(); return; }
+		const o = this.mod.observability(lm, this.view, this.hidden);
+		const label = { height: 'Height', shoulderWidth: 'Shoulder width', waistWidth: 'Waist width', hipWidth: 'Hip width', thighWidth: 'Thigh width', legLength: 'Leg length', buttProjection: 'Butt projection', bellyDepth: 'Belly depth', chestDepth: 'Chest depth' };
+		const word = { observed: 'measured', weak: 'rough', unknown: 'not shown: you choose' };
+		$('photo-regions').replaceChildren(el('div', { className: 'card-cap', textContent: 'What this photo can tell' }), ...Object.entries(o).map(([k, v]) => el('div', { className: `photo-region ${v}`, textContent: `${label[k]}: ${word[v]}` })));
+	},
+	async save() {
+		const f = this.found; if (!f?.landmarks) return;
+		const ev = this.mod.buildEvidence({ landmarks: f.landmarks, mask: f.mask, view: this.view, pose: this.pose, imageWidth: this.bitmap.width, imageHeight: this.bitmap.height, crop: { ...this.crop }, hidden: this.hidden, edited: this.edited });
+		try { const r = await api('POST', '/api/body/evidence', ev); this.status(`Saved (no photo pixels, just points, outline and measurements). Evidence id ${r.id.slice(0, 8)}.`); localStorage.setItem('photoEvidence', r.id); }
+		catch (err) { this.status(`Could not save: ${err.message}`); }
+	}
+};
+
 const bodyEditor = {
 	viewer: null, values: null, module: null,
 
@@ -1709,8 +1812,10 @@ const bodyEditor = {
 			localStorage.setItem('bodyTab', name);
 		};
 		for (const b of $('body-tabs').querySelectorAll('button')) b.addEventListener('click', () => tab(b.dataset.tab));
+		$('body-tabs').querySelector('[data-tab="photo"]')?.addEventListener('click', () => photoPane.init().catch((err) => { $('photo-status').textContent = `Photo tools failed to load: ${err.message}`; }));
 		const saved = localStorage.getItem('bodyTab');
 		tab($('body-tabs').querySelector(`[data-tab="${saved}"]`) ? saved : 'shape');
+		if (saved === 'photo') photoPane.init().catch(() => {});
 		// Breast and butt types set the detail sliders for that area in one tap.
 		for (const [kind, types] of [['breast', m.BREAST_TYPES], ['butt', m.BUTT_TYPES]]) {
 			$(`body-${kind}-types`).replaceChildren(...Object.keys(types).map((name) => {
