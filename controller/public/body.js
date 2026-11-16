@@ -645,7 +645,8 @@ function eyeCentre(p, [start, count]) {
  * A live 3D view inside `container`. Drag sideways to turn the figure. `update(values)` reshapes
  * it; `snapshot(w, h, angle, mode)` renders a plain picture of it for the image engine.
  */
-export function createViewer(container) {
+/** options.handles (default true): show the draggable pose dots; false = display only (no poser work). */
+export function createViewer(container, { handles: showHandles = true } = {}) {
 	// Transparent, so the studio backdrop behind it (in CSS) shows through.
 	const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -701,7 +702,7 @@ export function createViewer(container) {
 	const shapeKey = (v) => JSON.stringify({ ...v, pose: undefined, posing: undefined, name: undefined });
 	const getPoser = (v) => { const k = shapeKey(v); if (k !== poserKey) { poser = createPoser(v); poserKey = k; } return poser; };
 	function placeHandles() {
-		const on = Boolean(current && isPosing(current));
+		const on = Boolean(showHandles && current && isPosing(current));
 		const pts = on ? getPoser(current).points(current.pose, drag?.floor ?? undefined) : null;
 		for (const [name, h] of Object.entries(handles)) {
 			h.visible = on;
