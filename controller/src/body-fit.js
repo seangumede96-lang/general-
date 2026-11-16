@@ -109,14 +109,31 @@ export async function fitBody(evidence, start = {}, { width = 0, height = 0, ste
 	const params = fittable(evidence.observability || {});
 	const search = [...POSE_PARAMS, ...params];
 	let renders = 0;
-	const cost = async (v) => {
+	// rows: which profile rows count. UPPER = head to waist (weight shows there; hips and thighs don't).
+	const UPPER = Math.round(PROFILE_ROWS * ((0.42 - ROW_FROM) / (ROW_TO - ROW_FROM)));
+	const cost = async (v, rows = PROFILE_ROWS) => {
 		renders++;
 		const r = await renderBody({ ...v, posing: false }, { angleDeg: angle, width, height, raw: true });
 		const prof = profile(shrinkTo(r.mask, r.width, r.height, personPx));
 		if (!prof) return Infinity;
 		// the residual plus a gentle pull back towards where the user started (keeps unneeded sliders put)
 		let reg = 0; for (const p of params) reg += ((v[p.key] || 0) - (start[p.key] || 0)) ** 2;
-		return err(prof, target) + 0.002 * reg;
+		return err(prof.subarray(0, rows), target.subarray(0, rows)) + 0.002 * reg;
+	};
+	/** Coordinate descent over `list` at the given steps, scoring `rows` profile rows. */
+	const descend = async (list, stepsList, rows = PROFILE_ROWS) => {
+		let b = await cost(v, rows);
+		for (const step of stepsList) for (const p of list) for (const dir of [1, -1]) {
+			let moved = true;
+			while (moved) {
+				moved = false;
+				const cur = v[p.key] || 0, next = Math.min(p.hi, Math.max(p.lo, +(cur + dir * step).toFixed(3)));
+				if (next === cur || Math.abs(next - (start[p.key] || 0)) > 1.6) break;
+				const c = await cost({ ...v, [p.key]: next }, rows);
+				if (c < b - 1e-5) { b = c; v[p.key] = next; moved = true; }
+			}
+		}
+		return b;
 	};
 	const v = { ...start };
 	const before = await cost(v);
@@ -126,23 +143,14 @@ export async function fitBody(evidence, start = {}, { width = 0, height = 0, ste
 		let moved = true;
 		while (moved) { moved = false; const cur = v[p.key] || 0, next = Math.min(p.hi, Math.max(p.lo, +(cur + dir * step).toFixed(3))); if (next === cur) break; const c = await cost({ ...v, [p.key]: next }); if (c < best - 1e-5) { best = c; v[p.key] = next; moved = true; } }
 	}
-	// Small steps, many passes: a big first step lets one slider (weight) soak up a difference that
-	// belongs to a region (hips), and coordinate descent can't undo that.
-	for (const step of steps) {
-		for (const p of search) {
-			for (const dir of [1, -1]) {
-				let moved = true;
-				while (moved) {
-					moved = false;
-					const cur = v[p.key] || 0, next = Math.min(p.hi, Math.max(p.lo, +(cur + dir * step).toFixed(3)));
-					if (Math.abs(next - (start[p.key] || 0)) > 1.6) break;
-					if (next === cur) break;
-					const c = await cost({ ...v, [p.key]: next });
-					if (c < best - 1e-5) { best = c; v[p.key] = next; moved = true; }
-				}
-			}
-		}
-	}
+	// 1. Overall weight (and shoulders/chest) from the head-to-waist rows only: weight thickens arms,
+	//    neck and torso, while hips and thighs don't show up there, so it can't soak up hip width.
+	const upper = params.filter((p) => ['weight', 'shoulders', 'chest'].includes(p.key));
+	if (upper.length) await descend(upper, [0.25, 0.125], UPPER);
+	// 2. Everything else on the whole profile with weight held, local regions take what's left.
+	await descend(search.filter((p) => !upper.includes(p)), steps);
+	// 3. A final small-step pass over all of them together.
+	best = await descend(search, [0.125]);
 	const fitted = params.map((p) => ({ key: p.key, from: start[p.key] || 0, to: v[p.key] || 0, trust: p.trust === 1 ? 'measured' : 'rough' }));
 	const untouched = FIT_PARAMS.filter((p) => !params.some((q) => q.key === p.key)).map((p) => p.key);
 	const pose = Object.fromEntries(POSE_PARAMS.map((p) => [p.key, v[p.key] || 0]));
