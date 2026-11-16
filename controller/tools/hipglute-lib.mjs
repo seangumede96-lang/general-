@@ -69,6 +69,9 @@ make('glute-inner-up', (i, x, y, z, nx, ny, nz) => { const w = G[i] * (1 - gx(x)
 make('glute-outer-up', (i, x, y, z, nx, ny, nz) => { const w = G[i] * gx(x) ** 2; return w && [side(x) * 0.8 * A * w, 0, -0.5 * A * w]; });
 make('glute-thigh-blend-up', (i, x, y, z, nx, ny, nz) => { const w = Math.max(G[i], Th[i]) * bump(gy0 + 0.02, 0.35, y) * back(z, nz); return w && [0, -0.2 * A * w, -0.8 * A * w]; });
 make('glute-fold-up', (i, x, y, z, nx, ny, nz) => { const w = Math.max(G[i], Th[i] * 0.6) * bump(gy0 + 0.12, 0.12, y) * back(z, nz) * (1 - gx(x) * 0.5); return w && [0, 0.1 * A * w, 0.6 * A * w]; });
+// Lower-back to glute blend: fills the hollow above the top of the glutes so a strong projection
+// rises gradually from the waist instead of starting as a step (BBL / BBW / Thick side views).
+make('glute-top-blend-up', (i, x, y, z, nx, ny, nz) => { const g = gy(y); const w = ss(0.75, 0.97, g) * (1 - ss(1.0, 1.5, g)) * back(z, nz) * (1 - ss(gx1 * 0.55, gx1 * 1.05, Math.abs(x))); return w && [nx * A * w, 0.1 * A * w, nz * A * w]; });
 for (const [suf, sg] of [['L', 1], ['R', -1]]) { const m = d.morphs['glutes-up']; const map = new Map(); for (let i = 0; i < m.idx.length; i++) map.set(m.idx[i], [m.off[i * 3], m.off[i * 3 + 1], m.off[i * 3 + 2]]); make(`glutes-${suf}-up`, (i, x) => { if (!map.has(i)) return null; const w = ss(-0.25, 0.25, x * sg); return map.get(i).map((v) => v * w); }); } // soft split across the midline
 make('iliac-width-up', (i, x, y, z, nx, ny, nz) => { const w = Hm[i] * bump(hipY + 0.9, 0.45, y) * Math.max(0, nx * side(x)); return w && [side(x) * 0.8 * A * w, 0, 0]; });
 make('pelvic-tilt-up', (i, x, y, z) => { const w = Math.max(G[i], Hm[i]) * bump(hipY + 0.3, 1.1, y); if (!w) return null; const a = (8 * Math.PI / 180) * w; const dy = y - hipY, dz = z - HL[2]; return [0, dy * Math.cos(a) - dz * Math.sin(a) - dy, dy * Math.sin(a) + dz * Math.cos(a) - dz].map((v, k) => (k === 2 ? -v : v)); });

@@ -58,6 +58,7 @@ export const SLIDERS = [
 	{ key: 'gluteInner', label: 'Inner glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'gluteOuter', label: 'Outer glute (side)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'gluteThighBlend', label: 'Under-fold: defined ↔ filled', group: 'butt', min: -1.5, max: 1.5, step: 0.01 },
+	{ key: 'gluteTopBlend', label: 'Lower back to butt: sharp ↔ smooth', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'gluteAsym', label: 'Left ↔ right glute (+ her left fuller)', group: 'butt', min: -1, max: 1, step: 0.01 },
 	{ key: 'iliacWidth', label: 'Upper hip width (iliac)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'pelvicTilt', label: 'Pelvic tilt', group: 'butt', min: -1, max: 1.5, step: 0.01 },
@@ -328,6 +329,11 @@ export function weights(v) {
 	// One glute fuller than the other: + her left, - her right.
 	const asym = Math.max(-1, Math.min(1, Number(v.gluteAsym) || 0));
 	if (asym > 0) add('glutes-L-up', asym); else if (asym < 0) add('glutes-R-up', -asym);
+	// Lower back to butt: the slider, plus an automatic share when the butt projects strongly, so a big
+	// projection rises from the waist instead of starting as a step (sharp crease in side view).
+	const proj = Math.max(0, at('buttOut')) + 0.5 * Math.max(0, at('glutes')) + 0.5 * Math.max(0, at('gluteUpper')) + 0.5 * Math.max(0, at('gluteShelf'));
+	const topBlend = at('gluteTopBlend') + Math.min(1.5, Math.max(0, proj - 0.4) * 0.8);
+	if (topBlend > 0) add('glute-top-blend-up', topBlend); else if (topBlend < 0) add('glute-top-blend-down', -topBlend);
 	// One under-fold slider: + fills the glute-to-thigh crease, - defines it (the two targets were one axis, cos -0.98).
 	const fold = at('gluteThighBlend');
 	if (fold > 0) add('glute-thigh-blend-up', fold); else if (fold < 0) add('glute-fold-up', -fold);

@@ -270,9 +270,19 @@ test('stage 5 shape library: every target is present, finite and at most 3.6 cm;
 	assert.ok(plain.every((x, i) => x === zeros[i]));
 	// every new slider changes the body, and all at their extremes stay sound
 	const keys = body.SLIDERS.filter((s) => /^glute(Upper|Lower|Shelf|Inner|Outer|ThighBlend|Fold|Asym)$|^iliacWidth$|^pelvicTilt$|^thigh(Upper|Outer|Inner)$|^hamstring$/.test(s.key));
-	assert.equal(keys.length, 13); // fold merged into the under-fold slider (gluteThighBlend: - defined, + filled)
+	assert.equal(keys.length, 13); // (gluteTopBlend is checked separately) // fold merged into the under-fold slider (gluteThighBlend: - defined, + filled)
 	for (const s of keys) for (const x of [s.min, s.max]) assert.notDeepEqual(body.weights({ ...body.defaults(), [s.key]: x }), body.weights(body.defaults()), `${s.key}=${x}`);
 	const all = body.shapeBody({ ...body.defaults(), weight: 1, hips: 1.5, glutes: 1.5, thighs: 1.5, ...Object.fromEntries(keys.map((s) => [s.key, s.max])) });
 	assert.ok(all.every(Number.isFinite));
 	for (const name of Object.keys(body.BUTT_TYPES)) assert.ok(body.shapeBody(body.applyType(body.defaults(), 'butt', name)).every(Number.isFinite), name);
+});
+
+test('lower back to butt blend: the slider drives it, and a strong projection adds it automatically', () => {
+	const w = (v) => body.weights({ ...body.defaults(), ...v });
+	assert.ok(!w({})['glute-top-blend-up'], 'the plain body has no blend');
+	assert.ok(w({ gluteTopBlend: 1 })['glute-top-blend-up'] > 0.9);
+	assert.ok(w({ gluteTopBlend: -0.5 })['glute-top-blend-down'] > 0.4);
+	assert.ok(w({ buttOut: 1.2, glutes: 1, gluteUpper: 1 })['glute-top-blend-up'] > 0.5, 'a big projection blends by itself');
+	assert.ok(w({ buttOut: 1.3, glutes: 1.5, gluteUpper: 1.5, gluteShelf: 1.5 })['glute-top-blend-up'] <= 1.5);
+	assert.ok(body.SLIDERS.some((s) => s.key === 'gluteTopBlend'));
 });
