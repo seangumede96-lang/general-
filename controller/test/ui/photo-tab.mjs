@@ -63,6 +63,9 @@ if (first) {
 	if (first.landmarks.length !== 33) fail(`${first.landmarks.length} landmarks, expected 33`);
 	if (!first.mask?.rle?.length) fail('no outline mask saved');
 	if (first.consent !== 'own-or-consenting-adult') fail('consent not recorded');
+	// The photo sits in the scrolling control panel: bring the hip point into view first.
+	await page.evaluate((y) => { const c = document.querySelector('#photo-canvas'), sc = document.querySelector('#body-scroll'); sc.scrollTop += c.getBoundingClientRect().top + y * c.getBoundingClientRect().height - sc.getBoundingClientRect().top - sc.clientHeight / 2; }, first.landmarks[23].y);
+	await wait(300);
 	const box = await page.locator('#photo-canvas').boundingBox();
 	const hip = first.landmarks[23];
 	const x = box.x + hip.x * box.width, y = box.y + hip.y * box.height;

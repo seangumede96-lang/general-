@@ -96,7 +96,8 @@ await shot('1-pose-on');
 {
 	const box = await page.locator('#body-view').boundingBox();
 	before = await figure();
-	await touchDrag(box.x + 12, box.y + box.height * 0.3, box.x + 130, box.y + box.height * 0.3);
+	// In the open strip between the view buttons (top left) and the control panel (bottom).
+	await touchDrag(box.x + 12, box.y + box.height * 0.42, box.x + 130, box.y + box.height * 0.42);
 	if ((await figure()) === before) fail('dragging off the dots did not turn the figure');
 	await tap(page.locator('.body-views button', { hasText: /^Front$/ }));
 }

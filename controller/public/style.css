@@ -756,3 +756,6 @@ body.studio .icon-btn:hover { background: rgba(255,255,255,.18); }
 .creator-panel.glass .hslider b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .creator-panel.glass { height: 50%; }
 #body .stage-hint { bottom: 54%; }
+/* Only the buttons themselves catch touches: the space around them still turns the figure. */
+.glass-stack { pointer-events: none; }
+.glass-stack > * { pointer-events: auto; }
