@@ -1799,7 +1799,7 @@ const bodyEditor = {
 		if (!this.module) {
 			try { this.module = await import('./body.js'); this.types = await import('./body-types.js').catch(() => null); }
 			catch (err) { $('body-view').textContent = `The 3D view could not start: ${err.message}`; return; }
-			this.viewer = this.module.createViewer($('body-view'));
+			this.viewer = this.module.createViewer($('body-view'), { ground: true });
 			let current = null;
 			try { current = JSON.parse(localStorage.getItem('bodyCurrent') || 'null'); } catch { current = null; }
 			this.values = this.module.migrate(current || this.module.defaults('female'));

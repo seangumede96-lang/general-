@@ -2,7 +2,8 @@
 // (public/body.js: shape, poses, smoothing, framing and depth range), drawn with a small
 // software renderer instead of WebGL, so the app can be driven entirely through its API.
 // Output matches the editor's snapshot(w, h, angle, 'depth'): near = white, far and background
-// = black. A plain grey shaded preview is made too.
+// = black. A shaded preview is made too, in the mannequin's warm brown (the owner's reference
+// character's skin tone) on white.
 import { readFile } from 'node:fs/promises';
 import { deflateSync, crc32 } from 'node:zlib';
 
@@ -25,6 +26,36 @@ export function pngGray(pixels, w, h) {
 	const raw = Buffer.alloc((w + 1) * h);
 	for (let y = 0; y < h; y++) { raw[y * (w + 1)] = 0; pixels.copy ? pixels.copy(raw, y * (w + 1) + 1, y * w, (y + 1) * w) : raw.set(pixels.subarray(y * w, (y + 1) * w), y * (w + 1) + 1); }
 	return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+/** The mannequin's base colour (the owner's reference skin, #9A6243), for the preview. */
+export const SKIN_RGB = [154, 98, 67];
+
+/** 8-bit RGB PNG from a w x h x 3 byte array. */
+export function pngRGB(pixels, w, h) {
+	const chunk = (type, data) => {
+		const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+		const td = Buffer.concat([Buffer.from(type), data]);
+		const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td) >>> 0);
+		return Buffer.concat([len, td, crc]);
+	};
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+	const raw = Buffer.alloc((w * 3 + 1) * h);
+	for (let y = 0; y < h; y++) { raw[y * (w * 3 + 1)] = 0; Buffer.from(pixels.buffer, pixels.byteOffset + y * w * 3, w * 3).copy(raw, y * (w * 3 + 1) + 1); }
+	return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+/** The grey shading (white background) coloured as warm brown skin: shade times the base colour, with a soft highlight. */
+function colourise(gray) {
+	const out = Buffer.alloc(gray.length * 3);
+	for (let i = 0; i < gray.length; i++) {
+		const g = gray[i];
+		if (g === 255) { out[i * 3] = out[i * 3 + 1] = out[i * 3 + 2] = 255; continue; }
+		const t = g / 255, hi = Math.max(0, t - 0.8) * 1.6;
+		for (let c = 0; c < 3; c++) out[i * 3 + c] = Math.min(254, Math.round(SKIN_RGB[c] * (0.28 + 0.62 * t) + 255 * hi * 0.22));
+	}
+	return out;
 }
 
 /** A small UV sphere, for the eyeballs (the mesh has open eye sockets, as in the editor). */
@@ -141,7 +172,7 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 	const mask = Buffer.alloc(width * height, 0);
 	for (let i = 0; i < mask.length; i++) if (zbuf[i] !== Infinity) mask[i] = 255;
 	if (raw) return { depth, preview, mask, width, height };
-	return { depth: pngGray(depth, width, height), preview: pngGray(preview, width, height), mask: pngGray(mask, width, height) };
+	return { depth: pngGray(depth, width, height), preview: pngRGB(colourise(preview), width, height), mask: pngGray(mask, width, height) };
 }
 
 /** Named camera views: yaw in degrees, turning the body (0 = she faces the camera, 90 = her left side). */

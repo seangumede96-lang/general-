@@ -646,7 +646,7 @@ function eyeCentre(p, [start, count]) {
  * it; `snapshot(w, h, angle, mode)` renders a plain picture of it for the image engine.
  */
 /** options.handles (default true): show the draggable pose dots; false = display only (no poser work). */
-export function createViewer(container, { handles: showHandles = true } = {}) {
+export function createViewer(container, { handles: showHandles = true, ground = false } = {}) {
 	// Transparent, so the studio backdrop behind it (in CSS) shows through.
 	const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -667,10 +667,55 @@ export function createViewer(container, { handles: showHandles = true } = {}) {
 	const rim = new THREE.DirectionalLight('#ffffff', 1.1);
 	rim.position.set(60, 160, -180);
 	scene.add(rim);
-	// A smooth, light-grey clay finish.
-	const material = new THREE.MeshStandardMaterial({ color: '#e4e2df', roughness: 0.58, metalness: 0 });
+	// Warm brown skin (the owner's reference character, #9A6243), matte with a soft sheen at the
+	// edges like skin under studio light.
+	const material = new THREE.MeshPhysicalMaterial({ color: '#9a6243', roughness: 0.56, metalness: 0, sheen: 0.45, sheenColor: '#f0b48a', sheenRoughness: 0.55, clearcoat: 0.06, clearcoatRoughness: 0.6 });
 	const group = new THREE.Group();
 	scene.add(group);
+	// The floor (option `ground`): a glass pedestal disc at y = 0, where the feet stand, fading into
+	// the page behind, and a soft contact shadow under the soles that follows the feet.
+	const stageFloor = new THREE.Group();
+	let shadow = null;
+	if (ground) {
+		const tex = (draw) => { const c = document.createElement('canvas'); c.width = c.height = 256; draw(c.getContext('2d')); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; };
+		const disc = tex((g) => {
+			const r = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+			r.addColorStop(0, 'rgba(255,255,255,0.42)'); r.addColorStop(0.55, 'rgba(225,252,255,0.22)');
+			r.addColorStop(0.9, 'rgba(225,252,255,0.30)'); r.addColorStop(0.95, 'rgba(255,255,255,0.75)'); r.addColorStop(0.985, 'rgba(255,255,255,0.18)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+			g.fillStyle = r; g.fillRect(0, 0, 256, 256);
+		});
+		const pedestal = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ map: disc, transparent: true, depthWrite: false }));
+		pedestal.rotation.x = -Math.PI / 2;
+		pedestal.name = 'pedestal';
+		stageFloor.add(pedestal);
+		const blob = tex((g) => {
+			const r = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+			r.addColorStop(0, 'rgba(0,15,30,0.75)'); r.addColorStop(0.45, 'rgba(0,15,30,0.42)'); r.addColorStop(1, 'rgba(0,15,30,0)');
+			g.fillStyle = r; g.fillRect(0, 0, 256, 256);
+		});
+		shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, depthWrite: false }));
+		shadow.rotation.x = -Math.PI / 2;
+		shadow.position.y = 0.05;
+		shadow.renderOrder = 1;
+		group.add(shadow);
+		scene.add(stageFloor);
+	}
+	/** Size the pedestal to the figure, and put the contact shadow under the feet as they stand now. */
+	function placeGround() {
+		if (!ground || !basePos) return;
+		stageFloor.children[0].scale.setScalar(Math.max(reach * 1.25, height * 0.3));
+		let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, n = 0;
+		for (let i = 0; i < meshData.eyes[0][0]; i++) {
+			if (basePos[i * 3 + 1] > height * 0.025) continue;
+			const x = basePos[i * 3], z = basePos[i * 3 + 2];
+			if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; n++;
+		}
+		shadow.visible = n > 0;
+		if (!n) return;
+		const pad = height * 0.06;
+		shadow.position.set((x0 + x1) / 2, 0.05, (z0 + z1) / 2);
+		shadow.scale.set(x1 - x0 + pad * 2, z1 - z0 + pad * 2, 1);
+	}
 	const camera = new THREE.PerspectiveCamera(22, 1, 1, 5000);
 	let yaw = 0;
 	let height = 170;
@@ -718,6 +763,17 @@ export function createViewer(container, { handles: showHandles = true } = {}) {
 		// Fit the figure's height and its widest reach (whichever turn it is at), so it fills
 		// a narrow column as well as a wide one.
 		const t = Math.tan((cam.fov * Math.PI) / 360);
+		if (screen && ground) {
+			// Standing on the floor: room for the pedestal below the feet, and the camera looking down
+			// a little (about 5 degrees), as in a character creator's viewport.
+			const span = height_ * 1.12, mid = height_ * 0.47;
+			const distance = Math.max((span / 0.92 / 2) / t, (reach_ * 1.3 / 0.92) / (t * aspect)) + 20;
+			cam.aspect = aspect;
+			cam.position.set(0, mid + distance * Math.tan(5 * Math.PI / 180), distance);
+			cam.lookAt(0, mid, 0);
+			cam.updateProjectionMatrix();
+			return;
+		}
 		const distance = Math.max((height_ / 0.88 / 2) / t, (reach_ / 0.92) / (t * aspect)) + 20;
 		cam.aspect = aspect;
 		cam.position.set(0, height_ * 0.5, distance);
@@ -801,6 +857,7 @@ export function createViewer(container, { handles: showHandles = true } = {}) {
 			eyes[i].scale.setScalar(r);
 		});
 		placeHandles();
+		placeGround();
 		resize();
 	}
 
@@ -818,6 +875,7 @@ export function createViewer(container, { handles: showHandles = true } = {}) {
 		geometry.computeBoundingSphere();
 		meshData.eyes.forEach((e, i) => eyes[i].position.copy(eyeCentre(basePos, e)));
 		placeHandles();
+		placeGround();
 		draw();
 	}
 
@@ -927,6 +985,8 @@ export function createViewer(container, { handles: showHandles = true } = {}) {
 			if (!current) throw new Error('the body is still loading');
 			const cam = camera.clone();
 			const prevBg = scene.background;
+			// Pictures are of the figure alone: no floor or shadow in them.
+			stageFloor.visible = false; if (shadow) shadow.visible = false;
 			const prevYaw = yaw;
 			scene.background = new THREE.Color(mode === 'depth' ? '#000000' : '#ffffff');
 			yaw = angle;
@@ -949,6 +1009,7 @@ export function createViewer(container, { handles: showHandles = true } = {}) {
 			const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));
 			scene.overrideMaterial = null;
 			scene.background = prevBg;
+			stageFloor.visible = true; placeGround();
 			yaw = prevYaw;
 			renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 			resize();
