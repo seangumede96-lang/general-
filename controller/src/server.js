@@ -16,6 +16,22 @@ import { createImageStudio, ImageError } from './images.js';
 import { createMocapStudio, MocapError } from './mocap.js';
 import { B2Error } from './b2.js';
 import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel, isUncensored } from './gpu.js';
+import { crc32 as zlibCrc32 } from 'node:zlib';
+
+// ---- body depth helpers (named views, masks, manifest) ----
+const BODY_SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] };
+function bodySize(body) {
+	const [w, h] = BODY_SIZES[body.size] || [Number(body.width) || 1024, Number(body.height) || 1536];
+	if (!(w >= 256 && w <= 2048 && h >= 256 && h <= 2048)) throw new HttpError(400, 'Width and height must be 256 to 2048.');
+	if (body.values !== undefined && (typeof body.values !== 'object' || body.values === null || Array.isArray(body.values))) throw new HttpError(400, 'values must be an object of body settings.');
+	return [Math.round(w), Math.round(h)];
+}
+function appCommit() {
+	try { const dir = fileURLToPath(new URL('../../.git/', import.meta.url)); const head = readFileSync(join(dir, 'HEAD'), 'utf8').trim(); return head.startsWith('ref: ') ? readFileSync(join(dir, head.slice(5)), 'utf8').trim().slice(0, 12) : head.slice(0, 12); } catch { return null; }
+}
+function bodyMeshVersion() {
+	try { const st = readFileSync(fileURLToPath(new URL('../public/vendor/makehuman/human.json', import.meta.url))); return { humanJsonBytes: st.length, crc32: (zlibCrc32(st) >>> 0).toString(16) }; } catch { return null; }
+}
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.bin': 'application/octet-stream' };
@@ -60,6 +76,14 @@ const titleFrom = (text) => {
 export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase, mocapRetryMs, stopRetryMs, imageStartRetryMs }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
+	/** Store a generated body file (depth/mask/preview PNG, sheet, manifest) as an upload; returns its id. */
+	const saveBodyPng = async (name, data, type = 'image/png') => {
+		const id = randomUUID(), dir = join(uploadsDir, id);
+		await mkdir(dir, { recursive: true, mode: 0o700 });
+		await writeFile(join(dir, name), data, { mode: 0o600 });
+		db.insertUpload({ id, name, type, size: data.length, path: join(dir, name), created_at: Date.now() });
+		return id;
+	};
 	let bodyState = { values: null, rev: 0, source: null, at: 0 };
 	try { bodyState = { ...bodyState, ...JSON.parse(readFileSync(join(dataDir, 'body-current.json'), 'utf8')) }; } catch { /* none yet */ }
 	const gpu = createGpuManager({ db, clock });
@@ -428,24 +452,38 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		// the editor's slider values (a "body code"), angle in degrees (0 front, 90 side, 180 back).
 		['POST', /^\/api\/body\/depth$/, async (req) => {
 			const body = await readJson(req);
-			const SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] };
-			const [dw, dh] = SIZES[body.size] || [Number(body.width) || 1024, Number(body.height) || 1536];
-			if (!(dw >= 256 && dw <= 2048 && dh >= 256 && dh <= 2048)) throw new HttpError(400, 'Width and height must be 256 to 2048.');
-			if (body.values !== undefined && (typeof body.values !== 'object' || body.values === null || Array.isArray(body.values))) throw new HttpError(400, 'values must be an object of body settings.');
-			const { renderBody } = await import('./body-depth.js');
-			const angle = Number(body.angle) || 0;
-			const out = await renderBody(body.values || {}, { angleDeg: angle, width: Math.round(dw), height: Math.round(dh) });
+			const { renderBody, VIEWS } = await import('./body-depth.js');
+			const [dw, dh] = bodySize(body);
+			if (body.view !== undefined && !(body.view in VIEWS)) throw new HttpError(400, `view must be one of ${Object.keys(VIEWS).join(', ')}.`);
+			// A named view sets the angle; an explicit angle (the older API) still wins.
+			const angle = body.angle !== undefined ? Number(body.angle) || 0 : body.view !== undefined ? VIEWS[body.view] : 0;
+			const out = await renderBody(body.values || {}, { angleDeg: angle, width: dw, height: dh });
 			const saved = {};
-			for (const [kind, png] of Object.entries(out)) {
-				const id = randomUUID();
-				const dir = join(uploadsDir, id);
-				await mkdir(dir, { recursive: true, mode: 0o700 });
-				const name = `body-${kind}-${Math.round(angle)}deg.png`;
-				await writeFile(join(dir, name), png, { mode: 0o600 });
-				db.insertUpload({ id, name, type: 'image/png', size: png.length, path: join(dir, name), created_at: Date.now() });
-				saved[kind] = id;
+			for (const [kind, png] of Object.entries(out)) saved[kind] = await saveBodyPng(`body-${kind}-${body.view || `${Math.round(angle)}deg`}.png`, png);
+			return { depth: saved.depth, preview: saved.preview, mask: saved.mask, angle, view: body.view || null, width: dw, height: dh };
+		}],
+		// Several named views of ONE body state (same mesh, scale and framing), with masks, a contact
+		// sheet and a manifest that records everything needed to make them again.
+		['POST', /^\/api\/body\/views$/, async (req) => {
+			const body = await readJson(req);
+			const { renderBody, VIEWS, contactSheet, pngGray } = await import('./body-depth.js');
+			const [dw, dh] = bodySize(body);
+			const names = Array.isArray(body.views) && body.views.length ? body.views : Object.keys(VIEWS);
+			const bad = names.filter((v) => !(v in VIEWS));
+			if (bad.length) throw new HttpError(400, `Unknown view: ${bad.join(', ')}. Use ${Object.keys(VIEWS).join(', ')}.`);
+			const bodyMod = await import('../public/body.js');
+			const values = bodyMod.migrate({ version: 2, ...(body.values || {}) });
+			const views = {}, maps = [];
+			for (const name of names) {
+				const r = await renderBody(values, { angleDeg: VIEWS[name], width: dw, height: dh, raw: true });
+				views[name] = { angle: VIEWS[name], depth: await saveBodyPng(`body-depth-${name}.png`, pngGray(r.depth, dw, dh)), mask: await saveBodyPng(`body-mask-${name}.png`, pngGray(r.mask, dw, dh)) };
+				maps.push(r.depth);
 			}
-			return { depth: saved.depth, preview: saved.preview, angle, width: dw, height: dh };
+			const sheet = await saveBodyPng('body-views-sheet.png', contactSheet(maps, dw, dh, { cols: Math.min(4, maps.length), scale: Math.max(1, Math.round(dw / 256)) }));
+			const manifest = { format: 'body-views/1', created: new Date().toISOString(), app: appCommit(), mesh: bodyMeshVersion(), width: dw, height: dh, depth: 'near = white, far and background = black', values, views, sheet };
+			const json = Buffer.from(JSON.stringify(manifest, null, 1));
+			manifest.manifest = await saveBodyPng('body-views-manifest.json', json, 'application/json');
+			return manifest;
 		}],
 		// The body on the editor right now, shared with whatever drives the app remotely: the editor
 		// sends its body here as it changes and picks up a body sent by someone else (a newer rev

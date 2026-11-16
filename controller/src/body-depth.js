@@ -45,7 +45,7 @@ function sphere(cx, cy, cz, r, rings = 8, segs = 12) {
  * Render the body for `values` (the editor's slider values) turned `angleDeg` degrees
  * (0 front, 90 side, 180 back) at width x height. Returns { depth, preview } PNG buffers.
  */
-export async function renderBody(values, { angleDeg = 0, width = 1024, height = 1536 } = {}) {
+export async function renderBody(values, { angleDeg = 0, width = 1024, height = 1536, raw = false } = {}) {
 	const mesh = await load();
 	const v = body.migrate({ version: 2, ...values });
 	const base = body.shapeBody(v);
@@ -129,7 +129,30 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 			preview[o] = Math.round(255 * (w0 * shade[a] + w1 * shade[b] + w2 * shade[c]));
 		}
 	}
-	return { depth: pngGray(depth, width, height), preview: pngGray(preview, width, height) };
+	// Silhouette mask: white wherever the body is drawn (same z-buffer, so it matches the depth map exactly).
+	const mask = Buffer.alloc(width * height, 0);
+	for (let i = 0; i < mask.length; i++) if (zbuf[i] !== Infinity) mask[i] = 255;
+	if (raw) return { depth, preview, mask, width, height };
+	return { depth: pngGray(depth, width, height), preview: pngGray(preview, width, height), mask: pngGray(mask, width, height) };
+}
+
+/** Named camera views: yaw in degrees, turning the body (0 = she faces the camera, 90 = her left side). */
+export const VIEWS = { front: 0, front_left: 45, left: 90, rear_left: 135, rear: 180, rear_right: 225, right: 270, front_right: 315 };
+
+/** One grey contact sheet of several equal-size depth maps (byte arrays), cols x rows, each scaled down by `scale`. */
+export function contactSheet(maps, width, height, { cols = 4, scale = 4 } = {}) {
+	const w = Math.floor(width / scale), h = Math.floor(height / scale), rows = Math.ceil(maps.length / cols);
+	const out = Buffer.alloc(w * cols * h * rows, 32);
+	maps.forEach((m, k) => {
+		const ox = (k % cols) * w, oy = Math.floor(k / cols) * h;
+		for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+			let s = 0; for (let dy = 0; dy < scale; dy++) for (let dx = 0; dx < scale; dx++) s += m[(y * scale + dy) * width + x * scale + dx];
+			out[(oy + y) * w * cols + ox + x] = Math.round(s / (scale * scale));
+		}
+		for (let x = 0; x < w; x++) out[(oy + h - 1) * w * cols + ox + x] = 90; // thin divider
+		for (let y = 0; y < h; y++) out[(oy + y) * w * cols + ox + w - 1] = 90;
+	});
+	return pngGray(out, w * cols, h * rows);
 }
 
 /** Every draggable point of a posed body (centimetres; x her left, y up from the floor, z her front). */

@@ -82,3 +82,33 @@ test('remote control API: guide, points, solve, and the shared current body', as
 	const depth = await api('POST', '/api/body/depth', { values: now.body.values, size: 'square' });
 	assert.equal(depth.status, 200);
 });
+
+test('named views: one body state gives 8 consistent views with masks, a contact sheet and a manifest', async () => {
+	const values = { base: 'female', hips: 0.8, glutes: 0.6 };
+	const r = await api('POST', '/api/body/views', { values, width: 256, height: 384 });
+	assert.equal(r.status, 200, JSON.stringify(r.body));
+	const names = ['front', 'front_left', 'left', 'rear_left', 'rear', 'rear_right', 'right', 'front_right'];
+	assert.deepEqual(Object.keys(r.body.views), names);
+	assert.equal(r.body.format, 'body-views/1');
+	assert.equal(r.body.values.hips, 0.8);
+	const get = async (id) => Buffer.from(await (await fetch(`${base}/api/uploads/${id}`)).arrayBuffer());
+	const heights = [];
+	for (const n of names) {
+		const d = gray(await get(r.body.views[n].depth)), m = gray(await get(r.body.views[n].mask));
+		assert.deepEqual([d.w, d.h, m.w, m.h], [256, 384, 256, 384]);
+		for (let i = 0; i < d.px.length; i++) assert.equal(m.px[i] === 255, d.px[i] > 0, `${n}: mask matches depth at ${i}`);
+		let top = d.h, bottom = 0; for (let i = 0; i < d.px.length; i++) if (d.px[i]) { const y = Math.floor(i / d.w); top = Math.min(top, y); bottom = Math.max(bottom, y); }
+		heights.push(bottom - top);
+	}
+	assert.ok(Math.max(...heights) - Math.min(...heights) <= 6, `same scale and framing in every view: heights ${heights}`);
+	const sheet = gray(await get(r.body.sheet)); assert.ok(sheet.w > 0 && sheet.h > 0);
+	const man = JSON.parse((await get(r.body.manifest)).toString()); assert.equal(man.views.rear.angle, 180);
+	// a named view on /api/body/depth equals the same angle, and the same body code reproduces the same map
+	const a = await api('POST', '/api/body/depth', { values, view: 'rear', width: 256, height: 384 });
+	const b = await api('POST', '/api/body/depth', { values, angle: 180, width: 256, height: 384 });
+	assert.equal(a.body.view, 'rear'); assert.ok(a.body.mask);
+	assert.deepEqual(await get(a.body.depth), await get(b.body.depth));
+	assert.deepEqual(await get(a.body.depth), await get(r.body.views.rear.depth));
+	assert.equal((await api('POST', '/api/body/depth', { view: 'upside' })).status, 400);
+	assert.equal((await api('POST', '/api/body/views', { views: ['front', 'nope'] })).status, 400);
+});
