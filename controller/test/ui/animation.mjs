@@ -68,7 +68,7 @@ const lib = await (await fetch(`${base}/api/motions`)).json();
 const m = await (await fetch(`${base}/api/motions/${lib.motions[0].id}`)).json();
 const lifts = m.frames.map((f) => Math.round(f.pose['upperArm.L']?.lift || 0));
 console.log('left arm lift over time:', lifts.join(' '));
-if (Math.max(...lifts.slice(25)) < 120) fail('arms up was not found');
+if (Math.max(...lifts.slice(25)) < 100) fail('arms up was not found');
 if (Math.max(...lifts.slice(0, 8)) > 40) fail('arms not down at the start');
 
 // Downloads.

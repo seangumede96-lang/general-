@@ -319,7 +319,7 @@ export function createRetargeter(rest, upc, { iterations = 10, width = null, hei
  * hips.y (height change) to its pose. `floorOf(pose)` gives the lowest foot point, in cm above
  * the rest floor, for a pose (from the body).
  */
-export function addRootMotion(motion, clean, { width = 1, height = 1, footHeight } = {}) {
+export function addRootMotion(motion, clean, { width = 1, height = 1, footHeight, sceneDepth = null } = {}) {
 	// Torso length in pixels and in metres, per frame where it is seen.
 	const px = [], m = [];
 	clean.forEach((f, i) => {
@@ -337,17 +337,23 @@ export function addRootMotion(motion, clean, { width = 1, height = 1, footHeight
 	const first = known[0];
 	const depth = (i) => focal * torsoM / px[i]; // metres from the camera
 	const hipPx = (i) => { const im = clean[i].image; const c = mid(im[LM.hipL], im[LM.hipR]); return [c[0] * width, c[1] * height]; };
-	const z0 = depth(first), c0 = hipPx(first);
-	let last = [0, 0, 0];
+	// With sceneDepth (metres), everyone in the clip shares one origin: the point that far in front of
+	// the camera, straight ahead. So people who interact keep their places relative to each other.
+	// Without it, a person's motion starts at their own first position.
+	const z0 = sceneDepth ?? depth(first), c0 = sceneDepth ? [width / 2, 0] : hipPx(first);
+	// Frames before the person is first seen take their first known place (not the origin).
+	let last = null;
 	motion.frames.forEach((fr, i) => {
 		if (px[i]) {
 			const z = depth(i), c = hipPx(i);
 			// Across: pixels to metres at this depth. Towards the camera is the figure's +z when it faces the camera.
 			last = [(c[0] - c0[0]) * z / focal * 100, 0, (z0 - z) * 100];
 		}
-		fr.root = last.map((x) => Math.round(x * 10) / 10);
+		fr.root = last ? last.map((x) => Math.round(x * 10) / 10) : null;
 		fr.rootEstimated = true;
 	});
+	const firstRoot = motion.frames.find((fr) => fr.root)?.root || [0, 0, 0];
+	for (const fr of motion.frames) { if (!fr.root) fr.root = [...firstRoot]; else break; }
 	// Keep the feet on the floor where they are seen: lift or lower the hips by what it takes.
 	if (footHeight) {
 		const legsSeen = (i) => ['ankleL', 'ankleR'].some((n) => clean[i].world[LM[n]] && clean[i].vis[LM[n]] >= SEEN);
@@ -514,4 +520,19 @@ export function rotations(rest, upc, pose) {
 		else { const s = Math.sqrt(1 + R[8] - R[0] - R[4]) * 2; q = [(R[3] - R[1]) / s, (R[2] + R[6]) / s, (R[5] + R[7]) / s, s / 4]; }
 		return [name, q.map((x) => Math.round(x * 1e5) / 1e5)];
 	}));
+}
+
+/** The distance from the camera (metres) shared by everyone in a clip: the nearest person's start. */
+export function sceneDepthOf(cleans, { width, height }) {
+	const focal = 1.2 * Math.max(width, height);
+	const depths = [];
+	for (const clean of cleans) {
+		const f = clean.find((x) => [LM.hipL, LM.hipR, LM.shoulderL, LM.shoulderR].every((j) => x.world[j] && x.image[j]));
+		if (!f) continue;
+		const a = mid(f.image[LM.hipL], f.image[LM.hipR]), b = mid(f.image[LM.shoulderL], f.image[LM.shoulderR]);
+		const px = Math.hypot((a[0] - b[0]) * width, (a[1] - b[1]) * height);
+		const m = len(sub(mid(f.world[LM.hipL], f.world[LM.hipR]), mid(f.world[LM.shoulderL], f.world[LM.shoulderR])));
+		if (px > 0) depths.push(focal * m / px);
+	}
+	return depths.length ? Math.min(...depths) : null;
 }

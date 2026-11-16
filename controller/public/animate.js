@@ -75,11 +75,14 @@ export function createAnimationPage({ $, el, api, toast = (t) => alert(t) }) {
 			if (!tracks.length) throw new Error('No person was found in enough of the clip to follow. A clip where the whole body is clearly in view works best.');
 			const { poser, upc, floorCm } = await fig;
 			const ids = [], landmarks = {};
+			const cleans = tracks.map((tr) => M.cleanTrack(tr, { fps }));
+			// With more than one person, everyone shares one origin, so they keep their places relative to each other.
+			const sceneDepth = tracks.length > 1 ? M.sceneDepthOf(cleans, raw) : null;
 			for (const [n, tr] of tracks.entries()) {
-				const clean = M.cleanTrack(tr, { fps });
+				const clean = cleans[n];
 				const motion = await M.retargetAsync(poser.rest, upc, clean, { width: raw.width, height: raw.height, onProgress: (d, total) => stage(STEPS, 2, `${tracks.length > 1 ? `Person ${n + 1} of ${tracks.length} · ` : ''}frame ${d} of ${total}`, (n + d / total) / tracks.length) });
 				if (ctl.signal.aborted) throw new DOMException('Stopped', 'AbortError');
-				M.addRootMotion(motion, clean, { width: raw.width, height: raw.height, footHeight: floorCm });
+				M.addRootMotion(motion, clean, { width: raw.width, height: raw.height, footHeight: floorCm, sceneDepth });
 				stage(STEPS, 3, `Person ${n + 1}`, 1);
 				const name = `${file.name.replace(/\.[^.]+$/, '')}${tracks.length > 1 ? ` · person ${n + 1}` : ''}`;
 				const record = M.buildMotion({ name, fps, track: tr, motion, source: { kind: 'video', file: file.name, key, people: tracks.length, width: raw.width, height: raw.height, duration: Math.round(raw.duration * 100) / 100, detector: 'MediaPipe Pose Landmarker Lite (tasks-vision 1.2.3)', sampledFps: fps } });
@@ -125,6 +128,8 @@ export function createAnimationPage({ $, el, api, toast = (t) => alert(t) }) {
 		if (st.videoUrl) {
 			const v = el('video', { src: st.videoUrl, muted: true, playsInline: true, preload: 'auto', className: 'anim-video' });
 			v.muted = true;
+			// A landscape clip gets the full width, with the figure below it.
+			v.addEventListener('loadedmetadata', () => { const wide = v.videoWidth > v.videoHeight * 1.1; stageEl.classList.toggle('wide', wide); if (wide) v.parentElement.style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`; });
 			const c = el('canvas', { className: 'anim-overlay' });
 			stageEl.append(el('div', { className: 'anim-pane' }, v, c, el('span', { className: 'anim-label', textContent: 'Your clip' })));
 		}
@@ -136,6 +141,7 @@ export function createAnimationPage({ $, el, api, toast = (t) => alert(t) }) {
 		const scrub = el('input', { type: 'range', min: 0, max: m.frames.length - 1, step: 1, value: 0, className: 'anim-scrub', ariaLabel: 'Timeline' });
 		const time = el('span', { className: 'anim-time muted small' });
 		const q = m.quality || {};
+		const shared = motions.length > 1 ? el('p', { className: 'muted small', textContent: `Everyone in this clip shares one starting point, so exported files keep their places relative to each other (person ${current + 1} starts ${Math.round(Math.abs(m.frames[0].root[0]))} cm ${m.frames[0].root[0] >= 0 ? 'right' : 'left'} of the camera's centre).` }) : null;
 		const conf = el('div', { className: 'anim-conf' }, ...Object.entries(AREA_NAMES).filter(([k]) => q[k]).map(([k, label]) => {
 			const pct = Math.round((q[k].seen || 0) * 100);
 			return el('div', { className: `anim-conf-row${pct < 60 ? ' low' : ''}` }, el('span', { textContent: label }), el('div', { className: 'bar' }, el('div', { style: `width:${pct}%` })), el('span', { className: 'muted small', textContent: `${pct}% seen` }));
@@ -157,6 +163,7 @@ export function createAnimationPage({ $, el, api, toast = (t) => alert(t) }) {
 			el('ul', { className: 'anim-desc small' }, ...(m.description || []).map((d) => el('li', { textContent: d }))),
 			el('div', { className: 'card-cap', textContent: 'Export' }),
 			el('div', { className: 'row anim-export' }, dl('bvh', 'BVH'), fbx, json),
+			...(shared ? [shared] : []),
 			el('p', { className: 'muted small', textContent: 'FBX uses Mixamo bone names, so it retargets onto most humanoid rigs. Root motion is estimated from one camera.' })));
 		setupPlayer(m, play, scrub, time);
 	}

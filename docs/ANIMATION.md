@@ -61,10 +61,24 @@ hips → thigh.L/R (Left/RightUpLeg) → shin (Leg) → foot (Foot).
 6. Root motion: across from the hips on screen, towards or away from the size of the torso, and
    the lowest seen foot kept on the floor.
 
+## Two or more people
+
+MediaPipe Lite on the whole frame merges or loses people who stand close (tested: two figures
+walking towards each other were merged at about a body's width apart, and lost entirely during a
+high five). So once two people are in view, each is followed in a close-up of their own (a strip as
+tall as their body and as wide as their trunk and legs), with one landmarker per person in VIDEO
+mode; the whole frame is still searched twice a second for newcomers. Everyone in a clip shares one
+origin (straight ahead of the camera, at the nearest person's starting distance), so exported files
+keep their places relative to each other.
+
 ## Checked
 
 - Poses rebuilt from their own points: 12 standard poses within 6 cm (lying down, kneeling and crouching included).
 - BVH → Blender → FBX → imported again: every joint within 0.01 cm.
+- Two figures walking towards each other and high-fiving (`tools/test-clips.mjs`, `test/ui/animation-two.mjs`):
+  followed in 49 and 50 of 50 frames, no swaps, each walks about 55 cm the right way, facing ±39–45°
+  (true ±35°), the correct arm raised on each (104° and 108°), gap 156 cm → 49 cm (true about 145 → 40).
+  About 40 s for 5 s of clip.
 - The grey mannequin clip (the app's own render): found and fitted in about 26 s for 4 s of video.
   Known limits seen there: arms straight overhead read about 120–130° instead of about 168°, and knees
   that are straight read as 15–25° bent when filmed from the front (depth is hard to judge from one camera).
