@@ -443,3 +443,10 @@ test('a session start that finds no free GPU tries again shortly before giving u
 	assert.ok(rp.state.created.length - before >= 3);
 	rp.state.noCapacity.clear();
 });
+
+test('depth and shape together: every node points only at nodes that exist (the depth control used the deleted empty latent)', () => {
+	const g = buildImageGraph({ prompt: 'A mannequin.', width: 832, height: 1216, count: 1, seed: 1, prefix: 'p', depth: 'd.png', depthStrength: 0.9, shape: 's.png', shapeDenoise: 0.6 });
+	for (const [id, node] of Object.entries(g)) for (const v of Object.values(node.inputs)) if (Array.isArray(v) && typeof v[0] === 'string') assert.ok(g[v[0]], `node ${id} points at missing node ${v[0]}`);
+	assert.deepEqual(g[51].inputs.latent, ['43', 0]);
+	assert.equal(g[7], undefined);
+});

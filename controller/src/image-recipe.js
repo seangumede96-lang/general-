@@ -150,6 +150,8 @@ export function buildImageGraph({ prompt, negative = '', width, height, count, s
 		g[43] = { class_type: 'RepeatLatentBatch', inputs: { samples: ['42', 0], amount: count } };
 		Object.assign(g[8].inputs, { latent_image: ['43', 0], denoise: shapeDenoise });
 		delete g[7];
+		// The depth control takes its size from the latent: now the shape's, not the deleted empty one.
+		if (g[51]) g[51].inputs.latent = ['43', 0];
 	}
 	g[8].inputs.model = model;
 	if (stylePass && loras.length) {
