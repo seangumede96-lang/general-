@@ -737,3 +737,22 @@ body.studio .icon-btn:hover { background: rgba(255,255,255,.18); }
 	#body .body-view, #body .body-look { bottom: 0; right: 420px; }
 	#body .pedestal { bottom: 3%; left: calc((100% - 420px) / 2); }
 }
+/* In the glass panel, type buttons sit on one row you swipe sideways, so the sliders show at once. */
+.creator-panel.glass .creator-pane .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -18px; padding: 2px 18px 4px; scroll-padding: 0 18px; }
+.creator-panel.glass .creator-pane .chips::-webkit-scrollbar { display: none; }
+.creator-panel.glass .creator-pane .chips button, .creator-panel.glass .creator-pane .saved-chip { flex: none; }
+.creator-panel.glass .creator-pane { gap: 8px; }
+.creator-panel.glass .body-ref-types .card-cap { margin: 6px 0 2px; }
+/* As in the mockup: name, track and value on one line, so four or more sliders show at once. */
+.creator-panel.glass .hslider { grid-template-columns: minmax(84px, 30%) 1fr 46px; gap: 10px; padding: 2px 0; }
+.creator-panel.glass .hslider b { grid-column: 1; grid-row: 1; font-size: 14.5px; line-height: 1.25; }
+.creator-panel.glass .hslider .hs-track { grid-column: 2; grid-row: 1; padding: 12px 0; }
+.creator-panel.glass .hslider span { grid-column: 3; grid-row: 1; text-align: right; font-size: 14.5px; }
+.creator-panel.glass .creator-foot { padding: 8px 14px calc(8px + env(safe-area-inset-bottom)); }
+.creator-panel.glass #body-use { min-height: 44px; padding: 8px; }
+.creator-panel.glass .creator-scroll { padding-top: 8px; }
+.creator-panel.glass .card-cap { margin: 0; font-size: 13px; }
+.creator-panel.glass .slider-heading { margin: 4px 0 0; }
+.creator-panel.glass .hslider b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.creator-panel.glass { height: 50%; }
+#body .stage-hint { bottom: 54%; }
