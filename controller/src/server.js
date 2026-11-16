@@ -483,6 +483,22 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			const id = await saveBodyPng(`photo-evidence-${ev.view || 'view'}.json`, Buffer.from(JSON.stringify(ev)), 'application/json');
 			return { id, observability: ev.observability };
 		}],
+		// Fit the body to saved photo evidence (stage 4). Moves only the sliders the photo can measure,
+		// returns the new body code and what changed; also saves the fit record (body-fit/1).
+		['POST', /^\/api\/body\/fit$/, async (req) => {
+			const body = await readJson(req);
+			const up = typeof body.evidence === 'string' && db.getUpload(body.evidence);
+			if (!up) throw new HttpError(404, 'That photo evidence was not found. Save it in the Photo tab first.');
+			let ev; try { ev = JSON.parse(await readFile(up.path, 'utf8')); } catch { throw new HttpError(400, 'The evidence file could not be read.'); }
+			if (ev.consent !== 'own-or-consenting-adult') throw new HttpError(400, 'This photo has no consent confirmation.');
+			const bodyMod = await import('../public/body.js');
+			const start = bodyMod.migrate({ version: 2, ...(body.values || {}) });
+			const { fitBody } = await import('./body-fit.js');
+			let fit; try { fit = await fitBody(ev, start); } catch (err) { throw new HttpError(400, err.message); }
+			const record = { format: 'body-fit/1', created: new Date().toISOString(), evidence: body.evidence, consent: ev.consent, view: ev.view, app: appCommit(), mesh: bodyMeshVersion(), ...fit, values: bodyMod.migrate({ version: 2, ...fit.values }) };
+			record.id = await saveBodyPng(`body-fit-${ev.view || 'view'}.json`, Buffer.from(JSON.stringify(record)), 'application/json');
+			return record;
+		}],
 		['POST', /^\/api\/body\/views$/, async (req) => {
 			const body = await readJson(req);
 			const { renderBody, VIEWS, contactSheet, pngGray } = await import('./body-depth.js');

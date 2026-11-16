@@ -1688,6 +1688,7 @@ const photoPane = {
 		$('photo-detect').addEventListener('click', () => this.find());
 		$('photo-hide').addEventListener('click', () => { if (this.selected < 0) return; const i = this.selected; this.hidden = this.hidden.includes(i) ? this.hidden.filter((x) => x !== i) : [...this.hidden, i]; this.draw(); this.showRegions(); });
 		$('photo-ev-save').addEventListener('click', () => this.save());
+		$('photo-fit').addEventListener('click', () => this.fit());
 		const cv = $('photo-canvas');
 		const at = (e) => { const r = cv.getBoundingClientRect(); return [((e.clientX - r.left) / r.width) * cv.width, ((e.clientY - r.top) / r.height) * cv.height]; };
 		let dragging = false;
@@ -1705,6 +1706,25 @@ const photoPane = {
 		cv.addEventListener('pointerup', () => { if (dragging) { dragging = false; this.showRegions(); } });
 	},
 	status(t) { $('photo-status').textContent = t; },
+	/** Stage 4: fit the figure to the saved evidence on the app server, then load the result into the editor. */
+	async fit() {
+		const id = this.evidenceId || localStorage.getItem('photoEvidence');
+		if (!id) return this.status('Save the photo evidence first.');
+		$('photo-fit').disabled = true; this.status('Fitting the figure to the photo… (about 10 s)');
+		try {
+			const r = await api('POST', '/api/body/fit', { evidence: id, values: bodyEditor.values });
+			const m = await import('./body.js');
+			bodyEditor.values = m.migrate({ ...bodyEditor.values, ...r.values }); bodyEditor.changed(true);
+			const label = Object.fromEntries(m.SLIDERS.map((x) => [x.key, x.label]));
+			const moved = r.fitted.filter((f) => Math.abs(f.to - f.from) > 1e-6);
+			this.status(`Fitted: outline difference ${r.error.before} → ${r.error.after}. Check the figure from the side and back; adjust anything below.`);
+			$('photo-regions').replaceChildren(el('div', { className: 'card-cap', textContent: 'What the fit changed' }),
+				...(moved.length ? moved : [{ key: '', from: 0, to: 0 }]).map((f) => el('div', { className: `photo-region ${f.trust === 'measured' ? 'observed' : 'weak'}`, textContent: f.key ? `${label[f.key] || f.key}: ${f.from.toFixed(2)} → ${f.to.toFixed(2)} (${f.trust})` : 'Nothing needed changing.' })),
+				el('div', { className: 'card-cap', textContent: 'Not shown in this photo (your choice)' }),
+				el('div', { className: 'photo-region unknown', textContent: r.untouched.map((k) => label[k] || k).join(', ') || 'none' }));
+		} catch (err) { this.status(`Could not fit: ${err.message}`); }
+		$('photo-fit').disabled = false;
+	},
 	/** The cropped photo on its own canvas (at most 1024 px on the long side), the image the detector sees. */
 	cropped() {
 		const b = this.bitmap, c = this.crop;
@@ -1763,7 +1783,7 @@ const photoPane = {
 		const f = this.found; if (!f?.landmarks || !$('photo-consent').checked) return;
 		const ev = this.mod.buildEvidence({ landmarks: f.landmarks, mask: f.mask, view: this.view, pose: this.pose, imageWidth: this.bitmap.width, imageHeight: this.bitmap.height, crop: { ...this.crop }, hidden: this.hidden, edited: this.edited });
 		ev.consent = 'own-or-consenting-adult';
-		try { const r = await api('POST', '/api/body/evidence', ev); this.status(`Saved (no photo pixels, just points, outline and measurements). Evidence id ${r.id.slice(0, 8)}.`); localStorage.setItem('photoEvidence', r.id); }
+		try { const r = await api('POST', '/api/body/evidence', ev); this.status(`Saved (no photo pixels, just points, outline and measurements). Evidence id ${r.id.slice(0, 8)}. Now you can fit the figure to it.`); localStorage.setItem('photoEvidence', r.id); this.evidenceId = r.id; $('photo-fit').disabled = false; }
 		catch (err) { this.status(`Could not save: ${err.message}`); }
 	}
 };
