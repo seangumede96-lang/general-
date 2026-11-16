@@ -1694,11 +1694,12 @@ const bodyEditor = {
 			const c = slider(sl); this.controls.push(c);
 			return el('div', { className: 'vslider' }, c.out, c.input, el('b', { textContent: sl.label }));
 		}));
-		for (const [group] of m.GROUPS.filter(([g]) => g !== 'lengths')) $(`body-group-${group}`).replaceChildren(...m.SLIDERS.filter((x) => !x.vertical && x.group === group).map((sl) => {
+		for (const [group] of m.GROUPS.filter(([g]) => g !== 'lengths')) $(`body-group-${group}`).replaceChildren(...m.SLIDERS.filter((x) => !x.vertical && x.group === group).flatMap((sl) => {
 			const c = slider(sl); this.controls.push(c);
 			const track = el('div', { className: 'hs-track' }, c.input);
 			scrollFriendlySlider(track, c.input);
-			return el('div', { className: 'hslider' }, el('b', { textContent: sl.label }), track, c.out);
+			const row = el('div', { className: 'hslider' }, el('b', { textContent: sl.label }), track, c.out);
+			return sl.heading ? [el('h4', { className: 'slider-heading', textContent: sl.heading }), row] : [row];
 		}));
 		// Tabs, as in a character creator: the figure stays in view while you switch groups.
 		const tab = (name) => {

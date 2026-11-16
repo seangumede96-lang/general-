@@ -244,6 +244,17 @@ test('joint correctives: nothing changes at rest, and fewer triangles are crushe
 	}
 });
 
+test('under-fold slider: - drives the fold target, + the blend target; old gluteFold codes migrate', () => {
+	const w = (x) => body.weights({ ...body.defaults(), gluteThighBlend: x });
+	assert.ok(w(-1)['glute-fold-up'] > 0 && !w(-1)['glute-thigh-blend-down']);
+	assert.ok(w(1)['glute-thigh-blend-up'] > 0 && !w(1)['glute-fold-up']);
+	assert.ok(!body.SLIDERS.some((s) => s.key === 'gluteFold'));
+	const m = body.migrate({ ...body.defaults(), gluteFold: 0.8 });
+	assert.ok(Math.abs(m.gluteThighBlend + 0.8) < 1e-9 && !('gluteFold' in m));
+	const heads = body.SLIDERS.filter((s) => s.heading).map((s) => s.heading);
+	assert.deepEqual(heads, ['Basic', 'Detail']);
+});
+
 test('stage 5 shape library: every target is present, finite and at most 3.6 cm; zero changes nothing', () => {
 	const names = ['glute-upper', 'glute-lower', 'glute-shelf', 'glute-inner', 'glute-outer', 'glute-thigh-blend', 'glute-fold', 'iliac-width', 'pelvic-tilt', 'thigh-upper', 'thigh-outer', 'thigh-inner', 'hamstring'];
 	for (const base of [...names.map((x) => `${x}-up`), ...names.map((x) => `${x}-down`), 'glutes-L-up', 'glutes-R-up']) {
@@ -259,7 +270,7 @@ test('stage 5 shape library: every target is present, finite and at most 3.6 cm;
 	assert.ok(plain.every((x, i) => x === zeros[i]));
 	// every new slider changes the body, and all at their extremes stay sound
 	const keys = body.SLIDERS.filter((s) => /^glute(Upper|Lower|Shelf|Inner|Outer|ThighBlend|Fold|Asym)$|^iliacWidth$|^pelvicTilt$|^thigh(Upper|Outer|Inner)$|^hamstring$/.test(s.key));
-	assert.equal(keys.length, 14);
+	assert.equal(keys.length, 13); // fold merged into the under-fold slider (gluteThighBlend: - defined, + filled)
 	for (const s of keys) for (const x of [s.min, s.max]) assert.notDeepEqual(body.weights({ ...body.defaults(), [s.key]: x }), body.weights(body.defaults()), `${s.key}=${x}`);
 	const all = body.shapeBody({ ...body.defaults(), weight: 1, hips: 1.5, glutes: 1.5, thighs: 1.5, ...Object.fromEntries(keys.map((s) => [s.key, s.max])) });
 	assert.ok(all.every(Number.isFinite));

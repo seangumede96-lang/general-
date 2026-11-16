@@ -42,7 +42,7 @@ export const SLIDERS = [
 	{ key: 'breastSpacing', label: 'Spacing', group: 'chest', min: -1, max: 1.2, step: 0.01 },
 	{ key: 'breastFullness', label: 'Fullness: bottom ↔ top', group: 'chest', min: -1, max: 1, step: 0.01 },
 	{ key: 'breastPoint', label: 'Projection', group: 'chest', min: -1, max: 1, step: 0.01 },
-	{ key: 'hips', label: 'Hips', group: 'butt', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'hips', label: 'Hips', group: 'butt', heading: 'Basic', min: -1.2, max: 1.5, step: 0.01 },
 	{ key: 'glutes', label: 'Butt size', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'buttLift', label: 'Butt height (lower ↔ lift)', group: 'butt', min: -1, max: 1, step: 0.01 },
 	{ key: 'buttOut', label: 'Sticks out', group: 'butt', min: -1, max: 1.3, step: 0.01 },
@@ -52,13 +52,12 @@ export const SLIDERS = [
 	{ key: 'buttWidth', label: 'Butt width', group: 'butt', min: -1, max: 1.2, step: 0.01 },
 	{ key: 'buttFullness', label: 'Fullness: bottom ↔ top', group: 'butt', min: -1, max: 1, step: 0.01 },
 	// Stage 5 shape library (procedural, smoothed targets; see tools/hipglute-lib.mjs).
-	{ key: 'gluteUpper', label: 'Upper glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteUpper', label: 'Upper glute fullness', group: 'butt', heading: 'Detail', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'gluteLower', label: 'Lower glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'gluteShelf', label: 'Shelf (top projection)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'gluteInner', label: 'Inner glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'gluteOuter', label: 'Outer glute (side)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
-	{ key: 'gluteThighBlend', label: 'Glute to thigh blend', group: 'butt', min: -1, max: 1.5, step: 0.01 },
-	{ key: 'gluteFold', label: 'Under-fold definition', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteThighBlend', label: 'Under-fold: defined ↔ filled', group: 'butt', min: -1.5, max: 1.5, step: 0.01 },
 	{ key: 'gluteAsym', label: 'Left ↔ right glute (+ her left fuller)', group: 'butt', min: -1, max: 1, step: 0.01 },
 	{ key: 'iliacWidth', label: 'Upper hip width (iliac)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
 	{ key: 'pelvicTilt', label: 'Pelvic tilt', group: 'butt', min: -1, max: 1.5, step: 0.01 },
@@ -127,8 +126,6 @@ const DRIVES = {
 	gluteShelf: [['glute-shelf', 1]],
 	gluteInner: [['glute-inner', 1]],
 	gluteOuter: [['glute-outer', 1]],
-	gluteThighBlend: [['glute-thigh-blend', 1]],
-	gluteFold: [['glute-fold', 1]],
 	iliacWidth: [['iliac-width', 1]],
 	pelvicTilt: [['pelvic-tilt', 1]],
 	thighUpper: [['thigh-upper', 1]],
@@ -170,6 +167,8 @@ export function migrate(values) {
 			out[s.key] = clamp(out[s.key], s.min, s.max);
 		}
 	}
+	// Saved bodies from before the under-fold merge: fold definition becomes the negative side.
+	if (Number.isFinite(values.gluteFold) && values.gluteFold) out.gluteThighBlend = clamp((out.gluteThighBlend || 0) - values.gluteFold, -1.5, 1.5);
 	if (values.headShape in HEAD_SHAPES) out.headShape = values.headShape;
 	for (const k of ['armL', 'armR']) if (values[k] in ARM_POSES) out[k] = values[k];
 	// Pose mode: on or off, and the pose itself (kept while off, so switching back restores it).
@@ -243,14 +242,14 @@ export const BUTT_TYPES = {
 	'Upper-full': { glutes: 0.6, buttOut: 0.5, buttLift: 0.5, gluteShelf: 1, gluteUpper: 0.8, pelvicTilt: 0.5 },
 	Teardrop: { glutes: 0.6, buttLift: -0.3, gluteLower: 1.2, gluteThighBlend: 0.8, gluteInner: 0.5 },
 	Wide: { glutes: 0.5, hips: 0.9, buttWidth: 0.8, gluteOuter: 1, iliacWidth: 0.8, thighOuter: 0.7 },
-	'High and lifted': { glutes: 0.7, buttOut: 0.8, buttLift: 0.8, gluteUpper: 1, gluteShelf: 0.5, gluteFold: 0.8, pelvicTilt: 0.6 },
+	'High and lifted': { glutes: 0.7, buttOut: 0.8, buttLift: 0.8, gluteUpper: 1, gluteShelf: 0.5, gluteThighBlend: -0.8, pelvicTilt: 0.6 },
 	Natural: { glutes: 0.2, buttOut: 0.1, gluteLower: 0.2, thighUpper: 0.2 },
 	Square: { glutes: 0.1, buttWidth: 0.5, buttFullness: 0.1, buttOut: -0.2, buttLift: -0.2 },
 	'Inverted V': { glutes: 0.2, buttFullness: 0.8, buttWidth: -0.3, buttLift: 0.1, buttOut: -0.1 },
 	Bubble: { glutes: 0.8, buttOut: 1, buttLift: 0.7, buttFullness: 0.3 },
 	Flat: { glutes: -0.7, buttOut: -0.8, buttLift: -0.3 }
 };
-const BUTT_KEYS = ['glutes', 'buttOut', 'buttFullness', 'buttWidth', 'buttLift', 'hips', 'gluteUpper', 'gluteLower', 'gluteShelf', 'gluteInner', 'gluteOuter', 'gluteThighBlend', 'gluteFold', 'iliacWidth', 'pelvicTilt', 'thighUpper', 'thighOuter', 'thighInner'];
+const BUTT_KEYS = ['glutes', 'buttOut', 'buttFullness', 'buttWidth', 'buttLift', 'hips', 'gluteUpper', 'gluteLower', 'gluteShelf', 'gluteInner', 'gluteOuter', 'gluteThighBlend', 'iliacWidth', 'pelvicTilt', 'thighUpper', 'thighOuter', 'thighInner'];
 
 /** Apply a breast or butt type: its sliders take the type's values, the others in that set reset. */
 export function applyType(values, kind, name) {
@@ -329,6 +328,9 @@ export function weights(v) {
 	// One glute fuller than the other: + her left, - her right.
 	const asym = Math.max(-1, Math.min(1, Number(v.gluteAsym) || 0));
 	if (asym > 0) add('glutes-L-up', asym); else if (asym < 0) add('glutes-R-up', -asym);
+	// One under-fold slider: + fills the glute-to-thigh crease, - defines it (the two targets were one axis, cos -0.98).
+	const fold = at('gluteThighBlend');
+	if (fold > 0) add('glute-thigh-blend-up', fold); else if (fold < 0) add('glute-fold-up', -fold);
 	add('navel-in', 0.8); // a visible belly button, so its height can be seen and set
 	if (HEAD_SHAPES[v.headShape]) add(HEAD_SHAPES[v.headShape], HEAD_AMOUNT);
 	return w;

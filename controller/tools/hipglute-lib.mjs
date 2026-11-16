@@ -1,6 +1,6 @@
 // Stage 5: hip, butt and thigh shape library. 15 procedural targets made from the existing mesh
 // (no outside data): each displacement is built from MakeHuman's own buttock, hip and thigh
-// regions, then Laplacian-smoothed 25 times so it fades out with no edges. Peak 3 cm at 1.0
+// regions, then Laplacian-smoothed (15 passes by default) so it fades out with no edges. Peak 3 cm at 1.0
 // (shelf 3.5 cm, fold 1.5 cm). Written by the owner's phone session and checked there on
 // grey mannequin sheets and an extreme stress test (all targets at 1.5 on a thick body).
 //
@@ -47,11 +47,13 @@ const nb = Array.from({ length: n }, () => new Set());
 for (let t = 0; t < I.length; t += 3) for (let k = 0; k < 3; k++) { const a = I[t + k], b = I[t + (k + 1) % 3]; nb[a].add(b); nb[b].add(a); }
 const NB = nb.map((x) => [...x]);
 function smoothField(F, iters) { let a = F, b = new Float32Array(F.length); for (let it = 0; it < iters; it++) { for (let i = 0; i < n; i++) { const L = NB[i]; if (!L.length) { b.set(a.subarray(i * 3, i * 3 + 3), i * 3); continue; } let x = 0, y = 0, z = 0; for (const j of L) { x += a[j * 3]; y += a[j * 3 + 1]; z += a[j * 3 + 2]; } b[i * 3] = 0.5 * a[i * 3] + 0.5 * x / L.length; b[i * 3 + 1] = 0.5 * a[i * 3 + 1] + 0.5 * y / L.length; b[i * 3 + 2] = 0.5 * a[i * 3 + 2] + 0.5 * z / L.length; } [a, b] = [b, a]; } return a; }
-const SMOOTH = { 'glutes-L-up': 0, 'glutes-R-up': 0, 'pelvic-tilt-up': 4 };
+// v3 (2026-11-16 diagnostics): 25 passes blurred the targets into each other (upper/shelf cos 0.91,
+// blend/hamstring 0.96); 8 brought edges back on renders; 15 keeps them distinct with no edges.
+const SMOOTH = { 'glutes-L-up': 6, 'glutes-R-up': 6, 'pelvic-tilt-up': 4, 'glute-fold-up': 4 };
 function make(name, fn) {
 	const F = new Float32Array(n * 3);
 	for (let i = 0; i < n; i++) { const r = fn(i, P[i * 3], P[i * 3 + 1], P[i * 3 + 2], N[i * 3], N[i * 3 + 1], N[i * 3 + 2]); if (r) { F[i * 3] = r[0]; F[i * 3 + 1] = r[1]; F[i * 3 + 2] = r[2]; } }
-	const S = smoothField(F, name in SMOOTH ? SMOOTH[name] : 25);
+	const S = smoothField(F, name in SMOOTH ? SMOOTH[name] : 15);
 	const idx = [], off = [];
 	for (let i = 0; i < n; i++) { const r = [S[i * 3], S[i * 3 + 1], S[i * 3 + 2]]; if (Math.hypot(...r) < 2e-4) continue; idx.push(i); off.push(...r); }
 	let mx = 0; for (let k = 0; k < off.length; k += 3) mx = Math.max(mx, Math.hypot(off[k], off[k + 1], off[k + 2]));
@@ -60,20 +62,20 @@ function make(name, fn) {
 }
 const back = (z, nz) => ss(0.0, 0.55, -nz);
 const gy = (y) => (y - gy0) / (gy1 - gy0), gx = (x) => Math.abs(x) / gx1, side = (x) => (x > 0 ? 1 : -1);
-make('glute-upper-up', (i, x, y, z, nx, ny, nz) => { const w = G[i] * ss(0.45, 0.85, gy(y)) * back(z, nz); return w && [nx * A * w, 0.15 * A * w, nz * A * w]; });
+make('glute-upper-up', (i, x, y, z, nx, ny, nz) => { const w = G[i] * ss(0.35, 0.6, gy(y)) * (1 - ss(0.8, 0.95, gy(y))) * back(z, nz); return w && [nx * A * w, 0.15 * A * w, nz * A * w]; });
 make('glute-lower-up', (i, x, y, z, nx, ny, nz) => { const w = G[i] * (1 - ss(0.15, 0.6, gy(y))) * back(z, nz); return w && [nx * A * w, -0.3 * A * w, nz * A * w]; });
-make('glute-shelf-up', (i, x, y, z, nx, ny, nz) => { const g = gy(y); const w = G[i] * ss(0.3, 0.68, g) * (1 - ss(0.82, 1.0, g)) * back(z, nz); return w && [nx * A * w, (0.2 + 0.5 * Math.max(0, ny)) * A * w, nz * A * w]; });
-make('glute-inner-up', (i, x, y, z, nx, ny, nz) => { const w = G[i] * (1 - gx(x)) ** 2 * back(z, nz); return w && [nx * A * w, 0, nz * A * w]; });
+make('glute-shelf-up', (i, x, y, z, nx, ny, nz) => { const g = gy(y); const w = G[i] * ss(0.5, 0.8, g) * (1 - ss(0.88, 1.05, g)) * back(z, nz); return w && [nx * A * w, (0.2 + 0.5 * Math.max(0, ny)) * A * w, nz * A * w]; });
+make('glute-inner-up', (i, x, y, z, nx, ny, nz) => { const w = G[i] * (1 - gx(x)) ** 2 * ss(0.1, 0.35, Math.abs(x)) * back(z, nz); return w && [nx * A * w, 0, nz * A * w]; }); // keeps the cleft free
 make('glute-outer-up', (i, x, y, z, nx, ny, nz) => { const w = G[i] * gx(x) ** 2; return w && [side(x) * 0.8 * A * w, 0, -0.5 * A * w]; });
 make('glute-thigh-blend-up', (i, x, y, z, nx, ny, nz) => { const w = Math.max(G[i], Th[i]) * bump(gy0 + 0.02, 0.35, y) * back(z, nz); return w && [0, -0.2 * A * w, -0.8 * A * w]; });
 make('glute-fold-up', (i, x, y, z, nx, ny, nz) => { const w = Math.max(G[i], Th[i] * 0.6) * bump(gy0 + 0.12, 0.12, y) * back(z, nz) * (1 - gx(x) * 0.5); return w && [0, 0.1 * A * w, 0.6 * A * w]; });
-for (const [suf, s] of [['L', 1], ['R', -1]]) { const m = d.morphs['glutes-up']; const map = new Map(); for (let i = 0; i < m.idx.length; i++) map.set(m.idx[i], [m.off[i * 3], m.off[i * 3 + 1], m.off[i * 3 + 2]]); make(`glutes-${suf}-up`, (i, x) => (x * s > 0 && map.has(i) ? map.get(i) : null)); }
+for (const [suf, sg] of [['L', 1], ['R', -1]]) { const m = d.morphs['glutes-up']; const map = new Map(); for (let i = 0; i < m.idx.length; i++) map.set(m.idx[i], [m.off[i * 3], m.off[i * 3 + 1], m.off[i * 3 + 2]]); make(`glutes-${suf}-up`, (i, x) => { if (!map.has(i)) return null; const w = ss(-0.25, 0.25, x * sg); return map.get(i).map((v) => v * w); }); } // soft split across the midline
 make('iliac-width-up', (i, x, y, z, nx, ny, nz) => { const w = Hm[i] * bump(hipY + 0.9, 0.45, y) * Math.max(0, nx * side(x)); return w && [side(x) * 0.8 * A * w, 0, 0]; });
 make('pelvic-tilt-up', (i, x, y, z) => { const w = Math.max(G[i], Hm[i]) * bump(hipY + 0.3, 1.1, y); if (!w) return null; const a = (8 * Math.PI / 180) * w; const dy = y - hipY, dz = z - HL[2]; return [0, dy * Math.cos(a) - dz * Math.sin(a) - dy, dy * Math.sin(a) + dz * Math.cos(a) - dz].map((v, k) => (k === 2 ? -v : v)); });
 make('thigh-upper-up', (i, x, y, z, nx, ny, nz) => { const w = Th[i] * bump(hipY - 0.9, 0.7, y); return w && [nx * A * w, ny * A * w * 0.3, nz * A * w]; });
 make('thigh-outer-up', (i, x, y, z, nx, ny, nz) => { const w = Th[i] * bump(hipY - 0.8, 0.85, y) * ss(0.0, 0.9, nx * side(x)); return w && [nx * A * w, 0, nz * A * w * 0.5]; });
 make('thigh-inner-up', (i, x, y, z, nx, ny, nz) => { const w = Th[i] * bump(hipY - 1.1, 0.8, y) * ss(0.2, 0.8, -nx * side(x)); return w && [nx * 0.7 * A * w, 0, nz * 0.7 * A * w]; });
-make('hamstring-up', (i, x, y, z, nx, ny, nz) => { const w = Th[i] * bump(hipY - 1.8, 0.9, y) * ss(0.2, 0.8, -nz); return w && [0, 0, -0.8 * A * w]; });
+make('hamstring-up', (i, x, y, z, nx, ny, nz) => { const w = Th[i] * bump(hipY - 2.6, 0.8, y) * ss(0.2, 0.8, -nz); return w && [0, 0, -0.8 * A * w]; });
 // ---- end of the generator ----
 
 // Sliders go both ways: the "-down" target is the same field reversed (not for the one-sided

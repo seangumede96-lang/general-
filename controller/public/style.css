@@ -479,3 +479,5 @@ main > section#body { overflow: hidden; }
 .switch-line { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; }
 .switch-line input { width: 18px; height: 18px; accent-color: #ff7a3d; }
 .pose-part { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); text-transform: none; }
+
+.slider-heading { margin: 14px 0 4px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.7; }
