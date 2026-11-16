@@ -608,3 +608,5 @@ main > section#body { overflow: hidden; }
 .anim-stage.two.wide { grid-template-columns: 1fr; }
 .anim-stage.wide .anim-pane:first-child { aspect-ratio: 16 / 9; }
 .anim-stage.wide .anim-figure { aspect-ratio: 4 / 3; }
+.body-ref-types { margin-top: 10px; }
+.body-ref-types .card-cap { margin: 10px 0 6px; }

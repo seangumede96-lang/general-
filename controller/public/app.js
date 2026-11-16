@@ -1794,7 +1794,7 @@ const bodyEditor = {
 	async show() {
 		// The 3D library is about 2 MB, so it loads only when the editor is first opened.
 		if (!this.module) {
-			try { this.module = await import('./body.js'); }
+			try { this.module = await import('./body.js'); this.types = await import('./body-types.js').catch(() => null); }
 			catch (err) { $('body-view').textContent = `The 3D view could not start: ${err.message}`; return; }
 			this.viewer = this.module.createViewer($('body-view'));
 			let current = null;
@@ -1987,11 +1987,23 @@ const bodyEditor = {
 		for (const b of $('body-base').querySelectorAll('button')) b.classList.toggle('on', b.dataset.base === this.values.base);
 		for (const b of $('body-heads').querySelectorAll('button')) b.classList.toggle('on', b.dataset.shape === this.values.headShape);
 		for (const seg of document.querySelectorAll('#body .arm-row .seg')) for (const b of seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.pose === (this.values[seg.dataset.arm] || 'down'));
+		const usePreset = (preset) => { this.values = { ...m.defaults(this.values.base), headShape: this.values.headShape, posing: this.values.posing, pose: this.values.pose, ...preset }; this.changed(true); };
 		$('body-presets').replaceChildren(...Object.entries(m.PRESETS[this.values.base]).map(([name, preset]) => {
 			const b = el('button', { type: 'button', textContent: name });
-			b.addEventListener('click', () => { this.values = { ...m.defaults(this.values.base), headShape: this.values.headShape, posing: this.values.posing, pose: this.values.pose, ...preset }; this.changed(true); });
+			b.addEventListener('click', () => usePreset(preset));
 			return b;
 		}));
+		// The owner's 20 reference body types (public/body-types.js): base models and shapes.
+		const types = this.types;
+		$('body-ref-types').hidden = !types || this.values.base !== 'female';
+		if (types && this.values.base === 'female') $('body-ref-types').replaceChildren(...Object.entries(types.BODY_TYPES).flatMap(([group, list]) => [
+			el('div', { className: 'card-cap', textContent: group }),
+			el('div', { className: 'chips' }, ...Object.entries(list).map(([name, t]) => {
+				const b = el('button', { type: 'button', textContent: name, title: t.note });
+				b.addEventListener('click', () => usePreset(t.v));
+				return b;
+			}))
+		]));
 		const saved = this.saved();
 		$('body-saved').replaceChildren(...(saved.length ? saved.map((t) => {
 			const b = el('button', { type: 'button', textContent: t.name });
