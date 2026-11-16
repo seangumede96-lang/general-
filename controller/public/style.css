@@ -224,12 +224,12 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 @keyframes glow { 50% { color: #8ab4f8; } }
 .boot-word { font-weight: 600; flex: 1; min-width: 0; background: linear-gradient(90deg, #ececec 30%, #8b7cf6 50%, #ececec 70%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2s linear infinite; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-.boot-eta { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13.5px; white-space: nowrap; }
+.boot-eta { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13.5px; white-space: nowrap; min-width: 11ch; text-align: right; }
 .bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 8px 0 6px; position: relative; }
 .bar > div { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #8b7cf6, #5b9cf6); transition: width .8s ease; position: relative; overflow: hidden; }
 .bar > div::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: sweep 1.6s ease-in-out infinite; }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
-.boot-meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.boot-meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-files { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .dl-row { font-size: 12.5px; }
 .dl-top { display: flex; gap: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -237,7 +237,10 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 .dl-row .bar { height: 4px; margin: 3px 0 0; }
 .dl-row.done .bar > div { background: #81c995; }
 .dl-row.done .bar > div::after { display: none; }
-.boot-quiet { font-size: 13px; color: #f2c66d; margin-top: 4px; }
+.boot-quiet { font-size: 13px; color: #f2c66d; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.boot-quiet.idle { visibility: hidden; }
+.dl-row.placeholder { visibility: hidden; }
+.boot-top { min-height: 22px; }
 @media (prefers-reduced-motion: reduce) { .spin, .boot-word, .bar > div::after { animation: none; } .boot-word { color: var(--text); background: none; } }
 
 /* On/off switch */
@@ -349,7 +352,7 @@ dialog.sheet { overscroll-behavior: contain; }
 	padding: 6px 8px 6px 10px; border-radius: 999px; font-size: 13.5px; color: var(--muted);
 }
 .chip:hover { background: var(--surface-2); color: var(--text); }
-.chip #model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip #model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .chip svg { width: 15px; height: 15px; }
 .tag { flex: none; font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; color: #f0b4c8; background: #4a2431; border: 1px solid #6e3347; vertical-align: 2px; }
 .tag[hidden] { display: none; }
@@ -508,6 +511,7 @@ main > section#body { overflow: hidden; }
 .brain-log summary { cursor: pointer; color: var(--muted); padding: 8px 0; min-height: 40px; display: flex; align-items: center; }
 .brain-log-body { max-height: 260px; overflow-y: auto; background: var(--surface); border-radius: 10px; padding: 8px 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; }
 .brain-log-line { overflow-wrap: anywhere; }
+.brain-progress-slot .boot { min-height: 118px; }
 .brain-log-line.bad { color: #ffb4ab; }
 .brain-log-line.good { color: #8fe3a6; }
 .brain-log-time { color: var(--muted); }

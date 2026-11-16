@@ -64,8 +64,8 @@ const clockText = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, Math.fl
 const etaText = (until) => { const sec = Math.round((until - Date.now()) / 1000); return sec > 0 ? `about ${clockText(sec)} left` : 'any moment now'; };
 
 /** Bar, elapsed time, estimated time left and a rotating status word for a machine that is starting. */
-function progressNode(p, extra = '') {
-	if (!p) return el('div');
+function progressNode(p, extra = '', { reserveFiles = 0 } = {}) {
+	if (!p) return el('div', { className: 'boot' });
 	const label = p.steps[p.index] || '';
 	const words = /download/i.test(label) ? 'download' : /loading the model/i.test(label) ? 'load' : /replacing|render/i.test(label) ? 'gen' : p.index === 0 ? 0 : 1;
 	const word = el('span', { className: 'boot-word', textContent: BOOT_WORDS[words][bootTick % BOOT_WORDS[words].length] });
@@ -80,18 +80,21 @@ function progressNode(p, extra = '') {
 		el('div', { className: 'bar', role: 'progressbar', ariaValueNow: Math.round(p.fraction * 100), ariaValueMin: 0, ariaValueMax: 100 }, el('div', { style: `width:${Math.round(p.fraction * 100)}%` })),
 		meta);
 	// During the download step: one row per file with its size, progress and speed.
-	if (p.files?.length) {
+	if (p.files?.length || reserveFiles) {
 		const gb = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
-		node.append(el('div', { className: 'dl-files' }, ...p.files.map((f) => {
+		const files = p.files?.length ? p.files : Array.from({ length: reserveFiles }, () => ({ name: '', done: 0, total: 0, placeholder: true }));
+		node.append(el('div', { className: 'dl-files' }, ...files.map((f) => {
 			const pct = f.total ? Math.min(100, Math.floor(f.done / f.total * 100)) : 0;
 			const done = f.total > 0 && f.done >= f.total;
 			const right = done ? `${gb(f.total)} · done` : f.total ? `${gb(f.done)} of ${gb(f.total)} · ${pct}%${f.speed > 0 ? ` · ${(f.speed / 1e6).toFixed(f.speed < 1e7 ? 1 : 0)} MB/s` : ''}` : `${gb(f.done)} so far`;
-			return el('div', { className: `dl-row${done ? ' done' : ''}` },
+			return el('div', { className: `dl-row${done ? ' done' : ''}${f.placeholder ? ' placeholder' : ''}` },
 				el('div', { className: 'dl-top' }, el('span', { className: 'dl-name', textContent: f.name.replace(/\.safetensors$/, '') }), el('span', { textContent: right })),
 				el('div', { className: 'bar' }, el('div', { style: `width:${done ? 100 : pct}%` })));
 		})));
 	}
-	if (p.quietSeconds > p.quietLimitSeconds) node.append(el('div', { className: 'boot-quiet', textContent: `No news from the machine for ${clockText(p.quietSeconds)}. Still waiting; if it never gets ready it is shut down by itself and stops charging.` }));
+	// The quiet-machine line always takes its place (hidden when not needed), so the card never changes height.
+	const quiet = p.quietSeconds > p.quietLimitSeconds;
+	node.append(el('div', { className: `boot-quiet${quiet ? '' : ' idle'}`, textContent: quiet ? `No news from the machine for ${clockText(p.quietSeconds)}. Still waiting; if it never gets ready it is shut down by itself and stops charging.` : '\u00a0' }));
 	return node;
 }
 
@@ -2014,6 +2017,7 @@ async function refreshChip() {
 	const waking = b.chatBrain === 'private' && b.private.state === 'starting';
 	$('model-tag').hidden = !((b.using === 'private' || waking) && b.private.uncensored);
 	if (b.using === 'private') {
+		picker.name.style.minWidth = '';
 		picker.name.textContent = `${b.private.label} · private`;
 		picker.dot.className = 'dot private';
 	} else if (waking) {
@@ -2021,13 +2025,16 @@ async function refreshChip() {
 		if (b.private.progress?.etaSeconds != null) { eta.dataset.etaUntil = String(Date.now() + b.private.progress.etaSeconds * 1000); eta.textContent = etaText(Number(eta.dataset.etaUntil)); }
 		picker.name.replaceChildren(`Turning on ${b.private.label} · `, sinceNode(b.private.startedAt || Date.now()), ...(b.private.progress?.etaSeconds != null ? [' · ', eta] : []));
 		picker.dot.className = 'dot waking';
+		// The text changes every second while it wakes: let the chip only grow, so the message box doesn't shuffle.
+		picker.name.style.minWidth = `${Math.max(picker.name.offsetWidth, parseFloat(picker.name.style.minWidth) || 0)}px`;
 	} else {
+		picker.name.style.minWidth = '';
 		picker.name.textContent = b.everyday.model || (b.everyday.hasKey ? 'Everyday model' : 'Choose a model');
 		picker.dot.className = `dot${b.everyday.hasKey ? ' free' : ''}`;
 	}
 	showSession(b.private.state === 'ready' ? b.private.session : null);
 	// While a brain is waking or awake, keep the chip honest without the user doing anything.
-	if (b.private.state !== 'off') picker.timer = setTimeout(async () => { await refreshChip(); if (picker.dialog.open && !picker.busy) renderPicker(); }, b.private.state === 'starting' ? 3000 : 30000);
+	if (b.private.state !== 'off') picker.timer = setTimeout(async () => { const was = b.private.state; await refreshChip(); if (picker.dialog.open && !picker.busy) updatePicker(was); }, b.private.state === 'starting' ? 3000 : 30000);
 }
 
 /* ---------- Session chip: time left while a private model is on ---------- */
@@ -2115,6 +2122,19 @@ function brainLog(entries, live) {
 	return box;
 }
 
+/** Refresh the open picker without moving it: while the brain is still starting, only the progress
+ * card and the log change in place; anything else redraws the panel and keeps its scroll position. */
+function updatePicker(previousState) {
+	const p = picker.data?.private, slot = picker.body.querySelector('.brain-progress-slot');
+	if (p?.state === 'starting' && previousState === 'starting' && slot) {
+		slot.replaceChildren(progressNode(p.progress, ` · ${p.label}`, { reserveFiles: 1 }));
+		const log = picker.body.querySelector('.brain-log');
+		if (log && p.log?.length) log.replaceWith(brainLog(p.log, true));
+		return;
+	}
+	renderPicker();
+}
+
 async function renderPicker() {
 	const b = picker.data;
 	if (!b) return;
@@ -2127,7 +2147,7 @@ async function renderPicker() {
 	} else {
 		const list = el('div', {}, el('div', { className: 'sect-note', textContent: 'Loading models…' }));
 		nodes.push(list);
-		api('GET', '/api/models').then(({ models }) => {
+		(picker.models ||= api('GET', '/api/models').catch((err) => { picker.models = null; throw err; })).then(({ models }) => {
 			const usable = models.filter((m) => !NOT_CHAT_MODELS.test(m)).sort();
 			if (b.everyday.model && !usable.includes(b.everyday.model)) usable.unshift(b.everyday.model);
 			list.replaceChildren(...usable.map((m) => {
@@ -2156,7 +2176,7 @@ async function renderPicker() {
 	});
 	// While it turns on, the progress card is the whole row: the model's name is already in it.
 	const main = p.state === 'starting'
-		? el('div', { className: 'opt-main' }, progressNode(p.progress, ` · ${p.label}`))
+		? el('div', { className: 'opt-main brain-progress-slot' }, progressNode(p.progress, ` · ${p.label}`, { reserveFiles: 1 }))
 		: el('div', { className: 'opt-main' }, el('div', { className: 'opt-title' }, chosen.label, ...(tagFor(chosen) ? [el('span', { className: 'tag', textContent: tagFor(chosen) })] : [])), stateNote);
 	const head = [
 		el('div', { className: 'sect', textContent: 'Private brain · rented GPU' }),
@@ -2182,7 +2202,9 @@ async function renderPicker() {
 		if (picked) head.at(-1).classList.add('picked');
 	}
 	// The private brain comes first: it is the one with a switch.
+	const keep = picker.body.scrollTop;
 	picker.body.replaceChildren(...head, ...nodes);
+	picker.body.scrollTop = keep;
 }
 
 /** Waking a brain costs money, so show the worst-case price and wait for a second tap. */
@@ -2221,6 +2243,7 @@ async function showWake(preset, box) {
 }
 
 $('model-chip').addEventListener('click', async () => {
+	picker.models = null; // a fresh model list each time the picker opens, then reused while it stays open
 	await refreshChip();
 	renderPicker();
 	openDialog(picker.dialog);
