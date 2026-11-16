@@ -24,3 +24,10 @@ Roost is an unofficial client: it loads the x.com website and ships none of X's 
 
 Requires JDK 17+ and the Android SDK (platform 35). Extra accounts need a recent
 "Android System WebView" on the phone.
+
+## Updating without losing logins
+
+Every build is signed with `signing/roost.keystore`, so a newer APK installs straight over the
+old one and all accounts stay signed in. Do not replace that file, and bump `versionCode` in
+`app/build.gradle.kts` for each release. Never uninstall to update: uninstalling erases the
+saved sessions.

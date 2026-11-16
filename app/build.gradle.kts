@@ -12,13 +12,26 @@ android {
         minSdk = 26
         // 34 on purpose: targeting 35 forces edge-to-edge layout, which the web UI doesn't need.
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    // One fixed key for every build, on every machine. Android only installs an update over
+    // the existing app (keeping its saved logins) when the signature matches, so never
+    // replace signing/roost.keystore.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("signing/roost.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
