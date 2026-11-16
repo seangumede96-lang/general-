@@ -610,3 +610,130 @@ main > section#body { overflow: hidden; }
 .anim-stage.wide .anim-figure { aspect-ratio: 4 / 3; }
 .body-ref-types { margin-top: 10px; }
 .body-ref-types .card-cap { margin: 10px 0 6px; }
+
+/* ---------- Body studio (the owner's "MorphStudio" look) ----------
+   The figure fills the screen on a living blue-teal gradient whose hues drift through the family
+   (blue, ice, aqua, teal-green, indigo) over about a minute and a half, with two slow ribbons of
+   light like the PS3 menu. Controls float on frosted glass. */
+@property --h1 { syntax: '<number>'; inherits: true; initial-value: 212; }
+@property --h2 { syntax: '<number>'; inherits: true; initial-value: 168; }
+@property --h3 { syntax: '<number>'; inherits: true; initial-value: 196; }
+@keyframes studio-hues {
+	0% { --h1: 212; --h2: 168; --h3: 196; }
+	25% { --h1: 226; --h2: 186; --h3: 208; }
+	50% { --h1: 196; --h2: 150; --h3: 176; }
+	75% { --h1: 238; --h2: 194; --h3: 218; }
+	100% { --h1: 204; --h2: 160; --h3: 188; }
+}
+@keyframes studio-sway { from { transform: translateX(-7%) scaleY(1); } to { transform: translateX(5%) scaleY(1.12); } }
+@keyframes studio-sway2 { from { transform: translateX(6%) scaleY(1.1); } to { transform: translateX(-6%) scaleY(.92); } }
+@keyframes studio-hint { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+
+body.studio main {
+	--glass: linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,.1));
+	--glass-line: rgba(255,255,255,.38);
+	--glow: 0 0 14px rgba(170, 250, 255, .85);
+	background:
+		radial-gradient(70% 55% at 20% 16%, hsl(var(--h1) 85% 55% / .9), transparent 70%),
+		radial-gradient(60% 50% at 84% 72%, hsl(var(--h2) 70% 56% / .85), transparent 72%),
+		linear-gradient(165deg, hsl(var(--h1) 78% 33%), hsl(var(--h3) 66% 41%) 58%, hsl(var(--h2) 60% 47%));
+	animation: studio-hues 96s ease-in-out infinite alternate;
+	color: #fff;
+}
+body.studio header {
+	margin: 8px 10px 0; border-radius: 22px; padding: 6px; padding-top: max(6px, env(safe-area-inset-top));
+	background: var(--glass); border: 1px solid var(--glass-line);
+	backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+	box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 10px 30px rgba(0, 20, 50, .18);
+}
+body.studio #title { font-size: 22px; text-shadow: 0 1px 8px rgba(0, 30, 60, .3); }
+body.studio .icon-btn:hover { background: rgba(255,255,255,.18); }
+#body .creator { position: relative; display: block; height: 100%; }
+#body .creator-stage { position: absolute; inset: 0; background: transparent; flex: none; }
+.studio-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.studio-glow { position: absolute; left: 50%; top: 8%; width: 90%; height: 70%; transform: translateX(-50%); background: radial-gradient(closest-side, rgba(255,255,255,.22), transparent); filter: blur(10px); }
+.studio-wave { position: absolute; left: -12%; width: 124%; bottom: 18%; height: 34%; animation: studio-sway 23s ease-in-out infinite alternate; }
+.studio-wave path { fill: rgba(255,255,255,.07); stroke: rgba(255,255,255,.28); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.studio-wave .w2 { fill: rgba(255,255,255,.05); stroke: rgba(255,255,255,.18); animation: studio-sway2 31s ease-in-out infinite alternate; transform-origin: 50% 100%; }
+.pedestal {
+	position: absolute; left: 50%; bottom: 3%; width: min(78%, 520px); aspect-ratio: 5 / 1; transform: translateX(-50%);
+	border-radius: 50%; background: radial-gradient(closest-side, rgba(255,255,255,.55), rgba(190,250,255,.18) 60%, transparent);
+	box-shadow: 0 0 0 1.5px rgba(255,255,255,.45) inset, 0 0 40px rgba(170, 245, 255, .35);
+}
+#body .body-view { position: absolute; inset: 0; }
+.body-look { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; pointer-events: none; background: #000; }
+.glass-stack { position: absolute; top: 12px; z-index: 3; display: flex; flex-direction: column; gap: 10px; }
+.stage-left { left: 12px; align-items: flex-start; }
+.stage-right { right: 12px; align-items: flex-end; }
+.glass-pill, .glass-seg {
+	background: var(--glass); border: 1px solid var(--glass-line); color: #fff;
+	backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%);
+	box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 6px 18px rgba(0, 20, 50, .16);
+	text-shadow: 0 1px 4px rgba(0, 30, 60, .35);
+}
+.glass-pill { min-height: 40px; border-radius: 999px; padding: 0 16px; display: inline-flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; letter-spacing: .01em; }
+.glass-pill .dot { width: 22px; height: 22px; margin-left: -8px; border-radius: 50%; flex: none; background: rgba(255,255,255,.16); box-shadow: inset 0 1px 3px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.35); transition: background .25s, box-shadow .25s; }
+.glass-pill[aria-pressed="true"] { background: linear-gradient(180deg, rgba(255,255,255,.42), rgba(255,255,255,.2)); }
+.glass-pill[aria-pressed="true"] .dot { background: radial-gradient(circle at 40% 35%, #fff, #c9fbff 60%, #8fe8f5); box-shadow: var(--glow); }
+.glass-seg { display: inline-flex; border-radius: 999px; padding: 3px; gap: 2px; }
+.glass-seg button { min-height: 34px; padding: 0 14px; border-radius: 999px; border: 0; color: #fff; font-size: 13.5px; font-weight: 600; }
+.glass-seg button.on { background: #fff; color: hsl(var(--h1) 60% 28%); text-shadow: none; }
+#body .pose-toggle { position: static; top: auto; right: auto; }
+#body .pose-toggle[aria-pressed="true"] { background: linear-gradient(180deg, #ffd2ae, #ff9a5c); color: #3a1d08; text-shadow: none; border-color: #ffd9b8; }
+.stage-hint { position: absolute; left: 50%; bottom: calc(46% + 22px); transform: translateX(-50%); z-index: 2; font-size: 13px; padding: 6px 14px; border-radius: 999px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.3); pointer-events: none; animation: studio-hint 7s ease-out forwards; }
+.creator-panel.glass {
+	position: absolute; z-index: 4; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); height: 46%;
+	display: flex; flex-direction: column; border-radius: 28px; overflow: hidden;
+	background: linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.12)); border: 1px solid var(--glass-line); border-left-color: var(--glass-line);
+	backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%);
+	box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 18px 40px rgba(0, 20, 50, .25);
+	color: #fff; transition: height .3s ease;
+}
+.creator-panel.glass.folded { height: 112px; }
+.creator-panel.glass.folded .creator-scroll, .creator-panel.glass.folded .creator-foot { display: none; }
+.panel-grab { display: flex; justify-content: center; padding: 8px 0 2px; flex: none; }
+.panel-grab span { width: 44px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.6); }
+.creator-panel.glass .creator-tabs { display: flex; overflow-x: auto; scrollbar-width: none; gap: 2px; margin: 4px 12px 0; padding: 4px; border: 0; border-radius: 16px; background: rgba(255,255,255,.14); box-shadow: inset 0 1px 2px rgba(0,0,0,.12); }
+.creator-panel.glass .creator-tabs::-webkit-scrollbar { display: none; }
+.creator-panel.glass .creator-tabs button { flex: none; min-height: 38px; padding: 0 15px; border: 0; border-radius: 12px; color: rgba(255,255,255,.88); font-size: 14px; font-weight: 600; }
+.creator-panel.glass .creator-tabs button.on { background: rgba(255,255,255,.3); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 2px 8px rgba(0, 20, 50, .15); }
+.creator-panel.glass .creator-scroll { padding: 12px 18px 16px; }
+.creator-panel.glass .card-cap, .creator-panel.glass .slider-heading { color: rgba(255,255,255,.78); }
+.creator-panel.glass .muted, .creator-panel.glass small { color: rgba(255,255,255,.75); }
+.creator-panel.glass .hslider b { font-size: 15.5px; font-weight: 600; color: #fff; }
+.creator-panel.glass .hslider span, .creator-panel.glass .vslider span { color: #fff; font-size: 15px; font-weight: 600; }
+.creator-panel.glass input[type=range] { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #c9fbff, #5fe1f2 var(--p, 50%), rgba(255,255,255,.28) var(--p, 50%)); box-shadow: inset 0 1px 2px rgba(0,0,0,.15); }
+.creator-panel.glass .vslider input[type=range] { background: linear-gradient(0deg, #c9fbff, #5fe1f2 var(--p, 50%), rgba(255,255,255,.28) var(--p, 50%)); width: 6px; margin: 0 14px; }
+.creator-panel.glass input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff, #e6fdff 55%, #a8f0fa); box-shadow: var(--glow), 0 2px 6px rgba(0, 30, 60, .3); border: 0; }
+.creator-panel.glass input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: var(--glow); border: 0; }
+.creator-panel.glass .chips button, .creator-panel.glass .seg button, .creator-panel.glass .saved-chip button, .creator-panel.glass .btn-ghost, .creator-panel.glass .chip-btn {
+	background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.32); color: #fff;
+}
+.creator-panel.glass .chips button:hover, .creator-panel.glass .seg button.on, .creator-panel.glass .chips button.on { background: rgba(255,255,255,.34); color: #fff; border-color: rgba(255,255,255,.6); }
+.creator-panel.glass input[type=text], .creator-panel.glass textarea, .creator-panel.glass select { background: rgba(0, 25, 50, .22); color: #fff; border: 1px solid rgba(255,255,255,.3); }
+.creator-panel.glass .link { color: #dffbff; }
+.creator-panel.glass .creator-foot { border-top: 1px solid rgba(255,255,255,.2); padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
+.creator-panel.glass #body-use { background: linear-gradient(180deg, #ffffff, #d4f8ff); color: hsl(var(--h1) 60% 25%); box-shadow: var(--glow); }
+.creator-panel.glass .photo-region { color: #fff; }
+@media (min-width: 760px) {
+	.creator-panel.glass { left: auto; top: 10px; width: 400px; height: auto; }
+	.stage-hint { bottom: 22px; }
+	.stage-right { right: 424px; }
+}
+@media (prefers-reduced-motion: reduce) {
+	body.studio main, .studio-wave, .studio-wave .w2 { animation: none; }
+	.stage-hint { display: none; }
+}
+/* The figure stands above the folded panel (its feet on the pedestal); the open panel overlaps the legs, as in a character creator. */
+#body .body-view, #body .body-look { bottom: 128px; height: auto; }
+#body .pedestal { bottom: 116px; }
+#body .stage-hint { bottom: 50%; }
+.creator-panel.glass { background: linear-gradient(180deg, rgba(255,255,255,.22), rgba(0, 40, 80, .16)); text-shadow: 0 1px 3px rgba(0, 30, 60, .35); }
+.creator-panel.glass .card-cap, .creator-panel.glass .slider-heading { color: rgba(255,255,255,.92); }
+.creator-panel.glass .muted, .creator-panel.glass small { color: rgba(255,255,255,.86); }
+.creator-panel.glass .chips button, .creator-panel.glass .seg button, .creator-panel.glass .saved-chip button { background: rgba(0, 35, 70, .16); }
+.creator-panel.glass #body-use, .glass-seg button.on { text-shadow: none; }
+@media (min-width: 760px) {
+	#body .body-view, #body .body-look { bottom: 0; right: 420px; }
+	#body .pedestal { bottom: 3%; left: calc((100% - 420px) / 2); }
+}

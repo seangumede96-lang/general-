@@ -573,7 +573,7 @@ const pages = {
 	characters: { title: 'Characters', show: () => chars.show(), hide: () => chars.hide() },
 	mocap: { title: 'Motion capture', show: () => mocap.show(), hide: () => mocap.hide() },
 	animate: { title: 'Animation', show: () => animation().then((a) => a.show()), hide: () => animationPage?.hide() },
-	body: { title: 'Body', show: () => bodyEditor.show(), hide: () => {} }
+	body: { title: 'Body', show: () => { document.body.classList.add('studio'); bodyEditor.show(); }, hide: () => document.body.classList.remove('studio') }
 };
 // stack: pages underneath the one showing (a sub-page such as the body editor sits on Characters),
 // each with a history entry of its own so the phone's back gesture steps back through them.
@@ -1626,6 +1626,9 @@ $('photo-next').addEventListener('click', () => photoViewer.step(1));
  * where it was); an upward or downward swipe scrolls the page and leaves the slider alone; a
  * plain tap still sets the value at that spot.
  */
+/** How far along its track a slider is, for CSS to colour the filled part (--p). */
+function fillRange(input) { const lo = Number(input.min), hi = Number(input.max); input.style.setProperty('--p', `${hi > lo ? ((Number(input.value) - lo) / (hi - lo)) * 100 : 0}%`); }
+
 function scrollFriendlySlider(track, input) {
 	let start = null;
 	const set = (v) => {
@@ -1808,6 +1811,33 @@ const bodyEditor = {
 		this.pull();
 	},
 
+	/** The Depth or Silhouette view over the figure, redrawn (a moment after the last change) while it is on. */
+	refreshLook() {
+		clearTimeout(this.lookTimer);
+		const img = $('body-look');
+		if (!this.look) { img.hidden = true; return; }
+		this.lookTimer = setTimeout(async () => {
+			const box = $('body-view').getBoundingClientRect();
+			const w = Math.max(64, Math.round(box.width)), h = Math.max(64, Math.round(box.height));
+			try {
+				const blob = await this.viewer.snapshot(w, h, this.viewer.view(), 'depth');
+				let url = URL.createObjectURL(blob);
+				if (this.look === 'silhouette') {
+					const bmp = await createImageBitmap(blob);
+					const c = document.createElement('canvas'); c.width = w; c.height = h;
+					const g = c.getContext('2d'); g.drawImage(bmp, 0, 0);
+					const px = g.getImageData(0, 0, w, h);
+					for (let i = 0; i < px.data.length; i += 4) { const on = px.data[i] > 6; px.data[i] = px.data[i + 1] = px.data[i + 2] = on ? 255 : 0; px.data[i + 3] = 255; }
+					g.putImageData(px, 0, 0);
+					URL.revokeObjectURL(url);
+					url = URL.createObjectURL(await new Promise((r) => c.toBlob(r)));
+				}
+				if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
+				img.dataset.url = url; img.src = url; img.hidden = !this.look;
+			} catch (err) { img.hidden = true; console.warn('look failed', err); }
+		}, 250);
+	},
+
 	/** Saved bodies; anything damaged in storage is skipped rather than breaking the editor. */
 	saved() {
 		try {
@@ -1868,7 +1898,26 @@ const bodyEditor = {
 			b.addEventListener('click', () => { this.values.headShape = shape; this.changed(true); });
 			return b;
 		}));
-		for (const b of document.querySelectorAll('.body-views button')) b.addEventListener('click', () => this.viewer.setView(Number(b.dataset.angle)));
+		// View pills: the one chosen lights up.
+		const views = [...document.querySelectorAll('.body-views button')];
+		const pick = (b) => { for (const x of views) x.setAttribute('aria-pressed', String(x === b)); };
+		for (const b of views) b.addEventListener('click', () => { this.viewer.setView(Number(b.dataset.angle)); pick(b); this.refreshLook(); });
+		pick(views[0]);
+		// Slider tracks fill up to the thumb (the colour is drawn by CSS from --p).
+		$('body').addEventListener('input', (e) => { if (e.target.type === 'range') fillRange(e.target); });
+		// The glass panel folds down to just its tabs, to see the whole figure.
+		$('body-panel-grab').addEventListener('click', () => {
+			const panel = document.querySelector('#body .creator-panel');
+			const folded = panel.classList.toggle('folded');
+			$('body-panel-grab').setAttribute('aria-expanded', String(!folded));
+		});
+		// Depth and Silhouette: what the picture pipeline will follow, shown over the figure.
+		for (const [id, mode] of [['body-look-depth', 'depth'], ['body-look-silhouette', 'silhouette']]) $(id).addEventListener('click', () => {
+			this.look = this.look === mode ? null : mode;
+			$('body-look-depth').setAttribute('aria-pressed', String(this.look === 'depth'));
+			$('body-look-silhouette').setAttribute('aria-pressed', String(this.look === 'silhouette'));
+			this.refreshLook();
+		});
 		$('body-save').addEventListener('click', () => {
 			const name = $('body-name').value.trim() || `Body ${this.saved().length + 1}`;
 			localStorage.setItem('bodyTemplates', JSON.stringify([...this.saved().filter((t) => t.name !== name), { name, values: { ...this.values } }]));
@@ -1950,7 +1999,7 @@ const bodyEditor = {
 		$('body-posing').checked = on;
 		$('body-arms-posing').hidden = !on;
 		for (const row of document.querySelectorAll('#body .arm-row')) row.hidden = on;
-		for (const c of this.poseControls || []) { const v = this.values.pose?.[c.part]?.[c.axis] || 0; c.input.value = v; c.out.textContent = `${Math.round(v)}°`; }
+		for (const c of this.poseControls || []) { const v = this.values.pose?.[c.part]?.[c.axis] || 0; c.input.value = v; c.out.textContent = `${Math.round(v)}°`; fillRange(c.input); }
 		this.viewer.setPoseMode(on, { feetPlanted: $('body-feet').checked });
 	},
 
@@ -1983,7 +2032,8 @@ const bodyEditor = {
 	refresh() {
 		const m = this.module;
 		if (!m) return;
-		for (const c of this.controls) { c.input.value = this.values[c.sl.key]; c.out.textContent = this.labelOf(c.sl, this.values[c.sl.key]); }
+		for (const c of this.controls) { c.input.value = this.values[c.sl.key]; c.out.textContent = this.labelOf(c.sl, this.values[c.sl.key]); fillRange(c.input); }
+		if (this.look) this.refreshLook();
 		for (const b of $('body-base').querySelectorAll('button')) b.classList.toggle('on', b.dataset.base === this.values.base);
 		for (const b of $('body-heads').querySelectorAll('button')) b.classList.toggle('on', b.dataset.shape === this.values.headShape);
 		for (const seg of document.querySelectorAll('#body .arm-row .seg')) for (const b of seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.pose === (this.values[seg.dataset.arm] || 'down'));
