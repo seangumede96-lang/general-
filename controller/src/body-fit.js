@@ -17,14 +17,18 @@ export const PROFILE_ROWS = 48;
 const ROW_FROM = 0.1, ROW_TO = 0.78; // forehead to just below the knees: feet and hair are unreliable
 
 /** Sliders the fitter may move, in order: global first, then local; with the measurement they need. */
+/** Pose settings matched first so the outline compares like with like; never reported as body changes. */
+export const POSE_PARAMS = [{ key: 'armPose', needs: 'any', lo: 0, hi: 1, step: 0.25, pose: true }, { key: 'stance', needs: 'any', lo: 0, hi: 1, step: 0.25, pose: true }];
+
 export const FIT_PARAMS = [
 	{ key: 'weight', needs: 'any', lo: -1, hi: 1, step: 0.25 },
 	{ key: 'legLength', needs: 'legLength', lo: -1, hi: 1, step: 0.25 },
-	{ key: 'shoulders', needs: 'shoulderWidth', lo: -1, hi: 1, step: 0.25 },
-	{ key: 'chest', needs: 'shoulderWidth', lo: -1, hi: 1, step: 0.25 },
 	{ key: 'waist', needs: 'waistWidth', lo: -1.2, hi: 1.3, step: 0.25 },
 	{ key: 'hips', needs: 'hipWidth', lo: -1.2, hi: 1.5, step: 0.25 },
 	{ key: 'thighs', needs: 'thighWidth', lo: -1.2, hi: 1.5, step: 0.25 },
+	// shoulders after the lower body: the shoulder rows also carry the arms' roots, so they explain least
+	{ key: 'shoulders', needs: 'shoulderWidth', lo: -1, hi: 1, step: 0.25 },
+	{ key: 'chest', needs: 'shoulderWidth', lo: -1, hi: 1, step: 0.25 },
 	{ key: 'glutes', needs: 'buttProjection', lo: -1, hi: 1.5, step: 0.25 },
 	{ key: 'buttOut', needs: 'buttProjection', lo: -1, hi: 1.3, step: 0.25 },
 	{ key: 'belly', needs: 'bellyDepth', lo: -1, hi: 1, step: 0.25 },
@@ -103,6 +107,7 @@ export async function fitBody(evidence, start = {}, { width = 0, height = 0, ste
 	if (!width || !height) { height = Math.max(192, personPx * 4); width = Math.round((height * 2) / 3); }
 	const angle = VIEWS[evidence.view] ?? 0;
 	const params = fittable(evidence.observability || {});
+	const search = [...POSE_PARAMS, ...params];
 	let renders = 0;
 	const cost = async (v) => {
 		renders++;
@@ -116,10 +121,15 @@ export async function fitBody(evidence, start = {}, { width = 0, height = 0, ste
 	const v = { ...start };
 	const before = await cost(v);
 	let best = before;
+	// Match the arm and leg spread first (arms held out widen the shoulder rows and fool the fit).
+	for (const step of [0.25, 0.125]) for (const p of POSE_PARAMS) for (const dir of [1, -1]) {
+		let moved = true;
+		while (moved) { moved = false; const cur = v[p.key] || 0, next = Math.min(p.hi, Math.max(p.lo, +(cur + dir * step).toFixed(3))); if (next === cur) break; const c = await cost({ ...v, [p.key]: next }); if (c < best - 1e-5) { best = c; v[p.key] = next; moved = true; } }
+	}
 	// Small steps, many passes: a big first step lets one slider (weight) soak up a difference that
 	// belongs to a region (hips), and coordinate descent can't undo that.
 	for (const step of steps) {
-		for (const p of params) {
+		for (const p of search) {
 			for (const dir of [1, -1]) {
 				let moved = true;
 				while (moved) {
@@ -135,5 +145,8 @@ export async function fitBody(evidence, start = {}, { width = 0, height = 0, ste
 	}
 	const fitted = params.map((p) => ({ key: p.key, from: start[p.key] || 0, to: v[p.key] || 0, trust: p.trust === 1 ? 'measured' : 'rough' }));
 	const untouched = FIT_PARAMS.filter((p) => !params.some((q) => q.key === p.key)).map((p) => p.key);
-	return { values: v, fitted, untouched, error: { before: +before.toFixed(4), after: +best.toFixed(4) }, renders, view: evidence.view };
+	const pose = Object.fromEntries(POSE_PARAMS.map((p) => [p.key, v[p.key] || 0]));
+	// The body code keeps the user's own arm/leg spread; the matched pose is only reported.
+	for (const p of POSE_PARAMS) { if (p.key in start) v[p.key] = start[p.key]; else delete v[p.key]; }
+	return { values: v, pose, fitted, untouched, error: { before: +before.toFixed(4), after: +best.toFixed(4) }, renders, view: evidence.view };
 }
