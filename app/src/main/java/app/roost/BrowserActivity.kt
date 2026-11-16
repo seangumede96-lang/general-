@@ -25,9 +25,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.ProfileStore
-import androidx.webkit.UserAgentMetadata
-import androidx.webkit.WebSettingsCompat
-import androidx.webkit.WebViewFeature
 import androidx.webkit.WebViewCompat
 
 /**
@@ -81,10 +78,9 @@ class BrowserActivity : BaseActivity() {
             databaseEnabled = true
             mediaPlaybackRequiresUserGesture = true
             setSupportMultipleWindows(false)
-            // Present as regular mobile Chrome instead of an embedded WebView.
-            userAgentString = userAgentString.replace("; wv", "").replace(Regex("Version/\\d+\\.\\d+ "), "")
+            // The browser identity (user agent, client hints) is deliberately left untouched:
+            // X refused sign-in when this WebView claimed to be Chrome.
         }
-        presentAsBrowser()
         web.webViewClient = Client()
         web.webChromeClient = Chrome()
         web.setDownloadListener { url, _, _, _, _ -> openExternally(Uri.parse(url)) }
@@ -107,39 +103,6 @@ class BrowserActivity : BaseActivity() {
         })
 
         if (savedInstanceState == null || web.restoreState(savedInstanceState) == null) web.loadUrl(HOME)
-    }
-
-    /**
-     * The UA string above already says "Chrome"; make the other two identity signals agree
-     * with it, otherwise the site sees a browser contradicting itself and refuses sign-in.
-     */
-    @SuppressLint("RestrictedApi", "RequiresFeature")
-    private fun presentAsBrowser() {
-        try {
-            // 1. Client hints (Sec-CH-UA) otherwise carry the brand "Android WebView".
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
-                val current = WebSettingsCompat.getUserAgentMetadata(web.settings)
-                val brands = current.brandVersionList.map {
-                    if (it.brand.contains("WebView", ignoreCase = true)) {
-                        UserAgentMetadata.BrandVersion.Builder()
-                            .setBrand("Google Chrome")
-                            .setMajorVersion(it.majorVersion)
-                            .setFullVersion(it.fullVersion)
-                            .build()
-                    } else it
-                }
-                WebSettingsCompat.setUserAgentMetadata(
-                    web.settings,
-                    UserAgentMetadata.Builder(current).setBrandVersionList(brands).build(),
-                )
-            }
-            // 2. Don't attach this app's package name (X-Requested-With) to every request.
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
-                WebSettingsCompat.setRequestedWithHeaderOriginAllowList(web.settings, emptySet())
-            }
-        } catch (e: RuntimeException) {
-            // Older WebView without these controls: carry on with the defaults.
-        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

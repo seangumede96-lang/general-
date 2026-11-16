@@ -12,8 +12,8 @@ android {
         minSdk = 26
         // 34 on purpose: targeting 35 forces edge-to-edge layout, which the web UI doesn't need.
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     // One fixed key for every build, on every machine. Android only installs an update over
