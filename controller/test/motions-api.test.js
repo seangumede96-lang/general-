@@ -7,7 +7,8 @@ import { createApp } from '../src/server.js';
 import { POSE_PRESETS } from '../public/pose.js';
 
 let app, base, root;
-const BLENDER = process.env.BLENDER || '/opt/blender/blender';
+// Blender from BLENDER, or Ubuntu's package, or a download in /opt.
+const BLENDER = process.env.BLENDER || ['/usr/bin/blender', '/opt/blender/blender'].find((p) => existsSync(p)) || '';
 const api = async (method, path, body) => {
 	const res = await fetch(base + path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
 	return { status: res.status, body: res.headers.get('content-type')?.includes('json') ? await res.json() : Buffer.from(await res.arrayBuffer()), headers: res.headers };
@@ -51,7 +52,7 @@ test('FBX without Blender says how to get it', async () => {
 	assert.match(r.body.error, /apt install blender/);
 });
 
-test('FBX through Blender (when Blender is here)', { skip: !existsSync(BLENDER) && 'Blender not installed here' }, async () => {
+test('FBX through Blender (when Blender is here)', { skip: !BLENDER && 'Blender not installed here' }, async () => {
 	await api('PUT', '/api/settings', { blenderPath: BLENDER });
 	const { body: { id } } = await api('POST', '/api/motions', motion());
 	const r = await api('GET', `/api/motions/${id}.fbx?names=mixamo`);
