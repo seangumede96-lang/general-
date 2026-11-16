@@ -17,6 +17,7 @@ import { createMocapStudio, MocapError } from './mocap.js';
 import { B2Error } from './b2.js';
 import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel, isUncensored } from './gpu.js';
 import { createBrain } from './brain.js';
+import { createMotionStore, MAX_MOTION_BYTES } from './motions.js';
 import { crc32 as zlibCrc32 } from 'node:zlib';
 
 // ---- body depth helpers (named views, masks, manifest) ----
@@ -35,7 +36,7 @@ function bodyMeshVersion() {
 }
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.bin': 'application/octet-stream' , '.wasm': 'application/wasm', '.mjs': 'text/javascript; charset=utf-8', '.task': 'application/octet-stream'};
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.bin': 'application/octet-stream' , '.wasm': 'application/wasm', '.mjs': 'text/javascript; charset=utf-8', '.task': 'application/octet-stream', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
 const MAX_BODY = 1024 * 1024;
 const MAX_STEPS = 12;
 const MAX_ATTACHMENTS = 10;
@@ -89,6 +90,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 	try { bodyState = { ...bodyState, ...JSON.parse(readFileSync(join(dataDir, 'body-current.json'), 'utf8')) }; } catch { /* none yet */ }
 	const gpu = createGpuManager({ db, clock });
 	const brain = createBrain({ db, gpu, clock, ...brainOptions });
+	const motions = createMotionStore({ dataDir, getSettings: () => db.getSettings() });
 	const tools = createTools({ db, gpu, uploadsDir });
 	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs, stallMs: videoStallMs, generateFactor: videoGenerateFactor });
 	studio.recover().catch((err) => console.error('[video]', err.message));
@@ -575,6 +577,15 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 				}
 			};
 		}],
+		// The animation library (motion/1 records). ?source=<fingerprint> finds motions already made
+		// from the same video, so a clip is never analysed twice.
+		['GET', /^\/api\/motions$/, async (req) => {
+			const source = new URL(req.url, 'http://x').searchParams.get('source');
+			const all = await motions.list();
+			return { motions: source ? all.filter((m) => m.sourceKey === source) : all };
+		}],
+		['GET', /^\/api\/motions\/([\w-]+)$/, async (_req, id) => { const m = await motions.get(id); if (!m) throw new HttpError(404, 'Motion not found'); return m; }],
+		['DELETE', /^\/api\/motions\/([\w-]+)$/, async (_req, id) => { await motions.remove(id); return { ok: true }; }],
 		// Cancel a start that is still looking for a GPU, or turn the brain off.
 		['DELETE', /^\/api\/brains\/run$/, async () => { await gpuCall(() => brain.stop()); return { ok: true }; }],
 		// More time for the session (the chip in the chat's corner).
@@ -666,6 +677,27 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		const up = url.pathname.match(/^\/api\/uploads\/([\w-]+)$/);
 		if (up && req.method === 'GET') return serveUpload(req, res, up[1]);
 
+		// Animation files: BVH (made here) and FBX (made by Blender), as downloads.
+		const dl = url.pathname.match(/^\/api\/motions\/([\w-]+)\.(bvh|fbx)$/);
+		if (dl && req.method === 'GET') {
+			let out;
+			try { out = dl[2] === 'bvh' ? await motions.bvh(dl[1]) : await motions.fbx(dl[1], { mixamo: url.searchParams.get('names') === 'mixamo' }); }
+			catch (err) { throw new HttpError(err.status || 502, err.message); }
+			if (!out) throw new HttpError(404, 'Motion not found');
+			const name = `${String(out.name || 'motion').replace(/[^\w.-]+/g, '_').slice(0, 60)}.${dl[2]}`;
+			const data = dl[2] === 'bvh' ? Buffer.from(out.text) : out.data;
+			res.writeHead(200, { 'Content-Type': dl[2] === 'bvh' ? 'text/plain; charset=utf-8' : 'application/octet-stream', 'Content-Length': data.length, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`, 'Cache-Control': 'no-store' });
+			return res.end(data);
+		}
+		if (url.pathname === '/api/motions' && req.method === 'POST') {
+			// Motion records can be larger than other requests (a minute of motion is about 1 MB).
+			let size = 0; const chunks = [];
+			for await (const c of req) { size += c.length; if (size > MAX_MOTION_BYTES) throw new HttpError(413, 'Motion too large'); chunks.push(c); }
+			let m; try { m = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, 'Invalid JSON'); }
+			let id; try { id = await motions.save(m); } catch (err) { throw new HttpError(err.status || 500, err.message); }
+			res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+			return res.end(JSON.stringify({ id }));
+		}
 		if (url.pathname.startsWith('/api/')) {
 			for (const [method, pattern, fn] of routes) {
 				const m = req.method === method && url.pathname.match(pattern);
@@ -696,7 +728,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			server.once('error', reject);
 			server.listen(port, host, () => resolve(server.address()));
 		}),
-		gpu, brain, studio, images,
+		gpu, brain, motions, studio, images,
 		/** True while anything is running that a restart would interrupt or orphan. */
 		busy: () => live.size > 0 || db.listPods().some((p) => !p.ended_at) || studio.list().some((j) => j.active) || mocap.list().some((j) => j.active) || db.listGenerations().some((g) => g.status === 'running'),
 		async close() {

@@ -27,6 +27,8 @@ export const SETTING_DEFAULTS = {
 	// The owner's RunPod network volume that keeps the brain's model between starts (JSON
 	// {id, dataCenter}; empty = made on the first start), and its size in GB.
 	brainVolume: '',
+	// Blender, for FBX export of animations (empty = "blender" on the PATH).
+	blenderPath: '',
 	brainVolumeGb: '25',
 	// The machine image for the private brain (controller/engine-brain).
 	brainImage: 'ghcr.io/seangumede96-lang/assistant-brain-engine:latest',

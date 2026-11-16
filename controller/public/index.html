@@ -27,6 +27,10 @@
 			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
 			Characters
 		</button>
+		<button id="open-animate" class="side-btn">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M12 7l-1 6M11 13l-3 7M11 13l4 3 1 4M11.5 9.5L7 11M11.5 9.5l4.5-2"/><path d="M18.5 3.5l1.5 1.5-1.5 1.5M5.5 17.5L4 19l1.5 1.5"/></svg>
+			Animation
+		</button>
 		<button id="open-mocap" class="side-btn">
 			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M12 7v6M12 9l-5 3M12 9l5-2M12 13l-4 7M12 13l4 7"/></svg>
 			Motion capture
@@ -64,7 +68,7 @@
 	<div id="scroller">
 		<div id="thread"></div>
 		<div id="empty">
-			<h1>What can I help with?</h1>
+			<h1>What are we making today?</h1>
 		</div>
 	</div>
 
@@ -91,7 +95,7 @@
 				<div id="sys-brain-state" class="brain-state"></div>
 				<p class="muted small">Runs an open model on a rented GPU. While it is awake, chat uses it; when it is off, chat uses the endpoint in Settings. It shuts down by itself after the idle time below.</p>
 				<label>Model <input id="sys-brain-model" type="text" autocapitalize="off" spellcheck="false" placeholder="owner/repository:QUANT">
-					<small>A GGUF model on Hugging Face. Downloaded fresh each time the brain wakes.</small>
+					<small>A GGUF model on Hugging Face. Downloaded once to your RunPod storage on its first start, then reused.</small>
 				</label>
 				<div class="row">
 					<label class="inline">Minutes <input id="sys-brain-minutes" type="number" min="1" value="30" inputmode="numeric"></label>
@@ -283,6 +287,33 @@
 			</form>
 
 			<div id="img-gallery"></div>
+		</div>
+	</section>
+
+	<section id="animate" hidden>
+		<div class="sys-wrap">
+			<div class="seg anim-tabs" id="anim-tabs" role="tablist">
+				<button type="button" data-tab="video" aria-pressed="true">From video</button>
+				<button type="button" data-tab="library" aria-pressed="false">Library</button>
+			</div>
+			<div id="anim-video-pane">
+				<label class="anim-pick" id="anim-pick" for="anim-file" role="button" tabindex="0">
+					<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>
+					<span class="anim-pick-title">Choose a video</span>
+					<span class="muted small">MP4, MOV or WebM. The people's movement is turned into animation automatically; the video stays on this phone.</span>
+				</label>
+				<input id="anim-file" class="file-hidden" type="file" accept="video/mp4,video/quicktime,video/webm,video/*" tabindex="-1">
+				<details class="anim-options">
+					<summary>Options</summary>
+					<div class="row anim-option-row">
+						<label>Frames per second <select id="anim-fps"><option value="5">5 (faster)</option><option value="10" selected>10</option><option value="15">15 (smoother)</option></select></label>
+						<label>People to follow <select id="anim-people"><option value="1">1</option><option value="2" selected>Up to 2</option><option value="3">Up to 3</option></select></label>
+					</div>
+				</details>
+				<div id="anim-run"></div>
+				<div id="anim-result"></div>
+			</div>
+			<div id="anim-library-pane" hidden><div id="anim-library"></div></div>
 		</div>
 	</section>
 

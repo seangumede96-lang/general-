@@ -569,6 +569,7 @@ const pages = {
 	video: { title: 'Video', show: () => video.show(), hide: () => video.hide() },
 	characters: { title: 'Characters', show: () => chars.show(), hide: () => chars.hide() },
 	mocap: { title: 'Motion capture', show: () => mocap.show(), hide: () => mocap.hide() },
+	animate: { title: 'Animation', show: () => animation().then((a) => a.show()), hide: () => animationPage?.hide() },
 	body: { title: 'Body', show: () => bodyEditor.show(), hide: () => {} }
 };
 // stack: pages underneath the one showing (a sub-page such as the body editor sits on Characters),
@@ -774,6 +775,10 @@ sys.form.addEventListener('submit', async (e) => {
 $('open-system').addEventListener('click', () => { setDrawer(false); openPage('system'); });
 $('open-video').addEventListener('click', () => { setDrawer(false); openPage('video'); });
 $('open-mocap').addEventListener('click', () => { setDrawer(false); openPage('mocap'); });
+$('open-animate').addEventListener('click', () => { setDrawer(false); openPage('animate'); });
+// The Animation page's code loads the first time it is opened.
+let animationPage = null;
+const animation = async () => (animationPage ||= (await import('./animate.js')).createAnimationPage({ $, el, api }));
 $('open-characters').addEventListener('click', () => { setDrawer(false); openPage('characters'); });
 
 /* ---------- Video Studio ---------- */
