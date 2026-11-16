@@ -6,8 +6,8 @@ export async function startMockRunpod(opts = {}) {
 	const state = {
 		key: 'rp-test-key',
 		gpus: [
-			{ id: 'NVIDIA GeForce RTX 3090', name: 'RTX 3090', memory: 24, secure: true, community: true, price: { secure: 0.43, community: 0.22 }, availability: 'HIGH' },
-			{ id: 'NVIDIA GeForce RTX 4090', name: 'RTX 4090', memory: 24, secure: true, community: true, price: { secure: 0.69, community: 0.34 }, availability: 'MEDIUM' },
+			{ id: 'NVIDIA GeForce RTX 3090', name: 'RTX 3090', memory: 24, secure: true, community: true, price: { secure: 0.43, community: 0.22 }, availability: 'HIGH', dataCenters: [{ id: 'EU-RO-1', availability: 'HIGH' }, { id: 'US-TX-3', availability: 'LOW' }] },
+			{ id: 'NVIDIA GeForce RTX 4090', name: 'RTX 4090', memory: 24, secure: true, community: true, price: { secure: 0.69, community: 0.34 }, availability: 'MEDIUM', dataCenters: [{ id: 'EU-RO-1', availability: 'MEDIUM' }] },
 			{ id: 'NVIDIA RTX A4000', name: 'RTX A4000', memory: 16, secure: true, community: true, price: { secure: 0.25, community: 0.17 }, availability: 'HIGH' },
 			{ id: 'NVIDIA RTX A6000', name: 'RTX A6000', memory: 48, secure: true, community: true, price: { secure: 0.49, community: 0.33 }, availability: 'NONE' }
 		],
@@ -20,6 +20,9 @@ export async function startMockRunpod(opts = {}) {
 		deleted: [],
 		balance: 61.38,          // account credit; null makes the balance query fail
 		seq: 0,                  // pod ids are pod1, pod2, ...
+		volumes: new Map(),      // network volumes
+		dataCenters: [{ id: 'EU-RO-1', networkVolumeTypes: ['STANDARD'] }, { id: 'US-TX-3', networkVolumeTypes: ['STANDARD'] }, { id: 'CA-MTL-1', networkVolumeTypes: [] }],
+		dcFull: new Set(),       // data centres where every create fails with 400
 		...opts
 	};
 	const problem = (res, status, detail) => {
@@ -41,13 +44,24 @@ export async function startMockRunpod(opts = {}) {
 		for await (const c of req) raw += c;
 
 		if (req.method === 'GET' && path === '/catalog/gpus') return json(res, 200, { gpus: state.gpus });
+		if (req.method === 'GET' && path === '/catalog/datacenters') return json(res, 200, { dataCenters: state.dataCenters });
+		if (req.method === 'GET' && path === '/network-volumes') return json(res, 200, { networkVolumes: [...state.volumes.values()] });
+		if (req.method === 'POST' && path === '/network-volumes') {
+			const body = JSON.parse(raw);
+			const v = { id: `vol${state.volumes.size + 1}`, name: body.name, size: body.size, dataCenter: body.dataCenter };
+			state.volumes.set(v.id, v);
+			return json(res, 201, v);
+		}
+		const vol = path.match(/^\/network-volumes\/([\w-]+)$/);
+		if (vol && req.method === 'GET') return state.volumes.has(vol[1]) ? json(res, 200, state.volumes.get(vol[1])) : problem(res, 404, 'network volume not found');
 		if (req.method === 'POST' && path === '/pods') {
 			const body = JSON.parse(raw);
 			state.created.push(body);
 			if (state.insufficientBalance) return problem(res, 402, 'insufficient balance');
 			if (state.noCapacity.has(body.gpu.id)) return problem(res, 400, 'pod could not be placed');
+			if (body.dataCenterIds?.some((d) => state.dcFull.has(d))) return problem(res, 400, 'There are no longer any instances available with the requested specifications.');
 			const gpu = state.gpus.find((g) => g.id === body.gpu.id);
-			const pod = { id: `pod${++state.seq}`, name: body.name, image: body.image, status: 'RUNNING', cloud: body.cloud, gpu: { id: gpu.id, count: 1 }, cost: gpu.price[body.cloud.toLowerCase()] };
+			const pod = { id: `pod${++state.seq}`, name: body.name, image: body.image, status: 'RUNNING', cloud: body.cloud, gpu: { id: gpu.id, count: 1 }, cost: gpu.price[body.cloud.toLowerCase()], dataCenterId: body.dataCenterIds?.[0] || 'US-TX-3' };
 			state.pods.set(pod.id, pod);
 			// Simulates a phone connection that drops after RunPod has made the pod.
 			if (state.dropCreateAnswer) { state.dropCreateAnswer--; return res.socket.destroy(); }

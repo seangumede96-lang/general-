@@ -55,6 +55,7 @@
 			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
 		</button>
 		<div id="title">New chat</div>
+		<button id="session-chip" type="button" class="session-chip" aria-haspopup="dialog" hidden></button>
 		<button id="header-new" class="icon-btn" aria-label="New chat">
 			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
 		</button>
@@ -420,6 +421,11 @@
 	<button type="button" id="photo-prev" class="photo-nav prev" aria-label="Previous picture">&#8249;</button>
 	<button type="button" id="photo-next" class="photo-nav next" aria-label="Next picture">&#8250;</button>
 	<div class="photo-hint muted small">Tap to zoom · swipe for the next picture</div>
+</dialog>
+
+<dialog id="session" class="sheet" aria-label="Private brain session">
+	<div class="sheet-head"><h2 id="session-title">Private brain</h2><button type="button" id="session-close" class="icon-btn always" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+	<div id="session-body"></div>
 </dialog>
 
 <dialog id="models" class="sheet" aria-label="Choose a model">

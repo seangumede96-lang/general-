@@ -206,38 +206,49 @@ export function createGpuManager({ db, clock = Date.now }) {
 		if (!q.allowed) throw new GpuError(q.reason, 'refused');
 		let lastError;
 		for (const gpu of q.options) {
-			let pod;
-			try {
-				pod = await call('POST', '/pods', {
-					name: spec.name,
-					image: spec.image,
-					args: withDeadman(spec.cmd, minutes * 60 + DEADMAN_GRACE_S),
-					disk: spec.disk || 20,
-					ports: spec.ports || [],
-					env: spec.env || {},
-					cloud: gpu.cloud,
-					gpu: { id: gpu.id, count: 1 }
-				});
-			} catch (err) {
-				lastError = err;
-				if (err.code === 'network') {
-					// The request may have reached RunPod even though the answer did not reach
-					// this phone: delete any pod of ours this app does not know about, so nothing
-					// is left running (and charging) unseen.
-					await removeUnknownPods(spec.name);
-					throw new GpuError(`Could not reach RunPod to start the GPU (${err.message.replace(/^Could not reach RunPod \(|\)\.$/g, '')}). Nothing was left running. Check the phone's connection and try again.`, 'network');
-				}
-				catalog.clear(); // the list said this was in stock and it was not
-				if (err.code === 'unavailable') continue; // no capacity for this type: try the next
-				throw err;
-			}
-			const now = clock();
-			// Trust the rate RunPod reports for the pod it actually placed.
-			const rate = Number(pod.cost) > 0 ? Number(pod.cost) : gpu.rate;
-			db.insertPod({ id: pod.id, name: spec.name, gpu: gpu.name, rate, purpose, created_at: now, last_used_at: now, deadline_at: now + minutes * 60000, kind: spec.kind, secret: spec.secret, model: spec.model });
-			return db.getPod(pod.id);
+			try { return await createOne({ gpu, spec, minutes, purpose }); }
+			catch (err) { lastError = err; if (err.code === 'unavailable') continue; throw err; }
 		}
 		throw new GpuError(`None of the available GPUs could be started. ${lastError?.message || ''}`.trim(), 'unavailable');
+	}
+
+	/**
+	 * One try at creating a pod on one GPU type. `placement` optionally pins it to data centres and
+	 * mounts a network volume: { dataCenterIds, volumeId, path }. A pod with `spec.selfTimer` runs
+	 * its own extendable self-delete timer (POD_SECONDS); any other pod gets the fixed one.
+	 * Throws GpuError 'unavailable' when that type has no free machine, so the caller tries the next.
+	 */
+	async function createOne({ gpu, spec, minutes, purpose = '', placement = null }) {
+		const seconds = minutes * 60 + DEADMAN_GRACE_S;
+		const body = {
+			name: spec.name,
+			image: spec.image,
+			args: spec.selfTimer ? JSON.stringify({ entrypoint: ['bash', '-c'], cmd: [spec.cmd] }) : withDeadman(spec.cmd, seconds),
+			disk: spec.disk || 20,
+			ports: spec.ports || [],
+			env: { ...(spec.env || {}), ...(spec.selfTimer ? { POD_SECONDS: String(seconds) } : {}) },
+			cloud: gpu.cloud,
+			gpu: { id: gpu.id, count: 1 }
+		};
+		if (placement?.dataCenterIds?.length) body.dataCenterIds = placement.dataCenterIds;
+		if (placement?.volumeId) body.mounts = { network: [{ volumeId: placement.volumeId, path: placement.path || '/workspace' }] };
+		let pod;
+		try { pod = await call('POST', '/pods', body); }
+		catch (err) {
+			if (err.code === 'network') {
+				// The request may have reached RunPod even though the answer did not reach this phone:
+				// delete any pod of ours this app does not know about, so nothing is left running unseen.
+				await removeUnknownPods(spec.name);
+				throw new GpuError(`Could not reach RunPod to start the GPU (${err.message.replace(/^Could not reach RunPod \(|\)\.$/g, '')}). Nothing was left running. Check the phone's connection and try again.`, 'network');
+			}
+			catalog.clear(); // the list said this was in stock and it was not
+			throw err;
+		}
+		const now = clock();
+		// Trust the rate RunPod reports for the pod it actually placed.
+		const rate = Number(pod.cost) > 0 ? Number(pod.cost) : gpu.rate;
+		db.insertPod({ id: pod.id, name: spec.name, gpu: gpu.name, rate, purpose, created_at: now, last_used_at: now, deadline_at: now + minutes * 60000, kind: spec.kind, secret: spec.secret, model: spec.model });
+		return { ...db.getPod(pod.id), dataCenter: pod.dataCenterId || pod.dataCenter || placement?.dataCenterIds?.[0] || '' };
 	}
 
 	/** Delete running pods with this app's name that are not in its records (made during a dropped connection). */
@@ -431,7 +442,7 @@ export function createGpuManager({ db, clock = Date.now }) {
 		return out;
 	}
 
-	return { quote, start, stop, stopSoon, stopping, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, brainStage: () => brainStage,
+	return { quote, start, createOne, call, catalogFor, candidates, refreshBalance, stop, stopSoon, stopping, touch, tick, status, budget, brainSpec, brainEndpoint, probeBrain, brainPod, proxyUrl, registerProbe, brainStage: () => brainStage,
 		brainProgress: (p, model) => computeProgress('brain', p.created_at, brainTracker.get(p.id), clock(), brainPlan(model)), activePod: () => db.listPods().find((p) => !p.ended_at) || null };
 }
 
@@ -441,7 +452,7 @@ export function createGpuManager({ db, clock = Date.now }) {
  */
 export const BRAIN_PRESETS = [
 	{ id: 'unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M', label: 'Qwen 3.6 35B', note: 'Strongest all-round for planning and tools', sizeGb: 22 },
-	{ id: 'mradermacher/Huihui-Qwen3.6-35B-A3B-abliterated-GGUF:Q4_K_M', label: 'Qwen 3.6 35B', uncensored: true, note: 'Fewer refusals; may be less reliable with tools', sizeGb: 21 },
+	{ id: 'mradermacher/Huihui-Qwen3.6-35B-A3B-abliterated-GGUF:Q4_K_M', label: 'Qwen 3.6 35B Uncensored', uncensored: true, note: 'Fewer refusals; may be less reliable with tools', sizeGb: 21 },
 	{ id: 'unsloth/gemma-4-26B-A4B-it-GGUF:Q4_K_M', label: 'Gemma 4 26B', note: 'Lighter; leaves GPU memory free', sizeGb: 17 },
 	{ id: 'unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF:Q4_K_M', label: 'Mistral Small 3.2', note: 'Smallest and quickest to wake', sizeGb: 14 }
 ];

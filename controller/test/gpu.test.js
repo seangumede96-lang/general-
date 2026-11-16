@@ -56,7 +56,8 @@ test('a test pod takes the cheapest GPU of any size; the estimate covers the dea
 
 test('a brain pod only considers GPUs with 24 GB or more', async () => {
 	const q = (await api('POST', '/api/system/quote', { minutes: 30, kind: 'brain' })).body;
-	assert.deepEqual(q.options.map((o) => o.name), ['RTX 3090', 'RTX 4090']);
+	// First next to the model storage, then anywhere; never the 16 GB card.
+	assert.deepEqual(q.options.map((o) => `${o.name} ${o.where}`), ['RTX 3090 EU-RO-1', 'RTX 4090 EU-RO-1', 'RTX 3090 any data centre', 'RTX 4090 any data centre']);
 });
 
 test('with both clouds allowed, the cheapest wins wherever it is', async () => {

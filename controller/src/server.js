@@ -16,6 +16,7 @@ import { createImageStudio, ImageError } from './images.js';
 import { createMocapStudio, MocapError } from './mocap.js';
 import { B2Error } from './b2.js';
 import { createGpuManager, GpuError, TEST_POD, MIN_VRAM, BRAIN_PRESETS, brainLabel, isUncensored } from './gpu.js';
+import { createBrain } from './brain.js';
 import { crc32 as zlibCrc32 } from 'node:zlib';
 
 // ---- body depth helpers (named views, masks, manifest) ----
@@ -73,7 +74,7 @@ const titleFrom = (text) => {
 	return one.length > 48 ? `${one.slice(0, 47)}…` : one;
 };
 
-export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase, mocapRetryMs, stopRetryMs, imageStartRetryMs }) {
+export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUploadBytes = 2 * 1024 ** 3, videoPollMs = 5000, imagePollMs = 3000, videoStallMs, videoGenerateFactor, mocapPollMs = 5000, mocapStallMs, hfBase, mocapRetryMs, stopRetryMs, imageStartRetryMs, brainPollMs = 3000, brainOptions = {} }) {
 	const db = openDb(dataDir);
 	const uploadsDir = join(dataDir, 'uploads');
 	/** Store a generated body file (depth/mask/preview PNG, sheet, manifest) as an upload; returns its id. */
@@ -87,6 +88,7 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 	let bodyState = { values: null, rev: 0, source: null, at: 0 };
 	try { bodyState = { ...bodyState, ...JSON.parse(readFileSync(join(dataDir, 'body-current.json'), 'utf8')) }; } catch { /* none yet */ }
 	const gpu = createGpuManager({ db, clock });
+	const brain = createBrain({ db, gpu, clock, ...brainOptions });
 	const tools = createTools({ db, gpu, uploadsDir });
 	const studio = createVideoStudio({ db, gpu, uploadsDir, clock, pollMs: videoPollMs, stallMs: videoStallMs, generateFactor: videoGenerateFactor });
 	studio.recover().catch((err) => console.error('[video]', err.message));
@@ -170,6 +172,9 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 	// The watchdog stops idle and expired pods. unref: it must not keep the process alive.
 	const watchdog = watchdogMs ? setInterval(() => gpu.tick().catch((err) => console.error('[gpu]', err.message)), watchdogMs) : null;
 	watchdog?.unref();
+	// While the private brain starts, its machine is checked every few seconds (real progress, the 90 s silence rule).
+	const brainTimer = watchdogMs && brainPollMs ? setInterval(() => { if (brain.busy()) brain.step(); }, brainPollMs) : null;
+	brainTimer?.unref();
 	const gpuCall = async (fn) => {
 		try { return await fn(); }
 		catch (err) {
@@ -543,10 +548,14 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		}],
 		// Everything the chat's model picker needs: what is in use, and what can be chosen.
 		['GET', /^\/api\/brains$/, async () => {
-			await gpu.probeBrain().catch(() => {});
+			if (brain.busy()) await brain.step();
+			else await gpu.probeBrain().catch(() => {});
 			const s = db.getSettings();
 			const pod = gpu.brainPod();
-			const state = !pod ? 'off' : pod.ready_at ? 'ready' : 'starting';
+			const v = brain.view();
+			// "starting" covers the whole start, including waiting for a GPU before any machine exists.
+			const state = pod?.ready_at ? 'ready' : brain.busy() || pod ? 'starting' : 'off';
+			const model = (state !== 'off' && (v.model || pod?.model)) || s.brainModel;
 			let host = '';
 			try { host = new URL(s.baseUrl).hostname; } catch { /* not a URL yet */ }
 			return {
@@ -554,21 +563,30 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 				using: s.chatBrain !== 'everyday' && state === 'ready' ? 'private' : 'everyday',
 				everyday: { model: s.model, host, hasKey: Boolean(s.apiKey) },
 				private: {
-					state, podId: pod?.id || null,
-					// For the progress display while it turns on.
-					startedAt: pod?.created_at || null, stage: state === 'starting' ? gpu.brainStage() : state, gpu: pod?.gpu || '', rate: pod?.rate || 0,
-					progress: state === 'starting' ? gpu.brainProgress(pod, BRAIN_PRESETS.find((x) => x.id === pod.model) || { label: brainLabel(pod.model) }) : null,
-					// While a brain is up, "model" is the one it was started with, whatever is selected now.
-					model: pod?.model || s.brainModel, label: brainLabel(pod?.model || s.brainModel),
-					uncensored: isUncensored(pod?.model || s.brainModel),
-					selected: s.brainModel, presets: BRAIN_PRESETS
+					state, podId: pod?.id || null, phase: v.phase,
+					startedAt: v.startedAt || pod?.created_at || null, gpu: pod?.gpu || '', rate: pod?.rate || 0,
+					progress: state === 'starting' ? v.progress : null,
+					// The backend log of the current or last start (events from the app and the machine).
+					log: v.log, error: v.phase === 'failed' ? v.error : null,
+					session: brain.session(),
+					model, label: brainLabel(model), uncensored: isUncensored(model),
+					selected: s.brainModel, presets: BRAIN_PRESETS,
+					storage: brain.volume()
 				}
 			};
+		}],
+		// Cancel a start that is still looking for a GPU, or turn the brain off.
+		['DELETE', /^\/api\/brains\/run$/, async () => { await gpuCall(() => brain.stop()); return { ok: true }; }],
+		// More time for the session (the chip in the chat's corner).
+		['POST', /^\/api\/brains\/extend$/, async (req) => {
+			const { minutes } = await readJson(req);
+			return gpuCall(() => brain.extend(minutes));
 		}],
 		['GET', /^\/api\/system$/, () => gpu.status()],
 		['POST', /^\/api\/system\/quote$/, async (req) => {
 			const { minutes, kind = 'test' } = await readJson(req);
 			if (!(kind in MIN_VRAM)) throw new HttpError(400, 'kind must be "test" or "brain"');
+			if (kind === 'brain') return gpuCall(() => brain.quote({ minutes }));
 			return gpuCall(() => gpu.quote({ minutes, minVram: MIN_VRAM[kind] }));
 		}],
 		// Starting a pod spends money, so the caller must echo back the estimate it was shown.
@@ -577,6 +595,8 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			// A brain is started with the model the caller names, so the pod matches the price that was confirmed.
 			if (kind === 'brain' && typeof model === 'string' && model) db.setSettings({ brainModel: model });
 			if (!(kind in MIN_VRAM)) throw new HttpError(400, 'kind must be "test" or "brain"');
+			// The brain has its own start: storage, GPU types in order, real progress, retries.
+			if (kind === 'brain') return gpuCall(() => brain.start({ minutes, confirmEstimate, model: db.getSettings().brainModel }));
 			const minVram = MIN_VRAM[kind];
 			return gpuCall(async () => {
 				const spec = kind === 'brain' ? gpu.brainSpec() : TEST_POD;
@@ -676,11 +696,11 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			server.once('error', reject);
 			server.listen(port, host, () => resolve(server.address()));
 		}),
-		gpu, studio, images,
+		gpu, brain, studio, images,
 		/** True while anything is running that a restart would interrupt or orphan. */
 		busy: () => live.size > 0 || db.listPods().some((p) => !p.ended_at) || studio.list().some((j) => j.active) || mocap.list().some((j) => j.active) || db.listGenerations().some((g) => g.status === 'running'),
 		async close() {
-			clearInterval(watchdog);
+			clearInterval(watchdog); clearInterval(brainTimer);
 			await studio.shutdown();
 			await mocap.shutdown();
 			for (const turn of live.values()) cancelTurn(turn);

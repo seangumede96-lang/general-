@@ -24,6 +24,12 @@ export const SETTING_DEFAULTS = {
 	// The private brain: a GGUF model on Hugging Face, served by llama.cpp on a rented pod.
 	brainModel: 'unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_M',
 	brainContext: '16384',
+	// The owner's RunPod network volume that keeps the brain's model between starts (JSON
+	// {id, dataCenter}; empty = made on the first start), and its size in GB.
+	brainVolume: '',
+	brainVolumeGb: '25',
+	// The machine image for the private brain (controller/engine-brain).
+	brainImage: 'ghcr.io/seangumede96-lang/assistant-brain-engine:latest',
 	podProxyTemplate: 'https://{id}-{port}.proxy.runpod.net',
 	// Which brain chat should use: 'private' (the rented GPU, whenever it is awake) or 'everyday'.
 	chatBrain: 'private',
@@ -176,7 +182,9 @@ export function openDb(dataDir) {
 		insertPod: db.prepare('INSERT INTO pods (id, name, gpu, rate, purpose, created_at, last_used_at, deadline_at, kind, secret, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
 		setPodReady: db.prepare('UPDATE pods SET ready_at = ? WHERE id = ? AND ready_at IS NULL'),
 		endPod: db.prepare('UPDATE pods SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL'),
-		touchPod: db.prepare('UPDATE pods SET last_used_at = ? WHERE id = ?'),
+		// Never moves backwards: an extended session keeps its later time when a message comes in.
+		touchPod: db.prepare('UPDATE pods SET last_used_at = MAX(last_used_at, ?) WHERE id = ?'),
+		setPodDeadline: db.prepare('UPDATE pods SET deadline_at = ? WHERE id = ? AND ended_at IS NULL'),
 		setPodActualCost: db.prepare('UPDATE pods SET actual_cost = ? WHERE id = ?'),
 		allSettings: db.prepare('SELECT key, value FROM settings'),
 		setSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
@@ -257,6 +265,7 @@ export function openDb(dataDir) {
 		setPodReady: (id, at) => { q.setPodReady.run(at, id); },
 		endPod: (id, at, reason) => { q.endPod.run(at, reason, id); },
 		touchPod: (id, at) => { q.touchPod.run(at, id); },
+		setPodDeadline: (id, at) => { q.setPodDeadline.run(at, id); },
 		setPodActualCost: (id, cost) => { q.setPodActualCost.run(cost, id); },
 		getSettings() {
 			const out = { ...SETTING_DEFAULTS };

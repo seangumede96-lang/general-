@@ -70,8 +70,9 @@ function progressNode(p, extra = '') {
 	const words = /download/i.test(label) ? 'download' : /loading the model/i.test(label) ? 'load' : /replacing|render/i.test(label) ? 'gen' : p.index === 0 ? 0 : 1;
 	const word = el('span', { className: 'boot-word', textContent: BOOT_WORDS[words][bootTick % BOOT_WORDS[words].length] });
 	word.dataset.words = String(words);
-	const eta = el('span', { className: 'boot-eta', textContent: etaText(Date.now() + p.etaSeconds * 1000) });
-	eta.dataset.etaUntil = String(Date.now() + p.etaSeconds * 1000);
+	// No time left is shown until it can be worked out from something real (a measured download speed).
+	const eta = el('span', { className: 'boot-eta', textContent: p.etaSeconds == null ? '' : etaText(Date.now() + p.etaSeconds * 1000) });
+	if (p.etaSeconds != null) eta.dataset.etaUntil = String(Date.now() + p.etaSeconds * 1000);
 	const meta = el('div', { className: 'boot-meta' },
 		p.steps.length > 1 ? `Step ${p.index + 1} of ${p.steps.length} · ` : '', label, p.detail ? ` (${p.detail})` : '', ' · ', sinceNode(Date.now() - p.elapsedSeconds * 1000), ' so far', extra);
 	const node = el('div', { className: 'boot' },
@@ -2012,16 +2013,74 @@ async function refreshChip() {
 		picker.dot.className = 'dot private';
 	} else if (waking) {
 		const eta = el('span');
-		if (b.private.progress) { eta.dataset.etaUntil = String(Date.now() + b.private.progress.etaSeconds * 1000); eta.textContent = etaText(Number(eta.dataset.etaUntil)); }
-		picker.name.replaceChildren(`Turning on ${b.private.label} · `, sinceNode(b.private.startedAt || Date.now()), ...(b.private.progress ? [' · ', eta] : []));
+		if (b.private.progress?.etaSeconds != null) { eta.dataset.etaUntil = String(Date.now() + b.private.progress.etaSeconds * 1000); eta.textContent = etaText(Number(eta.dataset.etaUntil)); }
+		picker.name.replaceChildren(`Turning on ${b.private.label} · `, sinceNode(b.private.startedAt || Date.now()), ...(b.private.progress?.etaSeconds != null ? [' · ', eta] : []));
 		picker.dot.className = 'dot waking';
 	} else {
 		picker.name.textContent = b.everyday.model || (b.everyday.hasKey ? 'Everyday model' : 'Choose a model');
 		picker.dot.className = `dot${b.everyday.hasKey ? ' free' : ''}`;
 	}
+	showSession(b.private.state === 'ready' ? b.private.session : null);
 	// While a brain is waking or awake, keep the chip honest without the user doing anything.
-	if (b.private.state !== 'off') picker.timer = setTimeout(async () => { await refreshChip(); if (picker.dialog.open && !picker.busy) renderPicker(); }, b.private.state === 'starting' ? 8000 : 30000);
+	if (b.private.state !== 'off') picker.timer = setTimeout(async () => { await refreshChip(); if (picker.dialog.open && !picker.busy) renderPicker(); }, b.private.state === 'starting' ? 3000 : 30000);
 }
+
+/* ---------- Session chip: time left while a private model is on ---------- */
+
+// The private brain shuts down at the sooner of two rules, both shown here:
+// idle (no message for the idle time in Settings, 10 min by default) and the session's time limit.
+const session = { chip: $('session-chip'), dialog: $('session'), data: null, endsAt: 0 };
+function showSession(s) {
+	session.data = s;
+	session.chip.hidden = !s;
+	if (!s) { if (session.dialog.open) session.dialog.close(); return; }
+	session.endsAt = Date.now() + s.secondsLeft * 1000;
+	tickSession();
+	if (session.dialog.open) renderSession();
+}
+function tickSession() {
+	const s = session.data;
+	if (!s) return;
+	const left = Math.max(0, Math.round((session.endsAt - Date.now()) / 1000));
+	session.chip.textContent = `${s.label.split(' ')[0]} · ${clockText(left)} left`;
+	session.chip.classList.toggle('warn', left <= 300);
+	session.chip.setAttribute('aria-label', `Private brain ${s.label}: ${clockText(left)} left. Tap to extend.`);
+	const live = $('session-left');
+	if (live) live.textContent = clockText(left);
+}
+setInterval(tickSession, 1000);
+function renderSession() {
+	const s = session.data;
+	if (!s) return;
+	$('session-title').textContent = s.label;
+	const why = s.reason === 'idle' ? `after ${s.idleMinutes} minutes with no messages (each message resets this)` : "at the session's time limit";
+	const add = (min) => {
+		const btn = el('button', { type: 'button', className: 'btn-primary', textContent: `Add ${min} min · up to ${money(s.rate * min / 60)}` });
+		btn.addEventListener('click', async () => {
+			btn.disabled = true;
+			try { showSession(await api('POST', '/api/brains/extend', { minutes: min })); refreshChip(); }
+			catch (err) { alert(err.message); btn.disabled = false; }
+		});
+		return btn;
+	};
+	const off = el('button', { type: 'button', className: 'btn-ghost', textContent: 'Turn off now' });
+	off.addEventListener('click', async () => {
+		if (!confirm('Turn the private brain off? Charges stop immediately.')) return;
+		try { await api('DELETE', '/api/brains/run'); } catch (err) { alert(err.message); }
+		session.dialog.close();
+		refreshChip();
+	});
+	$('session-body').replaceChildren(
+		el('div', { className: 'session-cost' }, el('b', { textContent: `${money(s.rate)} per hour` }), ` · ${s.gpu}`),
+		el('p', {}, 'Shuts down in ', el('b', { id: 'session-left', textContent: '' }), ` ${why}.`),
+		...(s.reason === 'idle' && s.limitSecondsLeft > s.secondsLeft ? [el('p', { className: 'muted small', textContent: `Time limit: ${clockText(s.limitSecondsLeft)} from now.` })] : []),
+		el('div', { className: 'row session-actions' }, add(30), add(60)),
+		el('div', { className: 'row' }, off));
+	tickSession();
+}
+session.chip.addEventListener('click', () => { renderSession(); openDialog(session.dialog); });
+$('session-close').addEventListener('click', () => session.dialog.close());
+session.dialog.addEventListener('click', (e) => { if (e.target === session.dialog) session.dialog.close(); });
 
 function option({ title, tag, note, side, on, disabled, onClick }) {
 	const btn = el('button', { type: 'button', className: `opt${on ? ' on' : ''}`, disabled: Boolean(disabled) },
@@ -2036,6 +2095,20 @@ const choose = async (patch, close = true) => {
 	await refreshChip();
 	if (close) picker.dialog.close(); else renderPicker();
 };
+
+/** "Uncensored" as a tag only when the model's name does not already say so. */
+const tagFor = (preset) => (preset.uncensored && !/uncensored/i.test(preset.label) ? 'Uncensored' : '');
+
+/** The backend log: every event from the app and the machine, with the phone's local time. Collapsed until tapped. */
+function brainLog(entries, live) {
+	const time = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+	const box = el('details', { className: 'brain-log' }, el('summary', {}, `Backend log (${entries.length})`),
+		el('div', { className: 'brain-log-body' }, ...entries.map((e) => el('div', { className: `brain-log-line${/^(FAILED|Gave up)|Deleting this machine/.test(e.text) ? ' bad' : /^Ready/.test(e.text) ? ' good' : ''}` }, el('span', { className: 'brain-log-time', textContent: time(e.at) }), ' ', e.text))));
+	box.open = Boolean(brainLog.open);
+	box.addEventListener('toggle', () => { brainLog.open = box.open; if (box.open) box.querySelector('.brain-log-body').scrollTop = 1e9; });
+	if (box.open && live) requestAnimationFrame(() => { const b = box.querySelector('.brain-log-body'); b.scrollTop = b.scrollHeight; });
+	return box;
+}
 
 async function renderPicker() {
 	const b = picker.data;
@@ -2061,35 +2134,39 @@ async function renderPicker() {
 
 	// Private brain: a model on a rented GPU, with an on/off switch. Costs money while on.
 	const p = b.private;
-	const stages = { downloading: `Step 1 of 2: starting the machine and downloading the model (${(p.presets.find((x) => x.id === p.model) || {}).sizeGb || '?'} GB). Usually 3 to 6 minutes.`, loading: 'Step 2 of 2: loading the model into memory. About a minute.' };
 	const stateNote = el('div', { className: 'opt-note' });
-	if (p.state === 'off') stateNote.textContent = 'Off. Nothing is being charged.';
+	if (p.state === 'off') stateNote.textContent = p.error ? `Last start failed: ${p.error}.` : 'Off. Nothing is being charged.';
 	else if (p.state === 'ready') stateNote.append(`On for `, sinceNode(p.startedAt), ` · ${p.gpu} at ${money(p.rate)}/h. Chat is using it.`);
-	else stateNote.append(progressNode(p.progress), el('div', { className: 'boot-meta', textContent: 'You can close this; the chip in the message box shows progress too.' }));
 	const wakeBox = el('div');
 	const chosen = p.presets.find((x) => x.id === (p.state === 'off' ? p.selected : p.model)) || p.presets[0];
 	const sw = el('button', { type: 'button', className: `switch${p.state === 'starting' ? ' waking' : ''}`, role: 'switch', ariaLabel: 'Private brain' });
 	sw.setAttribute('aria-checked', String(p.state !== 'off'));
 	sw.addEventListener('click', async () => {
 		if (p.state === 'off') return showWake(chosen, wakeBox);
-		if (!confirm('Turn the private brain off? Charges stop immediately.')) return;
+		if (!confirm(p.state === 'starting' ? 'Stop turning it on? Any machine already started is deleted and charges stop.' : 'Turn the private brain off? Charges stop immediately.')) return;
 		sw.disabled = true;
-		try { await api('DELETE', `/api/system/pods/${p.podId}`); } catch (err) { alert(err.message); }
+		try { await api('DELETE', '/api/brains/run'); } catch (err) { alert(err.message); }
 		await refreshChip();
 		renderPicker();
 	});
+	// While it turns on, the progress card is the whole row: the model's name is already in it.
+	const main = p.state === 'starting'
+		? el('div', { className: 'opt-main' }, progressNode(p.progress, ` · ${p.label}`))
+		: el('div', { className: 'opt-main' }, el('div', { className: 'opt-title' }, chosen.label, ...(tagFor(chosen) ? [el('span', { className: 'tag', textContent: tagFor(chosen) })] : [])), stateNote);
 	const head = [
 		el('div', { className: 'sect', textContent: 'Private brain · rented GPU' }),
-		el('div', { className: 'switch-row' }, el('div', { className: 'opt-main' }, el('div', { className: 'opt-title' }, chosen.label, ...(chosen.uncensored ? [el('span', { className: 'tag', textContent: 'Uncensored' })] : [])), stateNote), sw),
+		el('div', { className: 'switch-row' }, main, sw),
+		...(p.log?.length ? [brainLog(p.log, p.state === 'starting')] : []),
 		wakeBox,
-		el('div', { className: 'sect-note', textContent: p.state === 'off' ? 'Choose which model the switch turns on:' : 'To change model, turn it off first.' })
+		...(p.state === 'starting' ? [] : [el('div', { className: 'sect-note', textContent: p.state === 'off' ? 'Choose which model the switch turns on:' : 'To change model, turn it off first.' })])
 	];
 	for (const preset of p.presets) {
+		if (p.state === 'starting') break; // the progress card already names the model; no extra copies meanwhile
 		const running = p.state !== 'off' && preset.id === p.model;
 		const on = running && b.using === 'private';
 		const picked = p.state === 'off' && preset.id === chosen.id;
 		head.push(option({
-			title: preset.label, tag: preset.uncensored ? 'Uncensored' : '', note: preset.note,
+			title: preset.label, tag: tagFor(preset), note: preset.note,
 			side: running ? (p.state === 'ready' ? (on ? 'In use' : 'On') : 'Turning on…') : picked ? 'Selected' : `${preset.sizeGb} GB`, on,
 			// One brain at a time: while one is on, the others wait until it is turned off.
 			disabled: p.state !== 'off' && !running,
@@ -2133,7 +2210,7 @@ async function showWake(preset, box) {
 		} finally { clearTimeout(slow); picker.busy = false; }
 	});
 	box.replaceChildren(el('div', { className: 'wake' },
-		`${q.summary} It takes about five minutes to turn on, and turns itself off after 10 quiet minutes.`,
+		`${q.summary} The first start downloads the model to your storage once; later starts only load it. It turns itself off after 10 quiet minutes.`,
 		el('div', { className: 'row' }, el('span', { className: 'spacer' }), go)));
 	box.scrollIntoView({ block: 'nearest' });
 }

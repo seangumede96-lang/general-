@@ -13,6 +13,10 @@ export async function startMockModel(opts = {}) {
 	const state = { chunks: ['Hello', ' from the', ' mock model.'], delayMs: 0, requireKey: null, requests: [], replies: [], ...opts };
 	const server = createServer(async (req, res) => {
 		// llama.cpp answers /health without a key: 503 while loading, 200 when ready.
+		// The brain machine's status server (brain-pod.sh): stage line, events, extend.
+		if (state.status && req.url.startsWith('/state')) { res.writeHead(200); return res.end(state.status()); }
+		if (state.status && req.url.startsWith('/events')) { res.writeHead(200); return res.end((state.events || []).join('\n')); }
+		if (req.url === '/cgi-bin/extend') { let raw = ''; for await (const c of req) raw += c; state.extended = raw; res.writeHead(200); return res.end('ok'); }
 		if (req.url === '/health') { res.writeHead(state.loading ? 503 : 200, { 'Content-Type': 'application/json' }); return res.end('{}'); }
 		state.lastAuth = req.headers.authorization || '';
 		if (state.requireKey && req.headers.authorization !== `Bearer ${state.requireKey}`) {
