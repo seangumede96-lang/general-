@@ -45,7 +45,7 @@ function sphere(cx, cy, cz, r, rings = 8, segs = 12) {
  * Render the body for `values` (the editor's slider values) turned `angleDeg` degrees
  * (0 front, 90 side, 180 back) at width x height. Returns { depth, preview } PNG buffers.
  */
-export async function renderBody(values, { angleDeg = 0, width = 1024, height = 1536, raw = false } = {}) {
+export async function renderBody(values, { angleDeg = 0, width = 1024, height = 1536, raw = false, range = 'body' } = {}) {
 	const mesh = await load();
 	const v = body.migrate({ version: 2, ...values });
 	const base = body.shapeBody(v);
@@ -128,6 +128,14 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 			depth[o] = Math.round((0.08 + 0.92 * dv) * 255);
 			preview[o] = Math.round(255 * (w0 * shade[a] + w1 * shade[b] + w2 * shade[c]));
 		}
+	}
+	// range 'visible': stretch the grey scale over the surface this camera actually sees. The default
+	// ('body', as the editor) spans the whole body, hidden far side included, so a side or rear view of a
+	// full figure comes out nearly flat white; 'visible' gives the butt and hips the whole grey range.
+	if (range === 'visible') {
+		let zn = Infinity, zf = -Infinity;
+		for (let i = 0; i < zbuf.length; i++) if (zbuf[i] !== Infinity) { if (zbuf[i] < zn) zn = zbuf[i]; if (zbuf[i] > zf) zf = zbuf[i]; }
+		if (zf > zn) for (let i = 0; i < zbuf.length; i++) if (zbuf[i] !== Infinity) depth[i] = Math.round((0.08 + 0.92 * ((zf - zbuf[i]) / (zf - zn))) * 255);
 	}
 	// Silhouette mask: white wherever the body is drawn (same z-buffer, so it matches the depth map exactly).
 	const mask = Buffer.alloc(width * height, 0);

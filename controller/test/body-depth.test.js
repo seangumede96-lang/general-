@@ -104,11 +104,23 @@ test('named views: one body state gives 8 consistent views with masks, a contact
 	const sheet = gray(await get(r.body.sheet)); assert.ok(sheet.w > 0 && sheet.h > 0);
 	const man = JSON.parse((await get(r.body.manifest)).toString()); assert.equal(man.views.rear.angle, 180);
 	// a named view on /api/body/depth equals the same angle, and the same body code reproduces the same map
-	const a = await api('POST', '/api/body/depth', { values, view: 'rear', width: 256, height: 384 });
-	const b = await api('POST', '/api/body/depth', { values, angle: 180, width: 256, height: 384 });
+	const a = await api('POST', '/api/body/depth', { values, view: 'rear', width: 256, height: 384, range: 'visible' });
+	const b = await api('POST', '/api/body/depth', { values, angle: 180, width: 256, height: 384, range: 'visible' });
 	assert.equal(a.body.view, 'rear'); assert.ok(a.body.mask);
 	assert.deepEqual(await get(a.body.depth), await get(b.body.depth));
 	assert.deepEqual(await get(a.body.depth), await get(r.body.views.rear.depth));
 	assert.equal((await api('POST', '/api/body/depth', { view: 'upside' })).status, 400);
 	assert.equal((await api('POST', '/api/body/views', { views: ['front', 'nope'] })).status, 400);
+});
+
+test('depth range: the default single view is unchanged; "visible" uses the whole grey range on the seen surface', async () => {
+	const values = { base: 'female', hips: 1.2, glutes: 1.2, weight: 0.5 };
+	const get = async (id) => gray(Buffer.from(await (await fetch(`${base}/api/uploads/${id}`)).arrayBuffer()));
+	const spread = (px) => { const lit = [...px].filter((v) => v > 0); lit.sort((x, y) => x - y); return lit[Math.floor(lit.length * 0.95)] - lit[Math.floor(lit.length * 0.05)]; };
+	const plain = await api('POST', '/api/body/depth', { values, view: 'rear', width: 256, height: 384 });
+	const vis = await api('POST', '/api/body/depth', { values, view: 'rear', width: 256, height: 384, range: 'visible' });
+	assert.equal(plain.body.range, 'body'); assert.equal(vis.body.range, 'visible');
+	const p = await get(plain.body.depth), v = await get(vis.body.depth);
+	assert.ok(spread(v.px) > spread(p.px) * 1.25, `rear view grey spread ${spread(p.px)} -> ${spread(v.px)}`);
+	for (let i = 0; i < p.px.length; i++) assert.equal(p.px[i] > 0, v.px[i] > 0, 'same silhouette');
 });

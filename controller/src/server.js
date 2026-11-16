@@ -457,10 +457,11 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			if (body.view !== undefined && !(body.view in VIEWS)) throw new HttpError(400, `view must be one of ${Object.keys(VIEWS).join(', ')}.`);
 			// A named view sets the angle; an explicit angle (the older API) still wins.
 			const angle = body.angle !== undefined ? Number(body.angle) || 0 : body.view !== undefined ? VIEWS[body.view] : 0;
-			const out = await renderBody(body.values || {}, { angleDeg: angle, width: dw, height: dh });
+			const range = body.range === 'visible' ? 'visible' : 'body';
+			const out = await renderBody(body.values || {}, { angleDeg: angle, width: dw, height: dh, range });
 			const saved = {};
 			for (const [kind, png] of Object.entries(out)) saved[kind] = await saveBodyPng(`body-${kind}-${body.view || `${Math.round(angle)}deg`}.png`, png);
-			return { depth: saved.depth, preview: saved.preview, mask: saved.mask, angle, view: body.view || null, width: dw, height: dh };
+			return { depth: saved.depth, preview: saved.preview, mask: saved.mask, angle, view: body.view || null, range, width: dw, height: dh };
 		}],
 		// Several named views of ONE body state (same mesh, scale and framing), with masks, a contact
 		// sheet and a manifest that records everything needed to make them again.
@@ -469,18 +470,20 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 			const { renderBody, VIEWS, contactSheet, pngGray } = await import('./body-depth.js');
 			const [dw, dh] = bodySize(body);
 			const names = Array.isArray(body.views) && body.views.length ? body.views : Object.keys(VIEWS);
+			// New endpoint, so it defaults to the visible-surface range; range: 'body' gives the editor's.
+			const range = body.range === 'body' ? 'body' : 'visible';
 			const bad = names.filter((v) => !(v in VIEWS));
 			if (bad.length) throw new HttpError(400, `Unknown view: ${bad.join(', ')}. Use ${Object.keys(VIEWS).join(', ')}.`);
 			const bodyMod = await import('../public/body.js');
 			const values = bodyMod.migrate({ version: 2, ...(body.values || {}) });
 			const views = {}, maps = [];
 			for (const name of names) {
-				const r = await renderBody(values, { angleDeg: VIEWS[name], width: dw, height: dh, raw: true });
+				const r = await renderBody(values, { angleDeg: VIEWS[name], width: dw, height: dh, raw: true, range });
 				views[name] = { angle: VIEWS[name], depth: await saveBodyPng(`body-depth-${name}.png`, pngGray(r.depth, dw, dh)), mask: await saveBodyPng(`body-mask-${name}.png`, pngGray(r.mask, dw, dh)) };
 				maps.push(r.depth);
 			}
 			const sheet = await saveBodyPng('body-views-sheet.png', contactSheet(maps, dw, dh, { cols: Math.min(4, maps.length), scale: Math.max(1, Math.round(dw / 256)) }));
-			const manifest = { format: 'body-views/1', created: new Date().toISOString(), app: appCommit(), mesh: bodyMeshVersion(), width: dw, height: dh, depth: 'near = white, far and background = black', values, views, sheet };
+			const manifest = { format: 'body-views/1', created: new Date().toISOString(), app: appCommit(), mesh: bodyMeshVersion(), width: dw, height: dh, depth: 'near = white, far and background = black', range, values, views, sheet };
 			const json = Buffer.from(JSON.stringify(manifest, null, 1));
 			manifest.manifest = await saveBodyPng('body-views-manifest.json', json, 'application/json');
 			return manifest;
