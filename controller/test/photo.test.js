@@ -44,7 +44,10 @@ after(async () => { await app.close(); rmSync(root, { recursive: true, force: tr
 
 test('the server stores evidence records, refuses other JSON, and serves the vendored MediaPipe files with the right types', async () => {
 	const ev = buildEvidence({ landmarks: person(), mask: null, view: 'left', pose: 'standing', imageWidth: 10, imageHeight: 20, crop: {} });
-	const ok = await fetch(`${base}/api/body/evidence`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ev) });
+	const post = (b) => fetch(`${base}/api/body/evidence`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+	assert.equal((await post(ev)).status, 400, 'no consent confirmation, refused');
+	ev.consent = 'own-or-consenting-adult';
+	const ok = await post(ev);
 	assert.equal(ok.status, 200); const r = await ok.json(); assert.ok(r.id); assert.equal(r.observability.buttProjection, 'observed');
 	const back = await (await fetch(`${base}/api/uploads/${r.id}`)).json(); assert.equal(back.view, 'left');
 	const bad = await fetch(`${base}/api/body/evidence`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hello: 1 }) });

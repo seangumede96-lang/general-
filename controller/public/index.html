@@ -201,11 +201,12 @@
 					</div>
 					<div class="creator-pane" data-pane="photo" hidden>
 						<p class="muted small">Pick a photo of a body to copy. It stays on this phone. The app finds the body's points and outline and shows what the photo can and can't tell; the figure isn't changed yet.</p>
-						<input type="file" id="photo-file" accept="image/*">
+						<label class="photo-consent small"><input type="checkbox" id="photo-consent"> This photo is of me, or of an adult who agreed to their body being used here.</label>
+						<input type="file" id="photo-file" accept="image/*" disabled>
 						<div class="row photo-selects"><label>View <select id="photo-view"></select></label><label>Pose <select id="photo-pose"></select></label></div>
 						<div class="card-cap">Crop</div><div id="photo-crop" class="hsliders"></div>
 						<canvas id="photo-canvas" class="photo-canvas" hidden></canvas>
-						<div class="row"><button type="button" class="btn-primary" id="photo-detect" disabled>Find body</button><span class="spacer"></span><button type="button" class="link" id="photo-hide" disabled>Mark point hidden</button><button type="button" class="btn-ghost" id="photo-save" disabled>Save</button></div>
+						<div class="row"><button type="button" class="btn-primary" id="photo-detect" disabled>Find body</button><span class="spacer"></span><button type="button" class="link" id="photo-hide" disabled>Mark point hidden</button><button type="button" class="btn-ghost" id="photo-ev-save" disabled>Save</button></div>
 						<p id="photo-status" class="muted small"></p>
 						<div id="photo-regions" class="photo-regions small"></div>
 					</div>

@@ -470,6 +470,8 @@ export function createApp({ dataDir, clock = Date.now, watchdogMs = 30000, maxUp
 		['POST', /^\/api\/body\/evidence$/, async (req) => {
 			const ev = await readJson(req);
 			if (ev?.format !== 'photo-evidence/1' || !Array.isArray(ev.landmarks)) throw new HttpError(400, 'Expected a photo-evidence/1 record.');
+			// Owner rule: reference photos only of the owner, or of an adult who agreed.
+			if (ev.consent !== 'own-or-consenting-adult') throw new HttpError(400, 'Confirm the photo is of you, or of an adult who agreed to it being used.');
 			if (JSON.stringify(ev).length > 400_000) throw new HttpError(413, 'Evidence record too large.');
 			const id = await saveBodyPng(`photo-evidence-${ev.view || 'view'}.json`, Buffer.from(JSON.stringify(ev)), 'application/json');
 			return { id, observability: ev.observability };

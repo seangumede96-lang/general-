@@ -1665,16 +1665,20 @@ const photoPane = {
 			input.addEventListener('input', () => { this.crop[k] = Number(input.value); this.found = null; this.draw(); this.showRegions(); });
 			return el('div', { className: 'hslider' }, el('b', { textContent: `Crop ${k}` }), el('div', { className: 'hs-track' }, input));
 		}));
+		// Only the owner's own body, or an adult who agreed: nothing runs until this is ticked.
+		$('photo-consent').addEventListener('change', (e) => {
+			const ok = e.target.checked; $('photo-file').disabled = !ok; $('photo-detect').disabled = !ok || !this.bitmap; if (!ok) $('photo-ev-save').disabled = true;
+		});
 		$('photo-file').addEventListener('change', async (e) => {
 			const f = e.target.files?.[0]; if (!f) return;
 			try { this.bitmap = await createImageBitmap(f, { imageOrientation: 'from-image' }); } catch { this.bitmap = await createImageBitmap(f); }
 			this.found = null; this.hidden = []; this.edited = []; this.selected = -1;
-			$('photo-canvas').hidden = false; $('photo-detect').disabled = false; this.status(`Photo ${this.bitmap.width} × ${this.bitmap.height}. Crop if needed, set the view, then Find body.`);
+			$('photo-canvas').hidden = false; $('photo-detect').disabled = !$('photo-consent').checked; this.status(`Photo ${this.bitmap.width} × ${this.bitmap.height}. Crop if needed, set the view, then Find body.`);
 			this.draw(); this.showRegions();
 		});
 		$('photo-detect').addEventListener('click', () => this.find());
 		$('photo-hide').addEventListener('click', () => { if (this.selected < 0) return; const i = this.selected; this.hidden = this.hidden.includes(i) ? this.hidden.filter((x) => x !== i) : [...this.hidden, i]; this.draw(); this.showRegions(); });
-		$('photo-save').addEventListener('click', () => this.save());
+		$('photo-ev-save').addEventListener('click', () => this.save());
 		const cv = $('photo-canvas');
 		const at = (e) => { const r = cv.getBoundingClientRect(); return [((e.clientX - r.left) / r.width) * cv.width, ((e.clientY - r.top) / r.height) * cv.height]; };
 		let dragging = false;
@@ -1722,6 +1726,7 @@ const photoPane = {
 		}
 	},
 	async find() {
+		if (!$('photo-consent').checked) return this.status('Tick the box first: the photo must be of you, or of an adult who agreed.');
 		$('photo-detect').disabled = true; this.status('Finding the body… (first time loads about 21 MB from the app, then it is cached)');
 		try {
 			const t = performance.now();
@@ -1731,7 +1736,7 @@ const photoPane = {
 			else {
 				const low = this.found.landmarks.filter((p) => (p.visibility ?? 0) < this.mod.SEEN).length;
 				this.status(`Found the body in ${Math.round(performance.now() - t)} ms. Green = sure, orange = unsure (${low} points). Drag a point to fix it, or tap it and "Mark point hidden".`);
-				$('photo-save').disabled = false;
+				$('photo-ev-save').disabled = false;
 			}
 		} catch (err) { this.status(`The body finder could not run here: ${err.message}`); }
 		$('photo-detect').disabled = false; this.draw(); this.showRegions();
@@ -1746,8 +1751,9 @@ const photoPane = {
 		$('photo-regions').replaceChildren(el('div', { className: 'card-cap', textContent: 'What this photo can tell' }), ...Object.entries(o).map(([k, v]) => el('div', { className: `photo-region ${v}`, textContent: `${label[k]}: ${word[v]}` })));
 	},
 	async save() {
-		const f = this.found; if (!f?.landmarks) return;
+		const f = this.found; if (!f?.landmarks || !$('photo-consent').checked) return;
 		const ev = this.mod.buildEvidence({ landmarks: f.landmarks, mask: f.mask, view: this.view, pose: this.pose, imageWidth: this.bitmap.width, imageHeight: this.bitmap.height, crop: { ...this.crop }, hidden: this.hidden, edited: this.edited });
+		ev.consent = 'own-or-consenting-adult';
 		try { const r = await api('POST', '/api/body/evidence', ev); this.status(`Saved (no photo pixels, just points, outline and measurements). Evidence id ${r.id.slice(0, 8)}.`); localStorage.setItem('photoEvidence', r.id); }
 		catch (err) { this.status(`Could not save: ${err.message}`); }
 	}
