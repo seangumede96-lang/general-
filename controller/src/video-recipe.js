@@ -30,7 +30,7 @@ export function downloadLines(files, root, step) {
 		`mkdir -p ${[...new Set(files.map(([, d]) => `${root}/${d.split('/').slice(0, -1).join('/')}`))].join(' ')}`,
 		// Each file's full size is asked for first, so the app can show how far along each one is.
 		'size() { curl -sIL --connect-timeout 20 "$1" | tr -d "\\r" | awk \'tolower($1)=="content-length:"{n=$2} END{print n+0}\'; }',
-		'get() { size "$1" > "$2.total"; if command -v aria2c >/dev/null; then aria2c -q -x 16 -s 16 -k 1M --file-allocation=none --retry-wait 3 -m 5 --allow-overwrite=true -d "$(dirname "$2")" -o "$(basename "$2")" "$1" && touch "$2.done"; else curl -fsSL --retry 5 --connect-timeout 20 -o "$2" "$1" && touch "$2.done"; fi; }',
+		'get() { size "$1" > "$2.total"; t=$(cat "$2.total"); if [ -f "$2.done" ] && [ -s "$2" ] && { [ "$t" = 0 ] || [ "$(stat -c %s "$2")" = "$t" ]; }; then echo "Already stored: $(basename "$2")"; return 0; fi; rm -f "$2.done"; echo "Downloading $(basename "$2") ($(awk -v t="$t" \'BEGIN{printf "%.1f", t/1e9}\') GB)"; if command -v aria2c >/dev/null; then aria2c -q -x 16 -s 16 -k 1M --file-allocation=none --retry-wait 3 -m 5 --allow-overwrite=true -d "$(dirname "$2")" -o "$(basename "$2")" "$1" && touch "$2.done"; else curl -fsSL --retry 5 --connect-timeout 20 -o "$2" "$1" && touch "$2.done"; fi; }',
 		// One line per file for the app: name, bytes so far, total bytes.
 		`files() { for f in ${paths}; do echo "$(basename "$f") $(stat -c %s "$f" 2>/dev/null || echo 0) $(cat "$f.total" 2>/dev/null || echo 0)"; done > /srv/log/files.tmp && mv /srv/log/files.tmp /srv/log/files.txt; }`,
 		// Remember each download's process, so only these are waited for: the pod's self-delete
@@ -42,7 +42,10 @@ export function downloadLines(files, root, step) {
 		'wait $pids || true',
 		'files',
 		`echo "Downloads finished: $(ls ${root}/*/*.done 2>/dev/null | wc -l) of ${files.length} files. Disk: $(df -h ${root} | tail -1)"`,
-		...files.map(([, dest]) => `test -s "${root}/${dest}" || { echo "MISSING ${dest}"; false; }`)
+		// A file that did not finish (dropped connection, full disk) is fetched once more, plainly,
+		// then every file must have its full size: a cut-off model otherwise fails only later, when loaded.
+		...files.map(([url, dest]) => `[ -f "${root}/${dest}.done" ] || { echo "Retrying ${dest.split('/').pop()} (it did not finish)"; rm -f "${root}/${dest}"; curl -fsSL --retry 5 --connect-timeout 20 -o "${root}/${dest}" ${q(url)} && touch "${root}/${dest}.done" || true; }`),
+		...files.map(([, dest]) => `t=$(cat "${root}/${dest}.total" 2>/dev/null || echo 0); h=$(stat -c %s "${root}/${dest}" 2>/dev/null || echo 0); if [ ! -f "${root}/${dest}.done" ] || { [ "$t" != 0 ] && [ "$h" != "$t" ]; }; then echo "MISSING ${dest}: only $h of $t bytes arrived (the storage or disk may be full)"; false; fi`)
 	];
 }
 const MODELS = [

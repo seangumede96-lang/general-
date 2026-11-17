@@ -24,28 +24,68 @@ export const loraFileName = (name) => name.split('/').pop().replace(/[^\w.-]/g, 
 /** Pod start command. `loras` is [{ name, url }] with time-limited links made on the phone. */
 export const STOCK_IMAGE = 'runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404';
 
-export function imagePodSpec(loras = [], engineImage = '') {
-	const M = '/root/ComfyUI/models';
+/** Where the engine lives on the owner's storage (a RunPod network volume mounted at /workspace). */
+export const VOLUME_DIR = '/workspace/image-engine';
+// v2: models live outside the ComfyUI folder (a reinstall keeps them) and the machine's own PyTorch
+// is reused instead of a 13 GB second copy on the storage.
+const INSTALLED = `${VOLUME_DIR}/.installed-v2`;
+export const VOLUME_MODELS = `${VOLUME_DIR}/models`;
+
+export function imagePodSpec(loras = [], engineImage = '', { store = 'disk' } = {}) {
+	const onVolume = store === 'volume';
+	const root = onVolume ? `${VOLUME_DIR}/ComfyUI` : '/root/ComfyUI';
+	const M = onVolume ? VOLUME_MODELS : `${root}/models`;
+	const py = onVolume ? `${VOLUME_DIR}/venv/bin/python` : 'python3';
+	const pip = onVolume ? `${VOLUME_DIR}/venv/bin/pip install -q` : 'pip install -q --break-system-packages';
 	const files = [...MODELS, ...loras.map((l) => [l.url, `loras/${loraFileName(l.name)}`])];
+	const install = [
+		`git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI ${root} && cd ${root}`,
+		...(onVolume ? [
+			`python3 -m venv --system-site-packages ${VOLUME_DIR}/venv`,
+			// Keep the machine's PyTorch: pin it, and add the matching torchvision/torchaudio if missing.
+			'TV=$(python3 -c "import torch;print(torch.__version__.split(\'+\')[0])")',
+			'echo "torch==$TV" > /tmp/pins.txt',
+			`python3 -c "import torchvision, torchaudio" 2>/dev/null || ${pip} --no-deps --index-url https://download.pytorch.org/whl/cu128 "torchvision==0.$(( $(echo $TV | cut -d. -f2) + 15 )).$(echo $TV | cut -d. -f3)" "torchaudio==$TV"`,
+			`${pip} -c /tmp/pins.txt -r requirements.txt && ${pip} -c /tmp/pins.txt -U pillow`,
+			`rm -rf ${root}/models && mkdir -p ${VOLUME_MODELS} && ln -s ${VOLUME_MODELS} ${root}/models`
+		] : [`${pip} -r requirements.txt && ${pip} -U torchaudio torchvision pillow`]),
+		'git clone -q https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit custom_nodes/ComfyUI-Krea2-Ostris-Edit && git -C custom_nodes/ComfyUI-Krea2-Ostris-Edit checkout -q 7756566'
+	];
 	const cmd = [
 		`mkdir -p /srv/log && cd /srv/log && (python3 -m http.server ${LOG_PORT} >/dev/null 2>&1 &)`,
 		'exec > /srv/log/setup.log 2>&1',
 		'trap \'echo "SETUP FAILED"; sleep 900\' ERR',
 		'set -eE',
 		'echo "STEP 1/3 Installing the image engine"',
-		// With the ready-made engine image everything below is already installed and skipped.
-		'if [ -f /root/ComfyUI/.ready-made-engine ]; then echo "Ready-made engine: nothing to install"; cd /root/ComfyUI; else',
-		'cd /root && git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI && cd ComfyUI',
-		'pip install -q --break-system-packages -r requirements.txt && pip install -q --break-system-packages -U torchaudio torchvision pillow',
-		'git clone -q https://github.com/ostris/ComfyUI-Krea2-Ostris-Edit custom_nodes/ComfyUI-Krea2-Ostris-Edit && git -C custom_nodes/ComfyUI-Krea2-Ostris-Edit checkout -q 7756566',
-		'fi',
-		// The depth-control nodes, in case the ready-made engine predates them.
+		'echo "Machine: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)"',
+		...(onVolume ? [
+			// Kept on the owner's storage: installed on the first start only, then reused.
+			`if [ -f ${INSTALLED} ]; then echo "Image engine found on your storage: nothing to install"; cd ${root}; else`,
+			'echo "First start with storage: installing the image engine onto it (one time only, a few minutes)"',
+			// Models from an older install are moved out first, so they are not downloaded again.
+			`if [ -d ${root}/models ] && [ ! -L ${root}/models ]; then mkdir -p ${VOLUME_MODELS}; for d in ${root}/models/*/; do n=$(basename "$d"); mkdir -p ${VOLUME_MODELS}/$n; mv -f "$d"* ${VOLUME_MODELS}/$n/ 2>/dev/null || true; done; echo "Kept the models already on your storage"; fi`,
+			`rm -rf ${root} ${VOLUME_DIR}/venv && mkdir -p ${VOLUME_DIR}`,
+			// A sign of life every 20 s while pip works silently, so the app does not think it is stuck.
+			`( while sleep 20; do echo "...still installing ($(du -sh ${VOLUME_DIR} 2>/dev/null | cut -f1) on your storage so far)"; done ) & TICK=$!`,
+			...install,
+			'kill $TICK 2>/dev/null || true',
+			`touch ${INSTALLED}`,
+			'echo "Image engine installed onto your storage"',
+			'fi'
+		] : [
+			// With the ready-made engine image everything below is already installed and skipped.
+			'if [ -f /root/ComfyUI/.ready-made-engine ]; then echo "Ready-made engine: nothing to install"; cd /root/ComfyUI; else',
+			...install,
+			'fi'
+		]),
+		// The depth-control nodes, in case the install predates them.
 		`[ -d ${DEPTH_NODES.dir} ] || { git clone -q ${DEPTH_NODES.repo} ${DEPTH_NODES.dir} && git -C ${DEPTH_NODES.dir} checkout -q ${DEPTH_NODES.commit}; }`,
 		...downloadLines(files, M, '2/3'),
 		'echo "STEP 3/3 Starting the image engine"',
-		`exec python3 main.py --listen 0.0.0.0 --port ${COMFY_PORT}`
+		`exec ${py} main.py --listen 0.0.0.0 --port ${COMFY_PORT}`
 	].join('\n');
-	return { kind: 'image', name: 'assistant-images', image: engineImage || STOCK_IMAGE, disk: 80, ports: [`${COMFY_PORT}/http`, `${LOG_PORT}/http`], cmd };
+	// On storage the stock image is used: RunPod keeps it on most machines, so nothing big is pulled.
+	return { kind: 'image', name: 'assistant-images', image: onVolume ? STOCK_IMAGE : engineImage || STOCK_IMAGE, disk: onVolume ? 20 : 80, ports: [`${COMFY_PORT}/http`, `${LOG_PORT}/http`], cmd };
 }
 
 export const SIZES = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] };

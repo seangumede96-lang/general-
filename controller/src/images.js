@@ -10,6 +10,7 @@ import { imagePodSpec, buildImageGraph, SIZES, sizeFor, MAX_QUALITY_COUNT, REFER
 import { COMFY_PORT, LOG_PORT } from './video-recipe.js';
 import { MIN_VRAM } from './gpu.js';
 import { createTracker, computeProgress, parseStep, imagePlan } from './progress.js';
+import { followPodLog } from './podlog.js';
 
 /** Longest a Standard picture request may take; Max quality gets twice this. */
 const MAX_GENERATE_MINUTES = 10;
@@ -32,8 +33,17 @@ Rules:
 
 /** Tries at starting a session's GPU when none of the listed ones can be placed. */
 const START_ATTEMPTS = 3;
+/** No news at all (RunPod, the engine) for this long while starting: the machine is replaced. */
+export const STUCK_MS = 3 * 60000;
+/** At most this many stuck machines are replaced automatically per session. */
+const MAX_REPLACEMENTS = 2;
+const usd = (n) => `$${n.toFixed(2)}`;
+const ceilCents = (n) => Math.ceil(n * 100 - 1e-9) / 100;
+const dcId = (d) => d.id || d.dataCenterId || d.name;
+// Setup-log lines not worth showing (they still count as signs of life).
+const NOISE = /\[notice\]|Running pip as the 'root' user|^\s*$|WARNING: Running pip/;
 
-export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000, llm = null, stopRetryMs = 15000, startRetryMs = 20000 }) {
+export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollMs = 3000, llm = null, stopRetryMs = 15000, startRetryMs = 20000, followLog = followPodLog }) {
 	const progress = new Map(); // podId -> latest setup step
 	const tracker = createTracker(clock);
 	const pod = () => db.listPods().find((p) => !p.ended_at && p.kind === 'image') || null;
@@ -42,13 +52,61 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 	const b2Ready = () => { const c = b2Config(); return Boolean(c.keyId && c.appKey && c.bucket); };
 	const savedLoras = () => { try { return JSON.parse(db.getSettings().imageLoras || '[]'); } catch { return []; } };
 
+	// ---- the live start-up log: what the app did, what RunPod reports, what the engine says ----
+	/** The current (or last) session start: { lines, lastNewsAt, podId, ... }. */
+	let session = null;
+	const note = (text, source = 'app', at = clock()) => {
+		if (!session) return;
+		session.lines.push({ at, source, text: String(text).slice(0, 400) });
+		if (session.lines.length > 250) session.lines.splice(0, session.lines.length - 250);
+		session.lastNewsAt = Math.max(session.lastNewsAt, clock());
+		if (source !== 'engine' || session.lines.length % 10 === 0) saveLog();
+	};
+	const saveLog = () => { if (session) db.setSettings({ imageSessionLog: JSON.stringify({ startedAt: session.startedAt, lines: session.lines.slice(-80) }) }); };
+	const stopFollowing = () => { if (session?.unfollow) { session.unfollow(); session.unfollow = null; } };
+	function follow(podId) {
+		stopFollowing();
+		if (db.getSettings().runpodBaseUrl) return; // a stand-in RunPod (tests): runpodctl cannot read its logs
+		session.unfollow = followLog(podId, { key: () => db.getSettings().runpodApiKey, clock, onEvent: (e) => note(e.text, e.kind === 'error' ? 'error' : 'runpod', clock()) });
+	}
+
+	// ---- the owner's storage (the RunPod network volume shared with the private brain) ----
+	const volume = () => { try { const v = JSON.parse(db.getSettings().brainVolume || 'null'); return v?.id ? v : null; } catch { return null; } };
+	/** Suitable GPUs free in the storage's data centre, cheapest first. */
+	async function storageGpus() {
+		const v = volume();
+		if (!v) return [];
+		const list = await gpu.catalogFor('SECURE');
+		return list.filter((g) => g.secure && g.memory >= MIN_VRAM.image && g.price?.secure > 0 && !/\bMIG\b/i.test(`${g.name || ''} ${g.id || ''}`)
+			&& (g.dataCenters || []).some((d) => dcId(d) === v.dataCenter && d.availability && d.availability !== 'NONE'))
+			.map((g) => ({ id: g.id, name: g.name || g.id, memory: g.memory, rate: g.price.secure, cloud: 'SECURE' }))
+			.sort((a, b) => a.rate - b.rate).slice(0, 4);
+	}
+	const engineStored = () => db.getSettings().imageEngineStored === volume()?.id;
+
 	/** Called by the GPU watchdog while the session pod is starting: is the engine up yet? */
 	async function probe(p) {
-		if (await comfyFor(p).ready()) { db.setPodReady(p.id, clock()); db.touchPod(p.id, clock()); progress.delete(p.id); return; }
+		if (!session || session.podId !== p.id) {
+			// The app was restarted while this machine was starting: pick its log up again.
+			session = { lines: session?.lines || [], startedAt: p.created_at, lastNewsAt: clock(), podId: p.id, store: 'unknown', engineSeen: 0, bad: new Set(), replacements: 0, unfollow: null };
+			follow(p.id);
+		}
+		if (await comfyFor(p).ready()) {
+			db.setPodReady(p.id, clock()); db.touchPod(p.id, clock()); progress.delete(p.id);
+			note(`Engine ready after ${Math.round((clock() - session.startedAt) / 1000)} s: you can make pictures now`);
+			if (session.store === 'volume') db.setSettings({ imageEngineStored: volume()?.id || '' });
+			stopFollowing(); saveLog();
+			return;
+		}
 		try {
 			const res = await fetch(`${gpu.proxyUrl(p.id, LOG_PORT)}/setup.log`, { signal: AbortSignal.timeout(8000) });
 			if (!res.ok) return;
 			const lines = (await res.text()).trim().split('\n');
+			if (lines.length > session.engineSeen) {
+				for (const raw of lines.slice(session.engineSeen)) { const l = raw.replace(/\x1b\[[0-9;]*m/g, ''); if (!NOISE.test(l)) note(l.replace(/^STEP /, 'Step '), /FAILED|Error|error:|Traceback|MISSING/.test(l) ? 'error' : 'engine'); }
+				session.lastNewsAt = clock();
+				session.engineSeen = lines.length;
+			}
 			const step = lines.filter((l) => l.startsWith('STEP ')).at(-1);
 			if (step) {
 				progress.set(p.id, step.replace(/^STEP /, ''));
@@ -66,8 +124,27 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 				await gpu.stop(p.id, `image engine setup failed: ${tail || 'no details'}`);
 			}
 		} catch { /* the pod is not answering yet */ }
+		await checkStuck(p);
 	}
 	gpu.registerProbe('image', probe);
+
+	/** A machine with no news at all for STUCK_MS is deleted and another GPU tried (twice at most). */
+	async function checkStuck(p) {
+		if (!session || session.podId !== p.id || db.getPod(p.id)?.ready_at || gpu.stopping?.(p.id)) return;
+		const quiet = clock() - session.lastNewsAt;
+		if (quiet < STUCK_MS) return;
+		if (session.replacements >= MAX_REPLACEMENTS) {
+			if (!session.warned) { session.warned = true; note(`No progress for ${Math.round(quiet / 60000)} minutes and ${MAX_REPLACEMENTS} machines were already replaced: tap End session and try again later`, 'error'); }
+			return;
+		}
+		session.replacements++;
+		session.bad.add(session.gpuId);
+		note(`No progress for ${Math.round(quiet / 60000)} minutes: this machine looks stuck. Deleting it and trying another GPU`, 'error');
+		stopFollowing();
+		session.podId = null;
+		await gpu.stopSoon(p.id, 'stuck: no progress while starting', stopRetryMs).catch((err) => note(`Delete failed: ${err.message}`, 'error'));
+		launch().catch((err) => { note(`Could not start another GPU: ${err.message}`, 'error'); saveLog(); });
+	}
 
 	/** Live progress of running pictures, from the engine's messages: { stage, step, steps, at }. */
 	const live = new Map();
@@ -100,16 +177,30 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 	const MODEL_GB = 13.14 + 13.2 + 8.88 + 0.25 + 0.2 + 0.86;
 	const sessionGb = () => Math.round(MODEL_GB + savedLoras().reduce((n, l) => n + (l.size || 0), 0) / 1e9);
 
+	/** What this session's machines have cost so far (each at its own rate). */
+	const spentSince = (from) => db.listPods().filter((x) => x.kind === 'image' && x.created_at >= from - 1000)
+		.reduce((n, x) => n + x.rate * (((x.ended_at || clock()) - x.created_at) / 3.6e6), 0);
+	function sessionLog() {
+		if (session) return session.lines;
+		try { return JSON.parse(db.getSettings().imageSessionLog || '{}').lines || []; } catch { return []; }
+	}
+
 	async function status() {
 		await listLoras();
 		let p = pod();
 		if (p && !p.ready_at) { await probe(p); p = pod(); }
+		if (!p && session?.unfollow && !session.podId) { /* between machines: keep */ } else if (!p && session?.unfollow) { stopFollowing(); saveLog(); }
 		const last = db.listPods().find((x) => x.kind === 'image');
 		return {
 			session: {
 				state: !p ? 'off' : gpu.stopping?.(p.id) ? 'stopping' : p.ready_at ? 'ready' : 'starting',
 				detail: p ? progress.get(p.id) || '' : '',
-				progress: p && !p.ready_at ? computeProgress('image', p.created_at, tracker.get(p.id), clock(), imagePlan(sessionGb())) : null,
+				progress: p && !p.ready_at ? computeProgress('image', p.created_at, tracker.get(p.id), clock(), imagePlan(sessionGb(), { stored: session?.store === 'volume' && engineStored() })) : null,
+				log: sessionLog().slice(-60),
+				lastNewsSeconds: p && !p.ready_at && session ? Math.round((clock() - session.lastNewsAt) / 1000) : null,
+				stuckAfterSeconds: STUCK_MS / 1000,
+				spent: session ? +spentSince(session.startedAt).toFixed(3) : null,
+				storage: volume() ? { dataCenter: volume().dataCenter, engineStored: engineStored() } : null,
 				podId: p?.id || null,
 				secondsLeft: p ? Math.max(0, Math.round((p.deadline_at - clock()) / 1000)) : 0,
 				// Why the last session ended, when that is worth telling the user.
@@ -140,7 +231,22 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 
 	/** Setup is reserved on top of the minutes asked for, so a 30-minute session gives 30 minutes of pictures. */
 	const SETUP_MINUTES = 15;
-	const quote = async (minutes) => ({ ...(await gpu.quote({ minutes: Number(minutes) + SETUP_MINUTES, minVram: MIN_VRAM.image, fastNetwork: true })), useMinutes: Number(minutes), setupMinutes: SETUP_MINUTES });
+	async function quote(minutes) {
+		const total = Number(minutes) + SETUP_MINUTES;
+		const q = { ...(await gpu.quote({ minutes: total, minVram: MIN_VRAM.image, fastNetwork: true })), useMinutes: Number(minutes), setupMinutes: SETUP_MINUTES };
+		const here = await storageGpus().catch(() => []);
+		q.storageOptions = here;
+		if (!here.length) return q;
+		// The GPUs next to the stored engine are tried first; budget for the dearest of everything.
+		const worst = Math.max(...here.map((g) => g.rate), ...(q.options || []).map((g) => g.rate));
+		q.estimate = ceilCents(worst * total / 60);
+		const busy = db.listPods().some((x) => !x.ended_at);
+		if (busy) { q.allowed = false; q.reason = 'A pod is already running. Stop it first.'; }
+		else if (q.remaining != null && q.estimate > q.remaining) { q.allowed = false; q.reason = `This could cost up to ${usd(q.estimate)} but only ${usd(q.remaining)} is left.`; }
+		else if (!q.options?.length || /No GPU/.test(q.reason || '')) { q.allowed = true; q.reason = null; }
+		q.summary = `${here[0].name} at ${usd(here[0].rate)}/h next to your stored engine (fastest start)${worst > here[0].rate ? `, or another up to ${usd(worst)}/h,` : ''} for up to ${total} min: at most ${usd(q.estimate)}.${q.remaining != null ? ` ${usd(q.remaining)} left.` : ''}`;
+		return q;
+	}
 
 	async function start({ minutes, confirmEstimate }) {
 		const q = await quote(minutes);
@@ -153,18 +259,53 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const files = (await b2.list('loras/')).filter((f) => f.name.endsWith('.safetensors'));
 			loras = await Promise.all(files.map(async (f) => ({ name: f.name, size: f.size, url: await b2.link(f.name) })));
 		}
+		session = { lines: [], startedAt: clock(), lastNewsAt: clock(), podId: null, gpuId: null, store: null, engineSeen: 0, bad: new Set(), replacements: 0, unfollow: null, minutes: Number(minutes), loras, maxRate: Math.max(...[...(q.options || []), ...(q.storageOptions || [])].map((g) => g.rate)) };
+		note(`Starting a picture session: up to ${Number(minutes) + SETUP_MINUTES} min, at most ${usd(q.estimate)}`);
+		db.setSettings({ imageLoras: JSON.stringify(loras.map(({ name, size }) => ({ name, size }))) });
+		try { return await launch(); }
+		catch (err) { note(`Could not start: ${err.message}`, 'error'); saveLog(); throw err; }
+	}
+
+	/** Get a machine: first next to the owner's storage (nothing big to download), else anywhere. */
+	async function launch() {
+		const s = session, total = s.minutes + SETUP_MINUTES, settings = db.getSettings();
+		const v = volume();
+		if (v) {
+			let here = [];
+			try { here = (await storageGpus()).filter((g) => g.rate <= s.maxRate + 1e-9 && !s.bad.has(g.id)); }
+			catch (err) { note(`Could not read the GPU list (${err.message})`, 'error'); }
+			note(here.length ? `Looking for a GPU in ${v.dataCenter}, next to your stored engine: ${here.map((g) => `${g.name} ${usd(g.rate)}/h`).join(', ')}` : `No suitable GPU free in ${v.dataCenter} (where your engine is stored) right now`);
+			for (const g of here) {
+				try {
+					const p = await gpu.createOne({ gpu: g, spec: imagePodSpec(s.loras, '', { store: 'volume' }), minutes: total, purpose: 'Character images', placement: { dataCenterIds: [v.dataCenter], volumeId: v.id, path: '/workspace' } });
+					return attach(p, g, 'volume');
+				} catch (err) {
+					if (err.code !== 'unavailable' && !/no longer any instances|not available|insufficient|could not find/i.test(err.message)) throw err;
+					note(`${g.name}: none free there after all`);
+				}
+			}
+			note('Trying any data centre instead: the engine will be downloaded onto the machine (a slower start)');
+		}
 		// The list of free GPUs can be a moment out of date ("no longer any instances"): try again
 		// shortly, with a fresh list, before giving up.
-		let started;
 		for (let attempt = 1; ; attempt++) {
-			try { started = await gpu.start({ minutes: Number(minutes) + SETUP_MINUTES, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(loras, db.getSettings().imageEngineImage) }); break; }
-			catch (err) {
+			try {
+				const p = await gpu.start({ minutes: total, minVram: MIN_VRAM.image, fastNetwork: true, purpose: 'Character images', spec: imagePodSpec(s.loras, settings.imageEngineImage) });
+				return attach(p, { id: p.gpu, name: p.gpu, rate: p.rate }, 'disk');
+			} catch (err) {
 				if (err.code !== 'unavailable' || attempt >= START_ATTEMPTS) throw err;
+				note(`No GPU free right now; trying again in ${Math.round(startRetryMs / 1000)} s`);
 				await sleep(startRetryMs);
 			}
 		}
-		db.setSettings({ imageLoras: JSON.stringify(loras.map(({ name, size }) => ({ name, size }))) });
-		return started.id;
+	}
+
+	function attach(p, g, store) {
+		Object.assign(session, { podId: p.id, gpuId: g.id, store, engineSeen: 0, lastNewsAt: clock() });
+		note(`GPU found: ${p.gpu || g.name} in ${p.dataCenter || 'a RunPod data centre'} at ${usd(p.rate || g.rate)}/h${store === 'volume' ? (engineStored() ? ' (engine already on your storage)' : ' (first start with storage: the engine is installed onto it once)') : ''}. Waiting for RunPod to start it…`);
+		follow(p.id);
+		saveLog();
+		return p.id;
 	}
 
 	function validate(req) {
@@ -312,5 +453,5 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		for (const g of db.listGenerations().filter((x) => x.status === 'running')) db.updateGeneration(g.id, { status: 'failed', detail: 'The app was restarted while this was being made.', ended_at: clock() });
 	}
 
-	return { status, quote, start, generate, remove, recover, enhance, stop: async () => { const p = pod(); return p ? gpu.stopSoon(p.id, 'stopped by you', stopRetryMs) : { stopped: true }; } };
+	return { status, quote, start, generate, remove, recover, enhance, stop: async () => { const p = pod(); if (session) { session.replacements = MAX_REPLACEMENTS; note('Ending the session (you tapped End session)'); stopFollowing(); saveLog(); } return p ? gpu.stopSoon(p.id, 'stopped by you', stopRetryMs) : { stopped: true }; } };
 }

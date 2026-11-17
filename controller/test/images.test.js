@@ -303,7 +303,11 @@ test('without Backblaze the session still starts, with no LoRAs', async () => {
 	assert.match(imagePodSpec([]).cmd, /STEP 1\/3[\s\S]*STEP 2\/3[\s\S]*STEP 3\/3/);
 	assert.equal(imagePodSpec([]).image, 'runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404');
 	assert.equal(imagePodSpec([], 'ghcr.io/x/assistant-image-engine:latest').image, 'ghcr.io/x/assistant-image-engine:latest');
-	assert.match(imagePodSpec([]).cmd, /if \[ -f \/root\/ComfyUI\/\.ready-made-engine \]; then .*; else\ncd \/root && git clone[\s\S]*\nfi\n/);
+	assert.match(imagePodSpec([]).cmd, /if \[ -f \/root\/ComfyUI\/\.ready-made-engine \]; then .*; else\ngit clone -q --depth 1 \S+ \/root\/ComfyUI && cd \/root\/ComfyUI[\s\S]*\nfi\n/);
+	// On the owner's storage: the stock image, installed once onto /workspace, downloads skipped when stored.
+	const v = imagePodSpec([], 'ghcr.io/x/assistant-image-engine:latest', { store: 'volume' });
+	assert.equal(v.image, 'runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404');
+	assert.match(v.cmd, /if \[ -f \/workspace\/image-engine\/\.installed-v2 \]; then[\s\S]*touch \/workspace\/image-engine\/\.installed-v2[\s\S]*Already stored[\s\S]*exec \/workspace\/image-engine\/venv\/bin\/python main\.py/);
 });
 
 test('a picture the engine lost, or one far past normal time, fails instead of keeping the GPU busy', async () => {
@@ -449,4 +453,30 @@ test('depth and shape together: every node points only at nodes that exist (the 
 	for (const [id, node] of Object.entries(g)) for (const v of Object.values(node.inputs)) if (Array.isArray(v) && typeof v[0] === 'string') assert.ok(g[v[0]], `node ${id} points at missing node ${v[0]}`);
 	assert.deepEqual(g[51].inputs.latent, ['43', 0]);
 	assert.equal(g[7], undefined);
+});
+
+test('a machine with no news for 3 minutes while starting is replaced by another GPU, and everything is in the live log', async () => {
+	Object.assign(comfy.state, { ready: false, setupLog: 'STEP 1/3 Installing the image engine\n' });
+	assert.equal((await startSession()).status, 200);
+	let s = (await api('GET', '/api/images')).body.session;
+	assert.equal(s.state, 'starting');
+	assert.ok(s.log.some((l) => /GPU found/.test(l.text)), 'the GPU found is shown');
+	assert.ok(s.log.some((l) => l.source === 'engine' && /Step 1\/3 Installing/.test(l.text)), 'the engine\'s own messages are shown');
+	now += 2 * MIN;
+	s = (await api('GET', '/api/images')).body.session;
+	assert.equal(s.lastNewsSeconds, 120);
+	assert.equal(rp.state.created.length, 1, 'not replaced yet');
+	now += 1.5 * MIN;
+	await api('GET', '/api/images');
+	for (let i = 0; i < 50 && rp.state.created.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+	assert.equal(rp.state.created.length, 2, 'a second machine was started');
+	assert.equal(rp.state.deleted.length, 1, 'the stuck one was deleted');
+	s = (await api('GET', '/api/images')).body.session;
+	assert.ok(s.log.some((l) => l.source === 'error' && /looks stuck/.test(l.text)));
+	assert.ok(s.spent > 0);
+	// Ready: said so in the log.
+	comfy.state.ready = true;
+	s = (await api('GET', '/api/images')).body.session;
+	assert.equal(s.state, 'ready');
+	assert.match(s.log.at(-1).text, /Engine ready/);
 });

@@ -64,6 +64,39 @@ const clockText = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, Math.fl
 const etaText = (until) => { const sec = Math.round((until - Date.now()) / 1000); return sec > 0 ? `about ${clockText(sec)} left` : 'any moment now'; };
 
 /** Bar, elapsed time, estimated time left and a rotating status word for a machine that is starting. */
+// ---- live start-up log of a GPU session: what the app did, what RunPod reports, what the engine says ----
+const LOG_SOURCE = { app: 'App', runpod: 'RunPod', engine: 'Engine', error: 'Problem' };
+const logTime = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function logRow(l) {
+	return el('li', { className: `log-${l.source}` }, el('time', { textContent: logTime(l.at) }), el('b', { textContent: LOG_SOURCE[l.source] || l.source }), el('span', { textContent: l.text }));
+}
+function logList(lines) { return el('ol', { className: 'live-lines' }, ...lines.map(logRow)); }
+function liveLog(open) {
+	return el('details', { className: 'live-log', open }, el('summary', {}, el('span', { className: 'live-title', textContent: 'Live log' }), el('span', { className: 'live-meta' })),
+		el('ol', { className: 'live-lines' }), el('p', { className: 'live-warn', hidden: true }));
+}
+function updateLiveLog(node, session) {
+	const lines = session.log || [];
+	const list = node.querySelector('.live-lines');
+	const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 30;
+	// Only new rows are added (the server sends the last 60; start over if it has moved past what is shown).
+	const key = (l) => `${l.at}|${l.text}`;
+	const last = list.lastElementChild?.dataset.key;
+	const from = last ? lines.findIndex((l) => key(l) === last) + 1 : 0;
+	if (last && from === 0) list.textContent = '';
+	for (const l of lines.slice(from)) { const li = logRow(l); li.dataset.key = key(l); list.append(li); }
+	if (atBottom) list.scrollTop = list.scrollHeight;
+	const bits = [];
+	if (session.lastNewsSeconds != null) bits.push(`last news ${clock(session.lastNewsSeconds)} ago`);
+	if (session.spent != null) bits.push(`cost so far $${session.spent.toFixed(2)}`);
+	node.querySelector('.live-meta').textContent = bits.length ? ` · ${bits.join(' · ')}` : '';
+	const warn = node.querySelector('.live-warn');
+	const quiet = session.lastNewsSeconds || 0;
+	warn.hidden = !(session.state === 'starting' && quiet >= 60);
+	warn.textContent = quiet >= session.stuckAfterSeconds ? `No progress for ${clock(quiet)}: this machine looks stuck. The app replaces it with another GPU by itself (twice at most); you can also tap End session.`
+		: `No news for ${clock(quiet)}. If nothing happens by ${clock(session.stuckAfterSeconds)}, the app replaces this machine with another GPU by itself.`;
+}
+
 function progressNode(p, extra = '', { reserveFiles = 0 } = {}) {
 	if (!p) return el('div', { className: 'boot' });
 	const label = p.steps[p.index] || '';
@@ -1040,14 +1073,18 @@ const chars = {
 				get.addEventListener('click', () => this.quote(Number(minutes.value), out));
 				box.replaceChildren(
 					...(session.lastEnd ? [el('details', { className: 'sys-alert' }, el('summary', { textContent: `Last time ${session.lastEnd}` }),
-						...(session.setupLog?.length ? [el('pre', { className: 'setup-log', textContent: session.setupLog.join('\n') })] : []))] : []),
+						...(session.log?.length ? [logList(session.log)] : session.setupLog?.length ? [el('pre', { className: 'setup-log', textContent: session.setupLog.join('\n') })] : []))] : []),
 					el('p', { className: 'muted small', textContent: b2 ? 'Rents a GPU, installs Krea 2 and loads your LoRAs from Backblaze. Then you can make as many pictures as you like until it stops.' : 'Rents a GPU and installs Krea 2. Backblaze is not connected, so no style LoRAs will be loaded.' }),
 					el('div', { className: 'row' }, el('label', { className: 'inline' }, 'Minutes ', minutes), get), out);
 			}
 		} else {
-			const stop = el('button', { type: 'button', className: 'btn-danger', textContent: 'End session' });
-			stop.addEventListener('click', async () => { if (confirm('End the session and shut the GPU down?')) { await api('DELETE', '/api/images/session').catch(() => {}); this.refresh(); } });
-			box.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'spacer' }), stop));
+			// Built once per session and updated in place, so it keeps its scroll position and open state.
+			if (!box.querySelector('.live-log')) {
+				const stop = el('button', { type: 'button', className: 'btn-danger', textContent: 'End session' });
+				stop.addEventListener('click', async () => { if (confirm('End the session and shut the GPU down?')) { await api('DELETE', '/api/images/session').catch(() => {}); this.refresh(); } });
+				box.replaceChildren(liveLog(session.state === 'starting'), el('div', { className: 'row' }, el('span', { className: 'spacer' }), stop));
+			}
+			updateLiveLog(box.querySelector('.live-log'), session);
 		}
 		// One row per LoRA loaded in this session: tick to use it, with its own strength.
 		const names = loras.map((l) => l.name);

@@ -36,7 +36,9 @@ export function brainPlan(model) {
 }
 
 /** The image plan with the download size of this session's actual files (models plus chosen LoRAs). */
-export function imagePlan(totalGb) {
+export function imagePlan(totalGb, { stored = false } = {}) {
+	// Engine and models already on the owner's storage: measured 50 s from GPU found to ready (17 Nov 2026).
+	if (stored) return PLANS.image.map((s, i) => ({ ...s, est: [25, 3, 7, 15][i], ...(s.totalGb ? { totalGb: 0 } : {}) }));
 	return PLANS.image.map((s) => (s.totalGb && totalGb ? { ...s, totalGb, est: Math.round(60 + totalGb * 6) } : s));
 }
 
