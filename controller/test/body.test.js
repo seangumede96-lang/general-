@@ -286,3 +286,21 @@ test('lower back to butt blend: the slider drives it, and a strong projection ad
 	assert.ok(w({ buttOut: 1.3, glutes: 1.5, gluteUpper: 1.5, gluteShelf: 1.5 })['glute-top-blend-up'] <= 1.5);
 	assert.ok(body.SLIDERS.some((s) => s.key === 'gluteTopBlend'));
 });
+
+test('the incremental shaper gives the same body as shapeBody through a run of slider changes, and is faster', () => {
+	const shape = body.createShaper();
+	let v = body.defaults();
+	const keys = ['weight', 'hips', 'glutes', 'buttOut', 'gluteUpper', 'waist', 'bust', 'thighs', 'gluteTopBlend', 'height', 'waistLength', 'armPose'];
+	let worst = 0;
+	for (let step = 0; step < 60; step++) {
+		const key = keys[step % keys.length], sl = body.SLIDERS.find((s) => s.key === key);
+		v = { ...v, [key]: sl.min + ((step * 37) % 100) / 100 * (sl.max - sl.min) };
+		if (step === 40) v = { ...v, posing: true, pose: { 'thigh.L': { forward: 60 } } };
+		const a = shape(v), b = body.shapeBody(v);
+		for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]));
+	}
+	assert.ok(worst < 0.01, `largest difference ${worst} cm`);
+	const t0 = performance.now(); for (let i = 0; i < 20; i++) body.shapeBody({ ...v, hips: (i % 5) / 5 }); const full = performance.now() - t0;
+	const t1 = performance.now(); for (let i = 0; i < 20; i++) shape({ ...v, hips: (i % 5) / 5 }); const inc = performance.now() - t1;
+	assert.ok(inc < full, `incremental ${inc.toFixed(0)} ms vs full ${full.toFixed(0)} ms for 20 updates`);
+});

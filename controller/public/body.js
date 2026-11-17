@@ -386,6 +386,45 @@ function prepare(v, p) {
 	return { k, cx, cz, minY };
 }
 
+/**
+ * Same result as shapeBody, for an editor that reshapes many times a second: the sum of the morphs
+ * is kept between calls and only the morphs whose weights changed are added again, so dragging one
+ * slider costs a few hundred vertices instead of every morph (about 24 ms -> 2-3 ms on a phone).
+ * A full rebuild happens every 300 calls, so rounding can't drift.
+ */
+export function createShaper() {
+	let acc = null, last = {}, calls = 0;
+	const after = (name) => name.startsWith('midsection-long');
+	const add = (p, name, k) => { const m = meshData.morphs[name]; if (!m || !k) return; for (let i = 0; i < m.idx.length; i++) { const j = m.idx[i] * 3; p[j] += m.off[i * 3] * k; p[j + 1] += m.off[i * 3 + 1] * k; p[j + 2] += m.off[i * 3 + 2] * k; } };
+	return function shape(v, out) {
+		const d = meshData, p = out || new Float32Array(d.count * 3);
+		const w = weights(v);
+		if (!acc || ++calls % 300 === 0) { acc = Float32Array.from(d.base); last = {}; }
+		for (const name of new Set([...Object.keys(w), ...Object.keys(last)])) {
+			if (after(name)) continue;
+			const dk = (w[name] || 0) - (last[name] || 0);
+			if (dk) add(acc, name, dk);
+		}
+		last = w;
+		p.set(acc);
+		if (!isPosing(v)) { poseArms(p, v.armPose || 0, { L: v.armL, R: v.armR }); poseLegs(p, v.stance || 0); }
+		const skin = d.eyes[0][0];
+		let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
+		for (let i = 0; i < skin; i++) { const y = p[i * 3 + 1]; if (y < minY) minY = y; if (y > maxY) maxY = y; cx += p[i * 3]; cz += p[i * 3 + 2]; }
+		cx /= skin; cz /= skin;
+		const k = (v.height || BASE_HEIGHT[v.base] || 170) / (maxY - minY);
+		for (const [name, x] of Object.entries(w)) if (after(name)) add(p, name, x);
+		const st = { k, cx, cz, minY };
+		if (isPosing(v)) {
+			const rest = rigRest(d, p), f = rigFrames(rest, v.pose, 1 / k);
+			skinRig(d, p, rest, f);
+			if (v.correctives !== false) correctRig(d, p, rest, f, v.pose, d.eyes[0][0]);
+			st.minY = floorOf(p);
+		}
+		return finish(p, st);
+	};
+}
+
 /** The lowest point of the drawn skin, so a posed body stands (or lies) on the floor. */
 function floorOf(p) {
 	let minY = Infinity;
@@ -517,6 +556,24 @@ function marker(p, [start, count]) {
  */
 export const ARM_POSES = { down: null, hip: { upper: 48, bend: 78 }, head: { upper: 168, bend: -100, back: 2.1 } };
 
+/** Rotation about a point in the x/y plane, as numbers (no arrays: this runs for thousands of vertices). */
+function rotor(angle, px, py) { return { c: Math.cos(angle), s: Math.sin(angle), px, py }; }
+const rx_ = (r, x, y) => r.px + (x - r.px) * r.c + (y - r.py) * r.s;
+const ry_ = (r, x, y) => r.py - (x - r.px) * r.s + (y - r.py) * r.c;
+
+/** Union of several skin groups' vertices with each group's weight, built once per mesh (cached). */
+const skinTables = new Map();
+function skinTable(names) {
+	const key = names.join('|');
+	let t = skinTables.get(key);
+	if (t && t.mesh === meshData) return t;
+	const maps = names.map((n) => { const m = new Map(), e = meshData.skin[n]; if (e) for (let i = 0; i < e.idx.length; i++) m.set(e.idx[i], e.w[i]); return m; });
+	const ids = [...new Set(maps.flatMap((m) => [...m.keys()]))];
+	t = { mesh: meshData, idx: Int32Array.from(ids), w: maps.map((m) => Float32Array.from(ids, (i) => m.get(i) || 0)) };
+	skinTables.set(key, t);
+	return t;
+}
+
 function poseArms(p, amount, poses = {}) {
 	const d = meshData;
 	if (!d.skin['arm.L'] || !d.markers['upperarm01.L']) return;
@@ -539,14 +596,18 @@ function poseArms(p, amount, poses = {}) {
 		const elbow = d.markers[`lowerarm01.${side}`] ? marker(p, d.markers[`lowerarm01.${side}`]) : null;
 		const re = bend ? rot(bend, elbow) : (x, y) => [x, y];
 		const reach = elbow ? Math.hypot(wrist[0] - elbow[0], wrist[1] - elbow[1]) || 1 : 1;
-		const weights = (name) => { const m = new Map(), e = d.skin[name]; if (e) for (let i = 0; i < e.idx.length; i++) m.set(e.idx[i], e.w[i]); return m; };
-		const sw = weights(`shoulder.${side}`), armW = weights(`arm.${side}`), foreW = bend ? weights(`forearm.${side}`) : new Map();
-		for (const i of new Set([...sw.keys(), ...armW.keys()])) {
-			const x = p[i * 3], y = p[i * 3 + 1];
-			const ws = sw.get(i) || 0, wa = armW.get(i) || 0, wf = Math.min(wa, foreW.get(i) || 0);
-			const [sx, sy] = rs(x, y);
-			const [ax, ay] = rs(...ru(x, y));
-			const [fx, fy] = rs(...ru(...re(x, y)));
+		const tb = skinTable([`shoulder.${side}`, `arm.${side}`, `forearm.${side}`]);
+		const [SW, AW, FW] = tb.w;
+		const RS = rotor(turn * 0.2, shoulder[0], shoulder[1]), RU = rotor(turn * 0.8, upper[0], upper[1]), RE = bend ? rotor(bend, elbow[0], elbow[1]) : null;
+		for (let n = 0; n < tb.idx.length; n++) {
+			const ws = SW[n], wa = AW[n];
+			if (!ws && !wa) continue;
+			const i = tb.idx[n], x = p[i * 3], y = p[i * 3 + 1];
+			const wf = bend ? Math.min(wa, FW[n]) : 0;
+			const sx = rx_(RS, x, y), sy = ry_(RS, x, y);
+			const ux = rx_(RU, x, y), uy = ry_(RU, x, y), ax = rx_(RS, ux, uy), ay = ry_(RS, ux, uy);
+			let fx = 0, fy = 0;
+			if (wf) { const ex = rx_(RE, x, y), ey = ry_(RE, x, y), vx = rx_(RU, ex, ey), vy = ry_(RU, ex, ey); fx = rx_(RS, vx, vy); fy = ry_(RS, vx, vy); }
 			const keep = Math.max(0, 1 - ws - wa);
 			p[i * 3] = keep * x + ws * sx + (wa - wf) * ax + wf * fx;
 			p[i * 3 + 1] = keep * y + ws * sy + (wa - wf) * ay + wf * fy;
@@ -623,16 +684,17 @@ function poseLegs(p, amount) {
 		const rot = (angle, [px, py]) => { const c = Math.cos(angle), s = Math.sin(angle); return (x, y) => [px + (x - px) * c + (y - py) * s, py - (x - px) * s + (y - py) * c]; };
 		const rh = rot(turn, hip);
 		const ra = rot(-turn, ankle);
-		const weightsOf = (name) => { const m = new Map(), e = d.skin[name]; for (let i = 0; i < e.idx.length; i++) m.set(e.idx[i], e.w[i]); return m; };
-		const wl = weightsOf(`leg.${side}`), wf = weightsOf(`foot.${side}`);
-		for (const i of new Set([...wl.keys(), ...wf.keys()])) {
-			const x = p[i * 3], y = p[i * 3 + 1];
-			const l = wl.get(i) || 0, f = wf.get(i) || 0;
-			const [lx, ly] = rh(x, y);
-			const [fx, fy] = rh(...ra(x, y));
+		const tb = skinTable([`leg.${side}`, `foot.${side}`]);
+		const [LW, FW] = tb.w;
+		const RH = rotor(turn, hip[0], hip[1]), RA = rotor(-turn, ankle[0], ankle[1]);
+		for (let n = 0; n < tb.idx.length; n++) {
+			const i = tb.idx[n], x = p[i * 3], y = p[i * 3 + 1];
+			const l = LW[n], f = FW[n];
+			let fx = 0, fy = 0;
+			if (f) { const qx = rx_(RA, x, y), qy = ry_(RA, x, y); fx = rx_(RH, qx, qy); fy = ry_(RH, qx, qy); }
 			const keep = Math.max(0, 1 - l - f);
-			p[i * 3] = keep * x + l * lx + f * fx;
-			p[i * 3 + 1] = keep * y + l * ly + f * fy;
+			p[i * 3] = keep * x + l * rx_(RH, x, y) + f * fx;
+			p[i * 3 + 1] = keep * y + l * ry_(RH, x, y) + f * fy;
 		}
 		const move = ([start, count], fn) => { for (let i = start; i < start + count; i++) { const [x, y] = fn(p[i * 3], p[i * 3 + 1]); p[i * 3] = x; p[i * 3 + 1] = y; } };
 		move(d.markers[`foot.${side}`], rh);
@@ -732,6 +794,8 @@ export function createViewer(container, { handles: showHandles = true, ground = 
 	let geometry = null;
 	let basePos = null;
 	let baseNrm = null;
+	let fineMesh = null, coarseMesh = null, coarseGeo = null;
+	const shaper = createShaper();
 	const eyes = [];
 	let ready = null;
 	let current = null;
@@ -808,7 +872,19 @@ export function createViewer(container, { handles: showHandles = true, ground = 
 		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((smooth ? d.subdiv.count : d.count) * 3), 3));
 		geometry.setIndex(new THREE.BufferAttribute(smooth ? d.subdiv.index : d.index, 1));
 		if (smooth) { geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.subdiv.count * 3), 3)); baseNrm = new Float32Array(d.count * 3); }
-		group.add(new THREE.Mesh(geometry, material));
+		fineMesh = new THREE.Mesh(geometry, material);
+		group.add(fineMesh);
+		// While a slider is being dragged the unsmoothed base mesh is drawn instead (4x fewer points,
+		// no subdivision): same shape, updated every frame; the smooth one returns when the drag stops.
+		if (smooth) {
+			coarseGeo = new THREE.BufferGeometry();
+			coarseGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(d.count * 3), 3));
+			coarseGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.count * 3), 3));
+			coarseGeo.setIndex(new THREE.BufferAttribute(d.index, 1));
+			coarseMesh = new THREE.Mesh(coarseGeo, material);
+			coarseMesh.visible = false;
+			group.add(coarseMesh);
+		}
 		// The base mesh has open eye sockets; plain eyeballs close them, as on a shop mannequin.
 		for (let i = 0; i < 2; i++) {
 			const eye = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), material);
@@ -823,18 +899,31 @@ export function createViewer(container, { handles: showHandles = true, ground = 
 	});
 
 	// While a slider is dragged it can fire many times per frame; reshape once per frame at most.
-	let pending = null;
+	// Updates closer together than 200 ms count as a drag: the quick unsmoothed mesh is drawn, and the
+	// smooth one is rebuilt once the values stop changing.
+	let pending = null, lastUpdate = 0, settleTimer = 0;
 	function update(values) {
+		const now = performance.now(), dragging = now - lastUpdate < 200;
+		lastUpdate = now;
 		const first = pending === null;
 		pending = values;
-		if (first) ready.then(() => requestAnimationFrame(() => { if (pending) { const v = pending; pending = null; reshape(v); } }), () => {});
+		if (first) ready.then(() => requestAnimationFrame(() => { if (pending) { const v = pending; pending = null; reshape(v, dragging && Boolean(coarseMesh)); } }), () => {});
+		clearTimeout(settleTimer);
+		if (coarseMesh) settleTimer = setTimeout(() => { if (current && coarseMesh.visible) reshape(current, false); }, 220);
 	}
 
-	function reshape(values) {
+	function reshape(values, quick = false) {
 		current = values;
 		const pos = geometry.attributes.position;
-		shapeBody(values, basePos);
-		if (meshData.subdiv) {
+		shaper(values, basePos);
+		if (quick) {
+			const cp = coarseGeo.attributes.position, cn = coarseGeo.attributes.normal;
+			cp.array.set(basePos); normalize(baseNormals(basePos, cn.array));
+			cp.needsUpdate = true; cn.needsUpdate = true;
+			coarseGeo.computeBoundingSphere();
+			coarseMesh.visible = true; fineMesh.visible = false;
+		} else if (meshData.subdiv) {
+			if (coarseMesh) { coarseMesh.visible = false; fineMesh.visible = true; }
 			subdivide(basePos, pos.array);
 			const nrm = geometry.attributes.normal;
 			subdivide(baseNormals(basePos, baseNrm), nrm.array);
