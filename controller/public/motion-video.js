@@ -177,3 +177,30 @@ export async function extractFromVideo(file, { fps = DEFAULT_FPS, people = 2, ma
 		video.removeAttribute('src'); video.load();
 	}
 }
+
+let still = null;
+/**
+ * The pose of the person in one picture (a File or Blob): MediaPipe's 33 points on the picture and
+ * in 3D, or null if nobody is found. The picture never leaves the phone.
+ */
+export async function poseFromPicture(file, { maxSide = 1280 } = {}) {
+	if (!still) {
+		const { FilesetResolver, PoseLandmarker } = await import('./vendor/mediapipe/vision_bundle.mjs');
+		const fileset = await FilesetResolver.forVisionTasks(new URL('./vendor/mediapipe/wasm', import.meta.url).href);
+		const opts = (delegate) => ({ baseOptions: { modelAssetPath: new URL('./vendor/mediapipe/pose_landmarker_lite.task', import.meta.url).href, delegate }, runningMode: 'IMAGE', numPoses: 1, minPoseDetectionConfidence: 0.4, minPosePresenceConfidence: 0.4 });
+		try { still = await PoseLandmarker.createFromOptions(fileset, opts('GPU')); } catch { still = await PoseLandmarker.createFromOptions(fileset, opts('CPU')); }
+	}
+	let bmp;
+	try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch { bmp = await createImageBitmap(file); }
+	const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+	const c = document.createElement('canvas');
+	c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+	c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+	const r = still.detect(c);
+	if (!r.landmarks?.[0]) return null;
+	return {
+		image: r.landmarks[0].map((p) => ({ x: p.x, y: p.y, visibility: p.visibility ?? 1 })),
+		world: (r.worldLandmarks?.[0] || r.landmarks[0]).map((p) => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility ?? 1 })),
+		width: bmp.width, height: bmp.height
+	};
+}

@@ -1167,15 +1167,41 @@ const chars = {
 		$('img-pose-chips').replaceChildren(
 			chip('None', !this.pose, () => this.choosePose(null)),
 			...(body?.posing ? [chip('As posed in the body editor', this.pose?.name === 'editor', () => this.choosePose('editor'))] : []),
+			...(this.photoPose ? [chip('From your picture', this.pose?.name === 'photo', () => this.choosePose('photo'))] : []),
 			...Object.keys(POSE_PRESETS).map((name) => chip(name, this.pose?.name === name, () => this.choosePose(name))),
+			chip('From a picture…', false, () => $('img-pose-file').click()),
 			chip('Make my own pose…', false, () => openPage('body', { sub: true })));
 		this.poseNote();
 	},
 	poseNote(extra = '') {
 		const body = this.bodyFor();
 		$('img-pose-note').textContent = extra || (this.pose
-			? `Pose "${this.pose.name === 'editor' ? 'from the body editor' : this.pose.name}" on ${this.poseBody ? 'the body you sent from the body editor' : body ? 'the body editor\'s current body' : 'the standard body (no body made yet)'}. ${$('img-pose-strict').checked ? 'Followed strictly: the drawing and the words both fix it.' : 'Followed loosely: the description may change it a little.'}`
+			? `${this.pose.name === 'photo' && this.photoPose?.unseen.length ? `Not visible in your picture (kept standing): ${this.photoPose.unseenText}. ` : ''}Pose "${this.pose.name === 'editor' ? 'from the body editor' : this.pose.name === 'photo' ? 'from your picture' : this.pose.name}" on ${this.poseBody ? 'the body you sent from the body editor' : body ? 'the body editor\'s current body' : 'the standard body (no body made yet)'}. ${$('img-pose-strict').checked ? 'Followed strictly: the drawing and the words both fix it.' : 'Followed loosely: the description may change it a little.'}`
 			: 'No pose: the picture\'s pose comes from the description (or from the body you sent, if it was posed).');
+	},
+	/**
+	 * A pose copied from a picture: the person's joints are found on this phone (MediaPipe), fitted
+	 * to your body's skeleton within human joint limits, then drawn as a strict guide. Only the joint
+	 * angles are kept; the picture itself is not sent anywhere. The guide is seen from the front,
+	 * because the angles already include which way the person faced the camera.
+	 */
+	async poseFromPicture(file) {
+		this.poseNote('Finding the pose in your picture…');
+		try {
+			const [{ poseFromPicture }, M, body] = await Promise.all([import('./motion-video.js'), import('./motion.js'), import('./body.js')]);
+			const found = await poseFromPicture(file);
+			if (!found) { this.poseNote('No person was found in that picture. One person, whole body in view, works best.'); return; }
+			await body.loadHuman();
+			const values = { ...(this.bodyFor() || body.defaults('female')), posing: true };
+			const poser = body.createPoser(values);
+			const upc = poser.toUnits([1, 0, 0], 0)[0] - poser.toUnits([0, 0, 0], 0)[0];
+			const fit = M.poseFromLandmarks(poser.rest, upc, found);
+			const names = { 'thigh.L': 'her left leg', 'thigh.R': 'her right leg', 'shin.L': 'her left leg', 'shin.R': 'her right leg', 'foot.L': 'her left foot', 'foot.R': 'her right foot', 'upperArm.L': 'her left arm', 'upperArm.R': 'her right arm', 'forearm.L': 'her left arm', 'forearm.R': 'her right arm', head: 'the head' };
+			this.photoPose = { pose: fit.pose, unseen: fit.unseen, unseenText: [...new Set(fit.unseen.map((p) => names[p]).filter(Boolean))].join(', ') };
+			$('img-pose-view').value = '0';
+			$('img-pose-strict').checked = true;
+			await this.choosePose('photo');
+		} catch (err) { this.poseNote(`The pose could not be read from that picture: ${err.message}`); }
 	},
 	/** Draw the chosen pose on the body (on this phone's server) and use it as the picture's guide. */
 	async choosePose(name) {
@@ -1183,8 +1209,8 @@ const chars = {
 		if (!name) { this.pose = null; if (this.shape?.pose) this.setShape(null); this.renderPoseChips(); return; }
 		const { POSE_PRESETS } = await import('./pose.js');
 		const body = this.bodyFor() || {};
-		const pose = name === 'editor' ? body.pose : POSE_PRESETS[name];
-		this.pose = { name, pose, text: poseText(name) };
+		const pose = name === 'editor' ? body.pose : name === 'photo' ? this.photoPose?.pose : POSE_PRESETS[name];
+		this.pose = { name, pose, text: name === 'photo' ? 'in exactly the pose of the body guide, every limb placed as shown' : poseText(name) };
 		this.renderPoseChips();
 		this.poseNote('Drawing the pose on your body…');
 		try {
@@ -1398,6 +1424,7 @@ qualityChanged();
 $('img-shape-clear').addEventListener('click', () => { chars.pose = null; chars.setShape(null); chars.renderPoseChips(); });
 // A new view, picture shape or strictness redraws or re-describes the chosen pose.
 $('img-pose-view').addEventListener('change', () => { if (chars.pose) chars.choosePose(chars.pose.name); });
+$('img-pose-file').addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) chars.poseFromPicture(f); });
 $('img-size').addEventListener('change', () => { if (chars.pose) chars.choosePose(chars.pose.name); });
 $('img-pose-strict').addEventListener('change', () => { chars.shapeText(); chars.poseNote(); });
 chars.renderPoseChips();

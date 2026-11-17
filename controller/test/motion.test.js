@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as body from '../public/body.js';
 import { rigFrames, effectorAt, POSE_PRESETS } from '../public/pose.js';
-import { trackPeople, cleanTrack, retarget, addRootMotion, buildMotion, toBVH, rotations, LM, SKELETON, describe } from '../public/motion.js';
+import { trackPeople, cleanTrack, retarget, addRootMotion, buildMotion, toBVH, rotations, LM, SKELETON, describe, poseFromLandmarks } from '../public/motion.js';
 
 // Synthetic "video": MediaPipe-style points made from known poses of the figure itself, so the
 // right answer is known. Real footage is checked by the owner; no frames are looked at here.
@@ -118,4 +118,16 @@ test('BVH: the hierarchy has every joint, and each frame has the right number of
 	assert.ok(rows.every((r) => r.trim().split(' ').length === 6 + 18 * 3));
 	const q = rotations(rest, upc, POSE_PRESETS.Waving);
 	assert.ok(Object.values(q).every((v) => Math.abs(Math.hypot(...v) - 1) < 1e-3), 'unit quaternions');
+});
+
+test('a pose from one picture: every limb within a few centimetres, a body part not seen is listed', () => {
+	for (const name of ['Hands on hips', 'Waving', 'Kneeling', 'Arms crossed', 'Crouching']) {
+		const lm = landmarks(POSE_PRESETS[name]);
+		const fit = poseFromLandmarks(rest, upc, { ...lm, width: 1000, height: 1000 });
+		const e = err(fit.pose, POSE_PRESETS[name]);
+		assert.ok(e < 6, `${name}: worst point ${e.toFixed(1)} cm off`);
+		assert.deepEqual(fit.unseen, []);
+	}
+	const hidden = landmarks(POSE_PRESETS.Waving, { hide: [LM.kneeL, LM.ankleL, LM.toeL, LM.heelL] });
+	assert.ok(poseFromLandmarks(rest, upc, { ...hidden, width: 1000, height: 1000 }).unseen.includes('shin.L'));
 });

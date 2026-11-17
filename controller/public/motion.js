@@ -13,7 +13,7 @@
 // so a motion fits any body shape made in the editor, plus local joint rotations (quaternions)
 // on the canonical skeleton below, so other tools need nothing from this app.
 
-import { rigFrames, effectorAt, solveRig, cleanPose, DEFAULT_POSE } from './pose.js';
+import { rigFrames, effectorAt, solveRig, cleanPose, DEFAULT_POSE, POSE_PRESETS } from './pose.js';
 
 export const FORMAT = 'motion/1';
 export const SKELETON_ID = 'assistant-human/1';
@@ -201,7 +201,7 @@ export async function retargetAsync(rest, upc, clean, { onProgress, chunk = 5, .
 }
 
 /** One frame at a time: returns step(cleanFrame) -> { t, pose, conf }, remembering the last frame. */
-export function createRetargeter(rest, upc, { iterations = 10, width = null, height = null } = {}) {
+export function createRetargeter(rest, upc, { iterations = 10, width = null, height = null, start = null } = {}) {
 	// MediaPipe's on-screen points are more precise than its 3D ones, whose depth is a guess. With
 	// the picture's size known, each point is projected back through a phone camera's usual lens
 	// (focal length 1.2 x the long side, as for root motion): its place on screen gives up/down and
@@ -246,7 +246,7 @@ export function createRetargeter(rest, upc, { iterations = 10, width = null, hei
 		upper: len(sub(E('elbow.L'), E('shoulder.L'))), fore: len(sub(E('hand.L'), E('elbow.L'))),
 		thigh: len(sub(E('knee.L'), r0.pp[idx('thigh.L')])), shin: len(sub(E('foot.L'), E('knee.L'))), foot: len(sub(E('toe.L'), E('foot.L')))
 	};
-	let prev = cleanPose(DEFAULT_POSE);
+	let prev = cleanPose(start || DEFAULT_POSE);
 	return (f) => {
 		makeHybrid(f);
 		let pose = structuredClone(prev);
@@ -535,4 +535,50 @@ export function sceneDepthOf(cleans, { width, height }) {
 		if (px > 0) depths.push(focal * m / px);
 	}
 	return depths.length ? Math.min(...depths) : null;
+}
+
+/**
+ * One picture's pose on the figure's skeleton: the same fitting as for video, settled over a few
+ * rounds (a still has no previous frame to start from). Returns { pose, conf, unseen: [parts] }.
+ */
+export function poseFromLandmarks(rest, upc, found, { rounds = 4, iterations = 30 } = {}) {
+	const track = { frames: [{ t: 0, image: found.image, world: found.world }] };
+	const [frame] = cleanTrack(track, { fps: DEFAULT_FPS });
+	// A still has no previous frame to start from, and a solver started with the arms down can stick
+	// (arms crossed, say). So it starts from several quite different poses, and the result whose
+	// limbs point most nearly the way the picture's do wins.
+	const seeds = [DEFAULT_POSE, POSE_PRESETS['Arms out'], POSE_PRESETS['Hands on hips'], POSE_PRESETS['Arms up'], POSE_PRESETS['Arms crossed'], POSE_PRESETS['Sitting (chair)'], POSE_PRESETS.Kneeling].filter(Boolean);
+	const segs = [['shoulderL', 'elbowL', 'shoulder.L', 'elbow.L'], ['elbowL', 'wristL', 'elbow.L', 'hand.L'], ['shoulderR', 'elbowR', 'shoulder.R', 'elbow.R'], ['elbowR', 'wristR', 'elbow.R', 'hand.R'],
+		['kneeL', 'ankleL', 'knee.L', 'foot.L'], ['kneeR', 'ankleR', 'knee.R', 'foot.R']];
+	const idx = (n) => rest.names.indexOf(n);
+	const score = (pose) => {
+		const f = rigFrames(rest, pose, upc);
+		const at = (n) => (n.startsWith('thigh') ? f.pp[idx(n)] : effectorAt(rest, f, n));
+		let e = 0;
+		for (const [a, b, ea, eb] of segs) {
+			const pa = frame.world[LM[a]], pb = frame.world[LM[b]];
+			if (!pa || !pb || frame.vis[LM[a]] < SEEN || frame.vis[LM[b]] < SEEN) continue;
+			const u = unit(sub(pb, pa)), v = unit(sub(at(eb), at(ea)));
+			e += 1 - (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]);
+		}
+		// Thighs: from the hip joints.
+		for (const s of ['L', 'R']) {
+			const pa = frame.world[LM[`hip${s}`]], pb = frame.world[LM[`knee${s}`]];
+			if (!pa || !pb || frame.vis[LM[`knee${s}`]] < SEEN) continue;
+			const u = unit(sub(pb, pa)), v = unit(sub(effectorAt(rest, f, `knee.${s}`), f.pp[idx(`thigh.${s}`)]));
+			e += 1 - (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]);
+		}
+		return e;
+	};
+	let best = null;
+	for (const start of seeds) {
+		const step = createRetargeter(rest, upc, { iterations, width: found.width, height: found.height, start });
+		let out = null;
+		for (let i = 0; i < rounds; i++) out = step(frame);
+		const e = score(out.pose);
+		if (!best || e < best.e) best = { e, out };
+	}
+	const out = best.out;
+	const unseen = Object.entries(out.conf).filter(([, c]) => c < SEEN).map(([p]) => p);
+	return { pose: out.pose, conf: out.conf, unseen, mismatch: Math.round(best.e * 1000) / 1000 };
 }
