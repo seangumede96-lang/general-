@@ -300,6 +300,9 @@ export async function loadHuman(url = new URL('./vendor/makehuman/', import.meta
 		skin: Object.fromEntries(Object.entries(layout.skin || {}).map(([k, e]) => [k, { idx: new Index(bin, e.indices, e.count), w: new Float32Array(bin, e.weights, e.count) }])),
 		morphs
 	};
+	[meshData.skin2, meshData.skin2coarse] = await Promise.all([loadSkin(url, read).catch(() => null), loadSkin(url, read, 'skin-coarse').catch(() => null)]);
+	// The surface that is drawn: the realistic skin bound to this mesh, else the smoothed mesh itself.
+	meshData.surface = meshData.skin2 ? { count: meshData.skin2.count, index: meshData.skin2.index } : meshData.subdiv;
 	return meshData;
 }
 
@@ -371,6 +374,7 @@ function prepare(v, p) {
 		poseArms(p, v.armPose || 0, { L: v.armL, R: v.armR });
 		poseLegs(p, v.stance || 0);
 	}
+	midlineContact(p);
 	// Measure the drawn skin only (the eye markers sit inside the head), then scale to the height.
 	const skin = d.eyes[0][0];
 	let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
@@ -408,6 +412,7 @@ export function createShaper() {
 		last = w;
 		p.set(acc);
 		if (!isPosing(v)) { poseArms(p, v.armPose || 0, { L: v.armL, R: v.armR }); poseLegs(p, v.stance || 0); }
+		midlineContact(p);
 		const skin = d.eyes[0][0];
 		let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
 		for (let i = 0; i < skin; i++) { const y = p[i * 3 + 1]; if (y < minY) minY = y; if (y > maxY) maxY = y; cx += p[i * 3]; cz += p[i * 3 + 2]; }
@@ -423,6 +428,40 @@ export function createShaper() {
 		}
 		return finish(p, st);
 	};
+}
+
+/**
+ * Left and right never pass through each other at the body's centre line (x = 0). Skin that rests on
+ * one side may move towards the middle, but softly stops short of it: thick inner thighs meet and
+ * flatten against each other instead of crossing, and the walls of the gluteal cleft and the sternal
+ * valley can narrow but never close (a vertex never gets closer to the middle than half its distance
+ * in the unshaped mesh, nor than 0.3 cm). Exactly nothing changes for skin moving outwards or staying
+ * clear of the middle. Runs on the shaped body before posing, so posed limbs (arms crossed) are free.
+ */
+const MIDLINE_FLOOR = 0.03, MIDLINE_SOFT = 0.1; // model units (decimetres): 0.3 cm and 1 cm
+let midlineSides = null;
+function midlineContact(p) {
+	const d = meshData, skin = d.eyes[0][0];
+	if (!midlineSides || midlineSides.mesh !== d) {
+		// Per vertex: which side it rests on, its floor and the width of the soft zone (from the unshaped mesh).
+		const side = new Int8Array(skin), floor = new Float32Array(skin), soft = new Float32Array(skin);
+		for (let i = 0; i < skin; i++) {
+			const u0 = Math.abs(d.base[i * 3]);
+			if (u0 < 0.002) continue; // on the centre line itself
+			side[i] = Math.sign(d.base[i * 3]);
+			floor[i] = Math.min(MIDLINE_FLOOR, 0.5 * u0);
+			soft[i] = Math.min(MIDLINE_SOFT, Math.max(1e-4, u0 - floor[i]));
+		}
+		midlineSides = { mesh: d, side, floor, soft };
+	}
+	const { side, floor, soft } = midlineSides;
+	for (let i = 0; i < skin; i++) {
+		const s = side[i];
+		if (!s) continue;
+		const u = s * p[i * 3], f = floor[i], w = soft[i];
+		if (u >= f + w) continue;
+		p[i * 3] = s * (f + w * Math.exp((u - f - w) / w));
+	}
 }
 
 /** The lowest point of the drawn skin, so a posed body stands (or lies) on the floor. */
@@ -623,6 +662,121 @@ function poseArms(p, amount, poses = {}) {
 	}
 }
 
+/**
+ * The realistic skin (Blender Studio's Human Base Meshes female, CC0; ~42k vertices) bound to this
+ * mesh: every skin vertex follows a point of a triangle here (barycentric) plus a small offset in that
+ * point's local frame, so all the sliders, body types, poses and correctives drive it. Only the new
+ * body's detail (anatomy under about a hand's width) rides on top; overall proportions stay the
+ * sliders'. The hands can't be matched finger by finger, so each hand moves as one solid piece
+ * with this mesh's hand (best-fit rotation, scale and position), blended into the forearm.
+ * Built by ~/pipeline/body-configurator/basemesh (wrap.py, build_skin.mjs).
+ */
+async function loadSkin(url, read, name = 'skin') {
+	const [layout, bin] = read
+		? await Promise.all([read(new URL(`${name}.json`, url)).then((b) => JSON.parse(Buffer.from(b).toString('utf8'))), read(new URL(`${name}.bin`, url)).then((b) => { const u = new Uint8Array(b); return u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength); })])
+		: await Promise.all([
+			fetch(new URL(`${name}.json`, url)).then((r) => { if (!r.ok) throw new Error(`skin: HTTP ${r.status}`); return r.json(); }),
+			fetch(new URL(`${name}.bin`, url)).then((r) => { if (!r.ok) throw new Error(`skin: HTTP ${r.status}`); return r.arrayBuffer(); })
+		]);
+	if (layout.format !== 'body-skin/1' || layout.refVertices !== meshData.count) return null;
+	const n = layout.vertices, r = layout.rigidCount;
+	const skin = meshData.eyes[0][0], idx = meshData.index, tris = [];
+	for (let t = 0; t < idx.length; t += 3) if (idx[t] < skin && idx[t + 1] < skin && idx[t + 2] < skin) tris.push(idx[t], idx[t + 1], idx[t + 2]);
+	return {
+		count: n,
+		index: new Uint16Array(bin, layout.indices, layout.triangles * 3),
+		tri: new Uint16Array(bin, layout.tri, n * 3),
+		bary: new Float32Array(bin, layout.bary, n * 2),
+		offset: new Float32Array(bin, layout.offset, n * 3),
+		ref: new Float32Array(bin, layout.ref, layout.refVertices * 3),
+		rigidIndex: new Uint16Array(bin, layout.rigidIndex, r),
+		rigidGroup: new Uint8Array(bin, layout.rigidGroup, r),
+		rigidWeight: new Float32Array(bin, layout.rigidWeight, r),
+		rigidRest: new Float32Array(bin, layout.rigidRest, r * 3),
+		groups: layout.groups.map((g, k) => new Uint16Array(bin, layout['group' + k], g.count)),
+		skinTris: Uint32Array.from(tris),
+		mhNormals: new Float32Array(meshData.count * 3)
+	};
+}
+
+/** Best-fit move (scale, rotation, translation) of points `ids` from A to B (Horn's quaternion method). */
+function bestFit(A, B, ids) {
+	let ax = 0, ay = 0, az = 0, bx = 0, by = 0, bz = 0;
+	for (const i of ids) { ax += A[i * 3]; ay += A[i * 3 + 1]; az += A[i * 3 + 2]; bx += B[i * 3]; by += B[i * 3 + 1]; bz += B[i * 3 + 2]; }
+	const m = ids.length; ax /= m; ay /= m; az /= m; bx /= m; by /= m; bz /= m;
+	let xx = 0, xy = 0, xz = 0, yx = 0, yy = 0, yz = 0, zx = 0, zy = 0, zz = 0, sa = 0, sb = 0;
+	for (const i of ids) {
+		const p = A[i * 3] - ax, q = A[i * 3 + 1] - ay, r = A[i * 3 + 2] - az, u = B[i * 3] - bx, v = B[i * 3 + 1] - by, w = B[i * 3 + 2] - bz;
+		xx += p * u; xy += p * v; xz += p * w; yx += q * u; yy += q * v; yz += q * w; zx += r * u; zy += r * v; zz += r * w;
+		sa += p * p + q * q + r * r; sb += u * u + v * v + w * w;
+	}
+	const N = [[xx + yy + zz, yz - zy, zx - xz, xy - yx], [yz - zy, xx - yy - zz, xy + yx, zx + xz], [zx - xz, xy + yx, -xx + yy - zz, yz + zy], [xy - yx, zx + xz, yz + zy, -xx - yy + zz]];
+	const shift = Math.sqrt(sa * sb) + 1e-9;
+	let q0 = 1, q1 = 0, q2 = 0, q3 = 0;
+	for (let it = 0; it < 40; it++) {
+		const n0 = N[0][0] * q0 + N[0][1] * q1 + N[0][2] * q2 + N[0][3] * q3 + shift * q0, n1 = N[1][0] * q0 + N[1][1] * q1 + N[1][2] * q2 + N[1][3] * q3 + shift * q1;
+		const n2 = N[2][0] * q0 + N[2][1] * q1 + N[2][2] * q2 + N[2][3] * q3 + shift * q2, n3 = N[3][0] * q0 + N[3][1] * q1 + N[3][2] * q2 + N[3][3] * q3 + shift * q3;
+		const l = Math.hypot(n0, n1, n2, n3); q0 = n0 / l; q1 = n1 / l; q2 = n2 / l; q3 = n3 / l;
+	}
+	const R = [q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3, 2 * (q1 * q2 - q0 * q3), 2 * (q1 * q3 + q0 * q2), 2 * (q1 * q2 + q0 * q3), q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3, 2 * (q2 * q3 - q0 * q1), 2 * (q1 * q3 - q0 * q2), 2 * (q2 * q3 + q0 * q1), q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3];
+	const s = Math.sqrt(sb / sa);
+	return { s, R, t: [bx - s * (R[0] * ax + R[1] * ay + R[2] * az), by - s * (R[3] * ax + R[4] * ay + R[5] * az), bz - s * (R[6] * ax + R[7] * ay + R[8] * az)] };
+}
+
+/** The realistic skin for shaped (and posed) mesh positions `p` (as from shapeBody), into `out`. */
+function bindSkin(p, out, k = meshData.skin2) {
+	const n = k.mhNormals, T = k.skinTris;
+	n.fill(0);
+	for (let t = 0; t < T.length; t += 3) {
+		const A = T[t] * 3, B = T[t + 1] * 3, C = T[t + 2] * 3;
+		const ux = p[B] - p[A], uy = p[B + 1] - p[A + 1], uz = p[B + 2] - p[A + 2], vx = p[C] - p[A], vy = p[C + 1] - p[A + 1], vz = p[C + 2] - p[A + 2];
+		const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+		n[A] += x; n[A + 1] += y; n[A + 2] += z; n[B] += x; n[B + 1] += y; n[B + 2] += z; n[C] += x; n[C + 1] += y; n[C + 2] += z;
+	}
+	const o = out || new Float32Array(k.count * 3), tri = k.tri, bary = k.bary, off = k.offset;
+	for (let i = 0; i < k.count; i++) {
+		const a = tri[i * 3] * 3, b = tri[i * 3 + 1] * 3, c = tri[i * 3 + 2] * 3, v = bary[i * 2], w = bary[i * 2 + 1], u = 1 - v - w;
+		const qx = u * p[a] + v * p[b] + w * p[c], qy = u * p[a + 1] + v * p[b + 1] + w * p[c + 1], qz = u * p[a + 2] + v * p[b + 2] + w * p[c + 2];
+		let nx = u * n[a] + v * n[b] + w * n[c], ny = u * n[a + 1] + v * n[b + 1] + w * n[c + 1], nz = u * n[a + 2] + v * n[b + 2] + w * n[c + 2];
+		let l = 1 / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1); nx *= l; ny *= l; nz *= l;
+		let ex = p[b] - p[a], ey = p[b + 1] - p[a + 1], ez = p[b + 2] - p[a + 2];
+		const d = ex * nx + ey * ny + ez * nz; ex -= nx * d; ey -= ny * d; ez -= nz * d;
+		l = 1 / (Math.sqrt(ex * ex + ey * ey + ez * ez) || 1); ex *= l; ey *= l; ez *= l;
+		const fx = ny * ez - nz * ey, fy = nz * ex - nx * ez, fz = nx * ey - ny * ex;
+		const s1 = off[i * 3], s2 = off[i * 3 + 1], s3 = off[i * 3 + 2];
+		o[i * 3] = qx + s1 * ex + s2 * fx + s3 * nx; o[i * 3 + 1] = qy + s1 * ey + s2 * fy + s3 * ny; o[i * 3 + 2] = qz + s1 * ez + s2 * fz + s3 * nz;
+	}
+	const fits = k.groups.map((g) => bestFit(k.ref, p, g));
+	for (let j = 0; j < k.rigidIndex.length; j++) {
+		const i = k.rigidIndex[j], { s, R, t } = fits[k.rigidGroup[j]], w = k.rigidWeight[j];
+		const x = k.rigidRest[j * 3], y = k.rigidRest[j * 3 + 1], z = k.rigidRest[j * 3 + 2];
+		o[i * 3] += w * (s * (R[0] * x + R[1] * y + R[2] * z) + t[0] - o[i * 3]);
+		o[i * 3 + 1] += w * (s * (R[3] * x + R[4] * y + R[5] * z) + t[1] - o[i * 3 + 1]);
+		o[i * 3 + 2] += w * (s * (R[6] * x + R[7] * y + R[8] * z) + t[2] - o[i * 3 + 2]);
+	}
+	return o;
+}
+
+/** The drawn surface for shaped base positions `p`: the realistic skin if loaded, else the subdivided mesh. */
+export function surface(p, out) { return meshData.skin2 ? bindSkin(p, out) : subdivide(p, out); }
+/** The coarse level of the realistic skin (about a quarter of the points; for drawing while a slider is dragged). */
+export const coarseSurface = (p, out) => bindSkin(p, out, meshData.skin2coarse);
+
+/** Unit normals of the drawn surface: from its own triangles (realistic skin) or smoothed base normals. */
+export function surfaceNormals(p, surfacePos, out, k = meshData.skin2) {
+	if (!k) { const o = subdivide(baseNormals(p), out); normalize(o); return o; }
+	const idx = k.index, P = surfacePos, o = out || new Float32Array(surfacePos.length);
+	o.fill(0);
+	for (let t = 0; t < idx.length; t += 3) {
+		const A = idx[t] * 3, B = idx[t + 1] * 3, C = idx[t + 2] * 3;
+		const ux = P[B] - P[A], uy = P[B + 1] - P[A + 1], uz = P[B + 2] - P[A + 2], vx = P[C] - P[A], vy = P[C + 1] - P[A + 1], vz = P[C + 2] - P[A + 2];
+		const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+		o[A] += x; o[A + 1] += y; o[A + 2] += z; o[B] += x; o[B + 1] += y; o[B + 2] += z; o[C] += x; o[C + 1] += y; o[C + 2] += z;
+	}
+	normalize(o);
+	return o;
+}
+
 /** The smooth (subdivided) surface for shaped base positions `p`, written into `out`. */
 export function subdivide(p, out) {
 	const s = meshData.subdiv;
@@ -658,8 +812,8 @@ export function baseNormals(p, out) {
 
 function normalize(n) {
 	for (let i = 0; i < n.length; i += 3) {
-		const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1;
-		n[i] /= l; n[i + 1] /= l; n[i + 2] /= l;
+		const l = 1 / (Math.sqrt(n[i] * n[i] + n[i + 1] * n[i + 1] + n[i + 2] * n[i + 2]) || 1);
+		n[i] *= l; n[i + 1] *= l; n[i + 2] *= l;
 	}
 }
 
@@ -871,20 +1025,22 @@ export function createViewer(container, { handles: showHandles = true, ground = 
 	function loaded(d) {
 		// Shapes and poses work on the base mesh; what is drawn is its smoothed version.
 		basePos = new Float32Array(d.count * 3);
-		const smooth = Boolean(d.subdiv);
+		const smooth = Boolean(d.surface);
 		geometry = new THREE.BufferGeometry();
-		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((smooth ? d.subdiv.count : d.count) * 3), 3));
-		geometry.setIndex(new THREE.BufferAttribute(smooth ? d.subdiv.index : d.index, 1));
-		if (smooth) { geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.subdiv.count * 3), 3)); baseNrm = new Float32Array(d.count * 3); }
+		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((smooth ? d.surface.count : d.count) * 3), 3));
+		geometry.setIndex(new THREE.BufferAttribute(smooth ? d.surface.index : d.index, 1));
+		if (smooth) { geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.surface.count * 3), 3)); baseNrm = new Float32Array(d.count * 3); }
 		fineMesh = new THREE.Mesh(geometry, material);
 		group.add(fineMesh);
 		// While a slider is being dragged the unsmoothed base mesh is drawn instead (4x fewer points,
 		// no subdivision): same shape, updated every frame; the smooth one returns when the drag stops.
 		if (smooth) {
 			coarseGeo = new THREE.BufferGeometry();
-			coarseGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(d.count * 3), 3));
-			coarseGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.count * 3), 3));
-			coarseGeo.setIndex(new THREE.BufferAttribute(d.index, 1));
+			// The realistic skin's coarse level when it is there (same look), else the unsmoothed base mesh.
+			const cn = d.skin2coarse ? d.skin2coarse.count : d.count;
+			coarseGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cn * 3), 3));
+			coarseGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(cn * 3), 3));
+			coarseGeo.setIndex(new THREE.BufferAttribute(d.skin2coarse ? d.skin2coarse.index : d.index, 1));
 			coarseMesh = new THREE.Mesh(coarseGeo, material);
 			coarseMesh.visible = false;
 			group.add(coarseMesh);
@@ -922,16 +1078,15 @@ export function createViewer(container, { handles: showHandles = true, ground = 
 		shaper(values, basePos);
 		if (quick) {
 			const cp = coarseGeo.attributes.position, cn = coarseGeo.attributes.normal;
-			cp.array.set(basePos); normalize(baseNormals(basePos, cn.array));
+			if (meshData.skin2coarse) { coarseSurface(basePos, cp.array); surfaceNormals(basePos, cp.array, cn.array, meshData.skin2coarse); } else { cp.array.set(basePos); normalize(baseNormals(basePos, cn.array)); }
 			cp.needsUpdate = true; cn.needsUpdate = true;
 			coarseGeo.computeBoundingSphere();
 			coarseMesh.visible = true; fineMesh.visible = false;
-		} else if (meshData.subdiv) {
+		} else if (meshData.surface) {
 			if (coarseMesh) { coarseMesh.visible = false; fineMesh.visible = true; }
-			subdivide(basePos, pos.array);
+			surface(basePos, pos.array);
 			const nrm = geometry.attributes.normal;
-			subdivide(baseNormals(basePos, baseNrm), nrm.array);
-			normalize(nrm.array);
+			surfaceNormals(basePos, pos.array, nrm.array);
 			nrm.needsUpdate = true;
 		} else {
 			pos.array.set(basePos.subarray(0, pos.array.length));
@@ -965,10 +1120,9 @@ export function createViewer(container, { handles: showHandles = true, ground = 
 		current = values;
 		getPoser(values).apply(values.pose, basePos, floor);
 		const pos = geometry.attributes.position;
-		subdivide(basePos, pos.array);
+		surface(basePos, pos.array);
 		const nrm = geometry.attributes.normal;
-		subdivide(baseNormals(basePos, baseNrm), nrm.array);
-		normalize(nrm.array);
+		surfaceNormals(basePos, pos.array, nrm.array);
 		nrm.needsUpdate = true;
 		pos.needsUpdate = true;
 		geometry.computeBoundingSphere();

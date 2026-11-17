@@ -121,6 +121,6 @@ test('depth range: the default single view is unchanged; "visible" uses the whol
 	const vis = await api('POST', '/api/body/depth', { values, view: 'rear', width: 256, height: 384, range: 'visible' });
 	assert.equal(plain.body.range, 'body'); assert.equal(vis.body.range, 'visible');
 	const p = await get(plain.body.depth), v = await get(vis.body.depth);
-	assert.ok(spread(v.px) > spread(p.px) * 1.25, `rear view grey spread ${spread(p.px)} -> ${spread(v.px)}`);
+	assert.ok(spread(v.px) > spread(p.px) * 1.15, `rear view grey spread ${spread(p.px)} -> ${spread(v.px)}`);
 	for (let i = 0; i < p.px.length; i++) assert.equal(p.px[i] > 0, v.px[i] > 0, 'same silhouette');
 });

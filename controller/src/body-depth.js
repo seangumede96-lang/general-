@@ -80,15 +80,15 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 	const mesh = await load();
 	const v = body.migrate({ version: 2, ...values });
 	const base = body.shapeBody(v);
-	const fine = body.subdivide(base);
-	const normals = body.subdivide(body.baseNormals(base));
+	const fine = body.surface(base);
+	const normals = body.surfaceNormals(base, fine);
 	const skin = mesh.eyes[0][0];
 	let H = 0, reach = 0;
 	for (let i = 0; i < skin; i++) { H = Math.max(H, base[i * 3 + 1]); reach = Math.max(reach, Math.hypot(base[i * 3], base[i * 3 + 2])); }
 	// Everything to draw: the smooth surface plus two eyeballs.
 	const positions = Array.from(fine);
 	const norms = Array.from(normals);
-	const tris = Array.from(mesh.subdiv.index);
+	const tris = Array.from(mesh.surface.index);
 	for (const [start, count] of mesh.eyes) {
 		let x = 0, y = 0, z = 0;
 		for (let i = start; i < start + count; i++) { x += base[i * 3]; y += base[i * 3 + 1]; z += base[i * 3 + 2]; }
