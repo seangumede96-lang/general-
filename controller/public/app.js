@@ -1205,7 +1205,7 @@ const chars = {
 	poseWords() {
 		if (!this.pose) return '';
 		const view = $('img-pose-view').selectedOptions[0].textContent.replace(/\(her (right|left)\)/, '').trim().toLowerCase();
-		return `${this.pose.text}, seen from the ${view}`;
+		return `${this.pose.text}, seen from ${view.startsWith('her ') ? '' : 'the '}${view}`;
 	},
 
 	shape: null,
