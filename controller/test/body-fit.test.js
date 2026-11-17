@@ -11,7 +11,7 @@ import { rle } from '../public/photo.js';
 const FRONT = { height: 'observed', shoulderWidth: 'observed', waistWidth: 'observed', hipWidth: 'observed', thighWidth: 'observed', legLength: 'observed', buttProjection: 'unknown', bellyDepth: 'unknown', chestDepth: 'unknown' };
 /** Evidence made from the figure itself with known settings: a "photo" whose true answer we know. */
 async function evidenceOf(values, view = 'front', angle = 0, obs = FRONT) {
-	const r = await renderBody(values, { angleDeg: angle, width: 72, height: 108, raw: true });
+	const r = await renderBody(values, { angleDeg: angle, width: 72, height: 108, raw: true, plain: true });
 	return { format: 'photo-evidence/1', consent: 'own-or-consenting-adult', view, observability: obs, landmarks: [], mask: { width: r.width, height: r.height, rle: rle(Uint8Array.from(r.mask, (x) => (x ? 255 : 0))) } };
 }
 

@@ -435,10 +435,10 @@ export function createShaper() {
  * one side may move towards the middle, but softly stops short of it: thick inner thighs meet and
  * flatten against each other instead of crossing, and the walls of the gluteal cleft and the sternal
  * valley can narrow but never close (a vertex never gets closer to the middle than half its distance
- * in the unshaped mesh, nor than 0.3 cm). Exactly nothing changes for skin moving outwards or staying
+ * in the unshaped mesh, nor than 0.02 cm: touching skin meets without a slit). Exactly nothing changes for skin moving outwards or staying
  * clear of the middle. Runs on the shaped body before posing, so posed limbs (arms crossed) are free.
  */
-const MIDLINE_FLOOR = 0.03, MIDLINE_SOFT = 0.1; // model units (decimetres): 0.3 cm and 1 cm
+const MIDLINE_FLOOR = 0.002, MIDLINE_SOFT = 0.1; // model units (decimetres): skin meets at 0.02 cm (no visible slit between touching thighs), soft over 1 cm
 let midlineSides = null;
 function midlineContact(p) {
 	const d = meshData, skin = d.eyes[0][0];

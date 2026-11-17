@@ -113,7 +113,7 @@ export async function fitBody(evidence, start = {}, { width = 0, height = 0, ste
 	const UPPER = Math.round(PROFILE_ROWS * ((0.42 - ROW_FROM) / (ROW_TO - ROW_FROM)));
 	const cost = async (v, rows = PROFILE_ROWS) => {
 		renders++;
-		const r = await renderBody({ ...v, posing: false }, { angleDeg: angle, width, height, raw: true });
+		const r = await renderBody({ ...v, posing: false }, { angleDeg: angle, width, height, raw: true, plain: true });
 		const prof = profile(shrinkTo(r.mask, r.width, r.height, personPx));
 		if (!prof) return Infinity;
 		// the residual plus a gentle pull back towards where the user started (keeps unneeded sliders put)
