@@ -851,10 +851,14 @@ export function createViewer(container, { handles: showHandles = true, ground = 
 		cam.updateProjectionMatrix();
 	}
 
+	// Resizing the canvas makes the browser rebuild its drawing buffers: only do it when the
+	// container's size really changed (not on every slider step, which also calls this).
+	let sizeW = 0, sizeH = 0, sizeRatio = 0;
 	function resize() {
 		const w = container.clientWidth || 300;
 		const h = container.clientHeight || 400;
-		renderer.setSize(w, h, false);
+		const ratio = renderer.getPixelRatio();
+		if (w !== sizeW || h !== sizeH || ratio !== sizeRatio) { renderer.setSize(w, h, false); sizeW = w; sizeH = h; sizeRatio = ratio; }
 		frame(camera, w / h, true);
 		draw();
 	}
@@ -1107,6 +1111,7 @@ export function createViewer(container, { handles: showHandles = true, ground = 
 			stageFloor.visible = true; placeGround();
 			yaw = prevYaw;
 			renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+			sizeW = 0; // the snapshot changed the canvas size: put the screen size back
 			resize();
 			return blob;
 		}
