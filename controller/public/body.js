@@ -759,7 +759,7 @@ function bindSkin(p, out, k = meshData.skin2) {
 		// shrinks with it, so it can't fold over itself; stretched or unchanged areas keep it in full.
 		const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2], vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
 		const ax = uy * vz - uz * vy, ay = uz * vx - ux * vz, az = ux * vy - uy * vx;
-		const sq = Math.min(1, Math.sqrt(Math.sqrt(ax * ax + ay * ay + az * az) / k.refArea[i]));
+		const sq = Math.min(1, Math.sqrt(ax * ax + ay * ay + az * az) / k.refArea[i]);
 		const s1 = off[i * 3] * sq, s2 = off[i * 3 + 1] * sq, s3 = off[i * 3 + 2] * sq;
 		o[i * 3] = qx + s1 * ex + s2 * fx + s3 * nx; o[i * 3 + 1] = qy + s1 * ey + s2 * fy + s3 * ny; o[i * 3 + 2] = qz + s1 * ez + s2 * fz + s3 * nz;
 	}
