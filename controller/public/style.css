@@ -759,3 +759,6 @@ body.studio .icon-btn:hover { background: rgba(255,255,255,.18); }
 /* Only the buttons themselves catch touches: the space around them still turns the figure. */
 .glass-stack { pointer-events: none; }
 .glass-stack > * { pointer-events: auto; }
+/* Vertical sliders (Lengths) keep the browser's own slider: restyling it breaks dragging on phones. */
+.creator-panel.glass .vslider input[type=range] { -webkit-appearance: slider-vertical; appearance: auto; width: 34px; height: 190px; margin: 0; background: none; box-shadow: none; accent-color: #7fe7f5; }
+.creator-panel.glass .vslider input[type=range]::-webkit-slider-thumb { -webkit-appearance: auto; appearance: auto; width: auto; height: auto; box-shadow: none; background: initial; }
