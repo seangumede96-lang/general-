@@ -301,7 +301,4 @@ test('the incremental shaper gives the same body as shapeBody through a run of s
 	}
 	assert.ok(worst < 0.01, `largest difference ${worst} cm`);
 	// (speed is measured outside the test suite: timings are unreliable while all tests run in parallel)
-}); const full = performance.now() - t0;
-	const t1 = performance.now(); for (let i = 0; i < 20; i++) shape({ ...v, hips: (i % 5) / 5 }); const inc = performance.now() - t1;
-	assert.ok(inc < full, `incremental ${inc.toFixed(0)} ms vs full ${full.toFixed(0)} ms for 20 updates`);
 });
