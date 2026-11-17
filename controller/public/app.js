@@ -66,7 +66,7 @@ const etaText = (until) => { const sec = Math.round((until - Date.now()) / 1000)
 /** Bar, elapsed time, estimated time left and a rotating status word for a machine that is starting. */
 // ---- live start-up log of a GPU session: what the app did, what RunPod reports, what the engine says ----
 const LOG_SOURCE = { app: 'App', runpod: 'RunPod', engine: 'Engine', error: 'Problem' };
-const logTime = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const logTime = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 function logRow(l) {
 	return el('li', { className: `log-${l.source}` }, el('time', { textContent: logTime(l.at) }), el('b', { textContent: LOG_SOURCE[l.source] || l.source }), el('span', { textContent: l.text }));
 }
@@ -96,6 +96,24 @@ function updateLiveLog(node, session) {
 	warn.textContent = quiet >= session.stuckAfterSeconds ? `No progress for ${clock(quiet)}: this machine looks stuck. The app replaces it with another GPU by itself (twice at most); you can also tap End session.`
 		: `No news for ${clock(quiet)}. If nothing happens by ${clock(session.stuckAfterSeconds)}, the app replaces this machine with another GPU by itself.`;
 }
+
+/** Each pose preset in words, for the prompt: the depth guide draws it, the words make sure the description agrees. */
+const POSE_WORDS = {
+	Standing: 'standing upright, arms relaxed at the sides',
+	Relaxed: 'standing relaxed with the weight on one leg, one knee slightly bent, head slightly tilted',
+	'Hands on hips': 'standing with both hands on the hips, elbows out to the sides',
+	'Arms crossed': 'standing with the arms crossed over the chest',
+	'Arms up': 'standing with both arms raised straight up above the head',
+	'Arms out': 'standing with both arms stretched out to the sides at shoulder height',
+	Waving: 'standing and waving with one hand raised',
+	Walking: 'walking mid-stride, one leg forward',
+	Running: 'running mid-stride, knees bent, arms swinging',
+	'Sitting (chair)': 'sitting upright on a simple chair, knees bent, feet on the floor',
+	Kneeling: 'kneeling upright on both knees',
+	Crouching: 'crouching low with the knees deeply bent',
+	'Lying on back': 'lying flat on the back'
+};
+const poseText = (name) => POSE_WORDS[name] || 'in exactly the pose shown by the body guide';
 
 function progressNode(p, extra = '', { reserveFiles = 0 } = {}) {
 	if (!p) return el('div', { className: 'boot' });
@@ -1063,7 +1081,7 @@ const chars = {
 		const { session, loras, b2 } = this.data;
 		const text = { off: 'Off. Nothing is being charged.', starting: `Starting up${session.detail ? `: ${session.detail}` : ''}. About 6 minutes.`, ready: `Ready. ${clock(session.secondsLeft)} left; it also stops after 10 quiet minutes.`, stopping: 'Stopping. RunPod could not be reached just now; the app keeps trying every 15 seconds until the GPU is deleted.' };
 		Object.assign($('img-state'), { className: `brain-state ${session.state}`, textContent: session.state === 'starting' ? 'Starting up' : text[session.state] });
-		if (session.state === 'starting') $('img-state').append(progressNode(session.progress));
+		if (session.state === 'starting') $('img-state').append(progressNode(session.lastNewsSeconds > 30 && session.progress ? { ...session.progress, etaSeconds: null } : session.progress, session.lastNewsSeconds > 30 ? ' · waiting for the machine' : ''));
 		const box = $('img-session');
 		if (session.state === 'off') {
 			if (!box.querySelector('#img-minutes')) {
@@ -1134,20 +1152,80 @@ const chars = {
 		out.replaceChildren(el('div', { className: 'row' }, el('span', { className: 'small', textContent: `${q.useMinutes} minutes of use, plus up to ${q.setupMinutes} for setup. ${q.summary}` }), el('span', { className: 'spacer' }), go));
 	},
 
+	// ---- Pose: put on the owner's own body and drawn as the same depth guide as the body shape ----
+	/** The body the pose is put on: the one sent with "Use this body", else the body editor's current one. */
+	poseBody: null,
+	pose: null, // { name, text, pose }
+	bodyFor() {
+		if (this.poseBody) return this.poseBody;
+		try { return JSON.parse(localStorage.getItem('bodyCurrent') || 'null'); } catch { return null; }
+	},
+	async renderPoseChips() {
+		const { POSE_PRESETS } = await import('./pose.js');
+		const body = this.bodyFor();
+		const chip = (label, on, fn) => { const b = el('button', { type: 'button', textContent: label, className: on ? 'on' : '' }); b.addEventListener('click', fn); return b; };
+		$('img-pose-chips').replaceChildren(
+			chip('None', !this.pose, () => this.choosePose(null)),
+			...(body?.posing ? [chip('As posed in the body editor', this.pose?.name === 'editor', () => this.choosePose('editor'))] : []),
+			...Object.keys(POSE_PRESETS).map((name) => chip(name, this.pose?.name === name, () => this.choosePose(name))),
+			chip('Make my own pose…', false, () => openPage('body', { sub: true })));
+		this.poseNote();
+	},
+	poseNote(extra = '') {
+		const body = this.bodyFor();
+		$('img-pose-note').textContent = extra || (this.pose
+			? `Pose "${this.pose.name === 'editor' ? 'from the body editor' : this.pose.name}" on ${this.poseBody ? 'the body you sent from the body editor' : body ? 'the body editor\'s current body' : 'the standard body (no body made yet)'}. ${$('img-pose-strict').checked ? 'Followed strictly: the drawing and the words both fix it.' : 'Followed loosely: the description may change it a little.'}`
+			: 'No pose: the picture\'s pose comes from the description (or from the body you sent, if it was posed).');
+	},
+	/** Draw the chosen pose on the body (on this phone's server) and use it as the picture's guide. */
+	async choosePose(name) {
+		const seq = (this.poseSeq = (this.poseSeq || 0) + 1);
+		if (!name) { this.pose = null; if (this.shape?.pose) this.setShape(null); this.renderPoseChips(); return; }
+		const { POSE_PRESETS } = await import('./pose.js');
+		const body = this.bodyFor() || {};
+		const pose = name === 'editor' ? body.pose : POSE_PRESETS[name];
+		this.pose = { name, pose, text: poseText(name) };
+		this.renderPoseChips();
+		this.poseNote('Drawing the pose on your body…');
+		try {
+			const [width, height] = { portrait: [1024, 1536], square: [1024, 1024], landscape: [1536, 1024] }[$('img-size').value] || [1024, 1536];
+			const values = { ...body, posing: true, pose: structuredClone(pose) };
+			const out = await api('POST', '/api/body/depth', { values, angle: Number($('img-pose-view').value), width, height, range: 'visible' });
+			if (seq !== this.poseSeq) return; // a newer choice is on its way
+			this.setShape(out.depth, `/api/uploads/${out.preview}`, { pose: true });
+			this.poseNote();
+		} catch (err) { if (seq === this.poseSeq) { this.pose = null; this.renderPoseChips(); this.poseNote(`The pose could not be drawn: ${err.message}`); } }
+	},
+	poseStrict() {
+		const strict = Boolean(this.pose) && $('img-pose-strict').checked;
+		$('img-shape-strength').disabled = strict;
+		return strict;
+	},
+	/** The pose in words for the prompt, with the view. */
+	poseWords() {
+		if (!this.pose) return '';
+		const view = $('img-pose-view').selectedOptions[0].textContent.replace(/\(her (right|left)\)/, '').trim().toLowerCase();
+		return `${this.pose.text}, seen from the ${view}`;
+	},
+
 	shape: null,
-	setShape(id, src) {
-		this.shape = id ? { id } : null;
+	setShape(id, src, { pose = false } = {}) {
+		this.shape = id ? { id, pose } : null;
+		// A body sent without a pose choice replaces the pose guide (it carries its own pose, if any).
+		if (!pose && this.pose) { this.pose = null; this.renderPoseChips(); }
 		$('img-shape-thumb').replaceChildren(...(id ? [el('img', { src, alt: 'Body shape' })] : ['None']));
 		$('img-shape-strength-row').hidden = !id;
 		this.shapeText();
 	},
 	shapeText() {
 		const v = Number($('img-shape-strength').value);
+		if (this.poseStrict()) { $('img-shape-strength-text').textContent = ' 1.00: strict, the pose is followed exactly'; return; }
 		$('img-shape-strength-text').textContent = ` ${this.depthStrength().toFixed(2)}: ${v >= 70 ? 'tight, pose followed closely' : v >= 30 ? 'balanced' : 'loose, the prompt can change arms and head'}`;
 	},
 	/** Slider 0-100 (right = follow tighter) to the depth add-on's strength. */
 	/** 0.40 (loose: the prompt can change arms and head) to 1.00 (tight: follows the mannequin). */
 	depthStrength() {
+		if (this.poseStrict()) return 1;
 		return Math.round((0.4 + Number($('img-shape-strength').value) / 100 * 0.6) * 100) / 100;
 	},
 
@@ -1237,7 +1315,7 @@ const chars = {
 		// Remember the strengths used, so next time each LoRA starts where you left it.
 		localStorage.setItem('loraStrengths', JSON.stringify({ ...savedStrengths(), ...Object.fromEntries(loras.map((l) => [l.name, l.strength])) }));
 		try {
-			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, stylePass: $('img-style-pass').checked, styleDenoise: Number($('img-style-denoise').value), size: $('img-size').value, quality: $('img-quality').value, count: Number($('img-count').value), refs, refCounts, depth: this.shape?.id || '', depthStrength: this.depthStrength() });
+			await api('POST', '/api/images/generate', { prompt: $('img-prompt').value.trim(), enhance: $('img-enhance').checked, prefix: this.triggers().join(' '), loras, stylePass: $('img-style-pass').checked, styleDenoise: Number($('img-style-denoise').value), size: $('img-size').value, quality: $('img-quality').value, count: Number($('img-count').value), refs, refCounts, depth: this.shape?.id || '', depthStrength: this.depthStrength(), pose: this.shape?.pose && $('img-pose-strict').checked ? this.poseWords() : '' });
 			out.replaceChildren();
 			this.refresh();
 		} catch (err) { out.replaceChildren(el('div', { className: 'sys-alert', textContent: err.message })); }
@@ -1317,7 +1395,12 @@ stylePassChanged();
 $('img-size').addEventListener('change', qualityChanged);
 $('img-count').addEventListener('change', () => { const n = Math.min(Number($('img-count').max), Math.max(1, Math.round(Number($('img-count').value) || 1))); $('img-count').value = String(n); });
 qualityChanged();
-$('img-shape-clear').addEventListener('click', () => chars.setShape(null));
+$('img-shape-clear').addEventListener('click', () => { chars.pose = null; chars.setShape(null); chars.renderPoseChips(); });
+// A new view, picture shape or strictness redraws or re-describes the chosen pose.
+$('img-pose-view').addEventListener('change', () => { if (chars.pose) chars.choosePose(chars.pose.name); });
+$('img-size').addEventListener('change', () => { if (chars.pose) chars.choosePose(chars.pose.name); });
+$('img-pose-strict').addEventListener('change', () => { chars.shapeText(); chars.poseNote(); });
+chars.renderPoseChips();
 $('img-shape-strength').addEventListener('input', () => chars.shapeText());
 chars.renderRefs();
 for (const input of document.querySelectorAll('.ref-input')) {
@@ -2116,7 +2199,9 @@ const bodyEditor = {
 			const depth = await this.viewer.snapshot(w, h, angle, 'depth');
 			const preview = await this.viewer.snapshot(w, h, angle, 'shape');
 			const up = await uploadWithProgress(new File([depth], 'body-depth.png', { type: 'image/png' }), () => {});
+			chars.poseBody = structuredClone(this.values);
 			chars.setShape(up.id, URL.createObjectURL(preview));
+			chars.renderPoseChips();
 			if (nav.stack.at(-1) === 'characters') goBack(); else openPage('characters');
 		} catch (err) { alert(`The body could not be prepared: ${err.message}`); }
 		finally { button.disabled = false; button.textContent = 'Use this body for pictures'; }

@@ -461,7 +461,7 @@ test('a machine with no news for 3 minutes while starting is replaced by another
 	let s = (await api('GET', '/api/images')).body.session;
 	assert.equal(s.state, 'starting');
 	assert.ok(s.log.some((l) => /GPU found/.test(l.text)), 'the GPU found is shown');
-	assert.ok(s.log.some((l) => l.source === 'engine' && /Step 1\/3 Installing/.test(l.text)), 'the engine\'s own messages are shown');
+	assert.ok(s.log.some((l) => l.source === 'engine' && /Step 2 of 4: Installing/.test(l.text)), 'the engine\'s own messages are shown');
 	now += 2 * MIN;
 	s = (await api('GET', '/api/images')).body.session;
 	assert.equal(s.lastNewsSeconds, 120);
@@ -479,4 +479,21 @@ test('a machine with no news for 3 minutes while starting is replaced by another
 	s = (await api('GET', '/api/images')).body.session;
 	assert.equal(s.state, 'ready');
 	assert.match(s.log.at(-1).text, /Engine ready/);
+});
+
+test('a chosen pose is drawn by the depth guide and stated in the prompt; without a guide it is refused', async () => {
+	await startSession();
+	await api('GET', '/api/images');
+	const depth = await upload('depth.png', 'image/png');
+	const bad = await api('POST', '/api/images/generate', { prompt: 'a woman', pose: 'standing with both hands on the hips' });
+	assert.ok(bad.status >= 400 && bad.status < 500);
+	assert.match(bad.body.error, /pose guide is missing/);
+	const before = comfy.state.prompts.length;
+	const g = await generate({ prompt: 'A short elf with blonde pigtails.', depth, depthStrength: 1, pose: 'standing with both hands on the hips, seen from the front' });
+	assert.equal(g.status, 'done');
+	assert.equal(g.params.pose, 'standing with both hands on the hips, seen from the front');
+	assert.equal(g.prompt, 'A short elf with blonde pigtails. Pose: standing with both hands on the hips, seen from the front.');
+	const graph = comfy.state.prompts[before].prompt;
+	assert.equal(graph['52'].inputs.strength, 1);
+	assert.match(graph['5'].inputs.text || graph['5'].inputs.prompt || '', /Pose: standing with both hands on the hips/);
 });

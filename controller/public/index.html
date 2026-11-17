@@ -287,6 +287,19 @@
 						</div>
 					</div>
 				</div>
+				<div class="card-cap" style="margin-top:14px">Pose (optional)</div>
+				<p class="muted small" style="margin:0 0 6px">The pose is put on <b>your body</b> from the body editor and drawn as one guide, so body shape and pose always agree.</p>
+				<div id="img-pose-chips" class="pose-chips"></div>
+				<div class="row" style="margin-top:8px">
+					<label class="inline">Seen from <select id="img-pose-view">
+						<option value="0">Front</option><option value="315">Front three-quarter (her right)</option><option value="45">Front three-quarter (her left)</option>
+						<option value="270">Her right side</option><option value="90">Her left side</option>
+						<option value="225">Back three-quarter (her right)</option><option value="135">Back three-quarter (her left)</option><option value="180">Back</option>
+					</select></label>
+				</div>
+				<label class="check" style="margin-top:8px"><input type="checkbox" id="img-pose-strict" checked> Follow the pose strictly</label>
+				<p class="muted small" id="img-pose-note" style="margin:4px 0 0"></p>
+
 				<label style="margin-top:14px">Shape <select id="img-size"><option value="portrait">Portrait</option><option value="square">Square</option><option value="landscape">Landscape</option></select></label>
 				<label>Quality <select id="img-quality"><option value="standard">Standard: 1.5 MP, fastest</option><option value="max">Max 2K: 4 MP, sharpest (up to 2 pictures)</option></select></label>
 				<p class="muted small" id="img-quality-note" style="margin:-6px 0 10px"></p>

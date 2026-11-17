@@ -29,7 +29,8 @@ Rules:
 - Follow the user's wishes about clothing and nudity exactly. If they ask for nudity, say plainly that the person is fully nude ("completely nude, wearing nothing") and do not mention or invent any clothing, underwear, cover or censoring. Otherwise state the clothing explicitly, item by item; if they say nothing about clothing, give a complete outfit.
 - Unless the user names a setting, the background is a plain pure white void.
 - Characters are fictional adults. Keep every detail the user gave; invent sensible specifics for what they left out. Do not add text, logos or watermarks.
-- If reference pictures are mentioned, do not describe the face or body they will supply; describe everything else.`;
+- If reference pictures are mentioned, do not describe the face or body they will supply; describe everything else.
+- If a fixed pose is given, describe exactly that pose (and the camera view given) and no other: do not add or change what the arms, hands, legs or head do.`;
 
 /** Tries at starting a session's GPU when none of the listed ones can be placed. */
 const START_ATTEMPTS = 3;
@@ -103,7 +104,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			if (!res.ok) return;
 			const lines = (await res.text()).trim().split('\n');
 			if (lines.length > session.engineSeen) {
-				for (const raw of lines.slice(session.engineSeen)) { const l = raw.replace(/\x1b\[[0-9;]*m/g, ''); if (!NOISE.test(l)) note(l.replace(/^STEP /, 'Step '), /FAILED|Error|error:|Traceback|MISSING/.test(l) ? 'error' : 'engine'); }
+				for (const raw of lines.slice(session.engineSeen)) { const l = raw.replace(/\x1b\[[0-9;]*m/g, ''); if (!NOISE.test(l)) note(l.replace(/^STEP (\d)\/3/, (_, n) => `Step ${Number(n) + 1} of 4:`), /FAILED|Error|error:|Traceback|MISSING/.test(l) ? 'error' : 'engine'); }
 				session.lastNewsAt = clock();
 				session.engineSeen = lines.length;
 			}
@@ -216,9 +217,10 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 	 * Expand a casual request into a detailed prompt using the chat brain. If no brain
 	 * answers, or it declines, the user's own words are used unchanged.
 	 */
-	async function enhance(text, refs = []) {
+	async function enhance(text, refs = [], pose = '') {
 		if (!llm) return { prompt: text, enhanced: false, why: 'No chat model is set up.' };
-		const refNote = refs.length ? `\n(Reference pictures will supply: ${refs.map((r) => r.role === 'look' ? 'outfit and makeup' : r.role).join(', ')}.)` : '';
+		const refNote = (refs.length ? `\n(Reference pictures will supply: ${refs.map((r) => r.role === 'look' ? 'outfit and makeup' : r.role).join(', ')}.)` : '')
+			+ (pose ? `\n(Fixed pose, set by a body guide the picture must follow exactly: ${pose}. Describe exactly this pose.)` : '');
 		try {
 			const out = (await llm([{ role: 'system', content: PROMPT_WRITER }, { role: 'user', content: text + refNote }])).replace(/^["'\s]+|["'\s]+$/g, '');
 			const declined = /^(i('m| am)? (sorry|unable|not able)|i can('|no)t|sorry|as an ai|i won't)/i.test(out);
@@ -341,7 +343,10 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			if (!depth || !depth.type.startsWith('image/')) throw new ImageError('The body depth map is missing. Open the body editor and tap "Use this body" again.');
 		}
 		const depthStrength = Math.min(1.2, Math.max(0.3, Number(req.depthStrength) || 0.9));
-		return { depth, depthStrength, shape, shapeDenoise, prompt: prompt.slice(0, 4000), width, height, count, quality, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
+		// The pose in words (from the pose picker); the drawing of it is the depth guide.
+		const pose = String(req.pose || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+		if (pose && !depth) throw new ImageError('The pose guide is missing. Pick the pose again.');
+		return { pose, depth, depthStrength, shape, shapeDenoise, prompt: prompt.slice(0, 4000), width, height, count, quality, loras, refs, size: SIZES[req.size] ? req.size : 'portrait' };
 	}
 
 	async function generate(req) {
@@ -351,7 +356,7 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 		if (gpu.stopping?.(p.id)) throw new ImageError('The session is stopping.');
 		if (db.listGenerations().some((g) => g.status === 'running')) throw new ImageError('A picture is already being made.');
 		const id = randomUUID();
-		const params = { size: v.size, quality: v.quality, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, depth: v.depth?.id || '', depthStrength: v.depth ? v.depthStrength : null, asked: v.prompt, note: '', stylePass: req.stylePass === true && v.loras.length > 0 ? Math.min(0.6, Math.max(0.3, Number(req.styleDenoise) || 0.45)) : null };
+		const params = { pose: v.pose || undefined, size: v.size, quality: v.quality, width: v.width, height: v.height, count: v.count, loras: v.loras, refs: Object.fromEntries(Object.keys(REFERENCE_ROLES).map((role) => [role, v.refs.filter((r) => r.role === role).map((r) => r.upload.id)]).filter(([, ids]) => ids.length)), shape: v.shape?.id || '', shapeDenoise: v.shape ? v.shapeDenoise : null, depth: v.depth?.id || '', depthStrength: v.depth ? v.depthStrength : null, asked: v.prompt, note: '', stylePass: req.stylePass === true && v.loras.length > 0 ? Math.min(0.6, Math.max(0.3, Number(req.styleDenoise) || 0.45)) : null };
 		params.styleDenoise = params.stylePass; // the second pass's denoise (null: no style pass)
 		v.enhance = req.enhance === true;
 		// Keep-it-nude style pass: only meaningful with a style LoRA.
@@ -369,11 +374,13 @@ export function createImageStudio({ db, gpu, uploadsDir, clock = Date.now, pollM
 			const comfy = comfyFor(p);
 			gpu.touch(p.id);
 			if (v.enhance) {
-				const e = await enhance(v.prompt, v.refs);
+				const e = await enhance(v.prompt, v.refs, v.pose);
 				v.prompt = e.prompt;
 				const params = { ...JSON.parse(db.getGeneration(id).params), note: e.why, writer: e.writer, ...(e.rejected ? { writerVersion: e.rejected } : {}) };
 				db.updateGeneration(id, { prompt: v.prompt, params: JSON.stringify(params) });
 			}
+			// The chosen pose is stated in words as well as drawn by the body guide, so the two agree.
+			if (v.pose && !v.prompt.toLowerCase().includes(v.pose.toLowerCase())) { v.prompt = `${v.prompt.replace(/[\s.]+$/, '')}. Pose: ${v.pose}.`; db.updateGeneration(id, { prompt: v.prompt }); }
 			// LoRA trigger words go first, outside the written prompt, so they are never reworded.
 			if (v.stylePass) v.stylePass.plainPrompt = v.prompt; // pass 1: no trigger words
 			if (v.prefix && !v.prompt.includes(v.prefix)) v.prompt = `${v.prefix} ${v.prompt}`;

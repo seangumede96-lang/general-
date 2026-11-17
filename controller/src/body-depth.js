@@ -157,7 +157,7 @@ export async function renderBody(values, { angleDeg = 0, width = 1024, height = 
 			zbuf[o] = z;
 			const dv = Math.min(1, Math.max(0, (far - z) / (far - near)));
 			depth[o] = Math.round((0.08 + 0.92 * dv) * 255);
-			preview[o] = Math.round(255 * (w0 * shade[a] + w1 * shade[b] + w2 * shade[c]));
+			preview[o] = Math.min(254, Math.round(255 * (w0 * shade[a] + w1 * shade[b] + w2 * shade[c]))); // 255 means background
 		}
 	}
 	// range 'visible': stretch the grey scale over the surface this camera actually sees. The default
