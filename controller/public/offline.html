@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#212121">
+<title>Assistant is not running</title>
+<style>
+	body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #212121; color: #ececec; font: 16px/1.6 system-ui, sans-serif; padding: 24px; box-sizing: border-box; }
+	main { max-width: 420px; }
+	h1 { font-size: 22px; margin: 0 0 8px; }
+	p { color: #b5b5b5; margin: 0 0 14px; }
+	a.btn { display: inline-block; background: #fff; color: #000; text-decoration: none; font-weight: 600; padding: 11px 20px; border-radius: 999px; margin: 6px 0 16px; }
+	code { background: #2f2f2f; padding: 2px 6px; border-radius: 6px; font-size: 14px; }
+	#status { font-size: 14px; color: #8ab4f8; }
+</style>
+</head>
+<body>
+<main>
+	<h1>The assistant is not running</h1>
+	<p>The engine behind this app runs in Termux, and Android stopped it. Nothing is lost: your chats, pictures and settings are kept.</p>
+	<a class="btn" href="intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.termux;end">Open Termux</a>
+	<p>Opening Termux starts it again by itself (once that is set up). Otherwise type <code>bash ~/termux-start.sh</code> there.</p>
+	<p id="status">Checking every few seconds; this page reloads when it is back.</p>
+</main>
+<script>
+	// Come back automatically as soon as the app answers again.
+	setInterval(async () => {
+		try { const r = await fetch('/api/system', { cache: 'no-store' }); if (r.ok) location.reload(); } catch { /* still down */ }
+	}, 3000);
+</script>
+</body>
+</html>

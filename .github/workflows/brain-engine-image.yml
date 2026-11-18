@@ -1,0 +1,27 @@
+# Builds the private brain's machine image and stores it on GitHub's container registry, free.
+# Runs when engine-brain changes, or by hand from the Actions tab.
+name: Build brain engine
+on:
+  push:
+    paths: ['controller/engine-brain/**', '.github/workflows/brain-engine-image.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/assistant-brain-engine
+          docker build -t $IMAGE:latest -t $IMAGE:${GITHUB_SHA::7} controller/engine-brain
+          docker run --rm --entrypoint bash $IMAGE:latest -c 'busybox httpd --help 2>&1 | head -1; aria2c --version | head -1; ls /app/llama-server'
+          docker push --all-tags $IMAGE
+          echo "Pushed $IMAGE:latest and $IMAGE:${GITHUB_SHA::7}"

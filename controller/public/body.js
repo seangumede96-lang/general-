@@ -1,0 +1,1290 @@
+// The body editor's 3D mannequin: the MakeHuman base body (CC0, see vendor/makehuman/LICENSE)
+// with its morph targets. Sliders blend the targets on the phone, so every change is instant.
+// The finished figure is in centimetres, +Y up, facing +Z, soles on y = 0.
+import * as THREE from './vendor/three/three.module.js';
+import { cleanPose, DEFAULT_POSE, rigRest, rigFrames, skinRig, effectorAt, solveRig, footPins, HANDLES, correctRig } from './pose.js';
+
+export { POSE_PARTS, POSE_PRESETS, DEFAULT_POSE, HANDLES, cleanPose, mirrorPose } from './pose.js';
+
+/** Layout version of saved values; older saves (from the first, drawn mannequin) are converted. */
+const VERSION = 2;
+
+/**
+ * The sliders. Most run from -1 (the target's "less" end) through 0 (average) to +1 ("more"),
+ * a little past either end for exaggerated figures. Vertical ones are lengths.
+ */
+export const SLIDERS = [
+	{ key: 'height', label: 'Height', group: 'lengths', min: 140, max: 205, step: 1, unit: 'cm', vertical: true },
+	{ key: 'neckLength', label: 'Neck', group: 'lengths', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'torsoLength', label: 'Torso', group: 'lengths', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'legLength', label: 'Legs', group: 'lengths', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'armLength', label: 'Arms', group: 'lengths', min: -1.3, max: 1.3, step: 0.01, vertical: true },
+	{ key: 'armPose', label: 'Arms out', group: 'shape', min: 0, max: 1, step: 0.01 },
+	{ key: 'weight', label: 'Weight', group: 'shape', min: -1, max: 1, step: 0.01 },
+	{ key: 'muscle', label: 'Muscle', group: 'shape', min: -1, max: 1, step: 0.01 },
+	{ key: 'shoulders', label: 'Shoulders', group: 'torso', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'chest', label: 'Ribcage', group: 'torso', min: -1.2, max: 1.2, step: 0.01 },
+	{ key: 'pecs', label: 'Pectorals', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'lats', label: 'Back (lats)', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'vshape', label: 'V-shape', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'waist', label: 'Waist', group: 'torso', min: -1.2, max: 1.3, step: 0.01 },
+	{ key: 'belly', label: 'Belly', group: 'torso', min: -1, max: 1, step: 0.01 },
+	{ key: 'waistLength', label: 'Waist to chest length', group: 'torso', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'midWidth', label: 'Waist to chest width', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'navelHeight', label: 'Belly button height', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'fupa', label: 'Lower belly (FUPA)', group: 'torso', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'fupaHeight', label: 'Lower belly height (lower ↔ higher)', group: 'torso', min: -1, max: 1, step: 0.01 },
+	{ key: 'abs', label: 'Abs tone', group: 'torso', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'arms', label: 'Arm thickness', group: 'torso', min: -1.2, max: 1.4, step: 0.01 },
+	{ key: 'bust', label: 'Breast size', group: 'chest', min: -1, max: 1.6, step: 0.01 },
+	{ key: 'breastFirm', label: 'Firmness (lift)', group: 'chest', min: -1, max: 1, step: 0.01 },
+	{ key: 'breastHeight', label: 'Height on chest', group: 'chest', min: -1, max: 1, step: 0.01 },
+	{ key: 'breastSpacing', label: 'Spacing', group: 'chest', min: -1, max: 1.2, step: 0.01 },
+	{ key: 'breastFullness', label: 'Fullness: bottom ↔ top', group: 'chest', min: -1, max: 1, step: 0.01 },
+	{ key: 'breastPoint', label: 'Projection', group: 'chest', min: -1, max: 1, step: 0.01 },
+	{ key: 'hips', label: 'Hips', group: 'butt', heading: 'Basic', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'glutes', label: 'Butt size', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'buttLift', label: 'Butt height (lower ↔ lift)', group: 'butt', min: -1, max: 1, step: 0.01 },
+	{ key: 'buttOut', label: 'Sticks out', group: 'butt', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'buttSplit', label: 'Cheek separation', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'hipDips', label: 'Hip dips', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'hipDipHeight', label: 'Hip dip height (lower ↔ higher)', group: 'butt', min: -1, max: 1, step: 0.01 },
+	{ key: 'buttWidth', label: 'Butt width', group: 'butt', min: -1, max: 1.2, step: 0.01 },
+	{ key: 'buttFullness', label: 'Fullness: bottom ↔ top', group: 'butt', min: -1, max: 1, step: 0.01 },
+	// Stage 5 shape library (procedural, smoothed targets; see tools/hipglute-lib.mjs).
+	{ key: 'gluteUpper', label: 'Upper glute fullness', group: 'butt', heading: 'Detail', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteLower', label: 'Lower glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteShelf', label: 'Shelf (top projection)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteInner', label: 'Inner glute fullness', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteOuter', label: 'Outer glute (side)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteThighBlend', label: 'Under-fold: defined ↔ filled', group: 'butt', min: -1.5, max: 1.5, step: 0.01 },
+	{ key: 'gluteTopBlend', label: 'Lower back to butt: sharp ↔ smooth', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'gluteAsym', label: 'Left ↔ right glute (+ her left fuller)', group: 'butt', min: -1, max: 1, step: 0.01 },
+	{ key: 'iliacWidth', label: 'Upper hip width (iliac)', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'pelvicTilt', label: 'Pelvic tilt', group: 'butt', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'stance', label: 'Feet apart', group: 'legs', min: 0, max: 1, step: 0.01 },
+	{ key: 'thighs', label: 'Thighs', group: 'legs', min: -1.2, max: 1.5, step: 0.01 },
+	{ key: 'thighGap', label: 'Thigh gap', group: 'legs', min: -1, max: 1.3, step: 0.01 },
+	{ key: 'bowLegs', label: 'Bow legs', group: 'legs', min: -1.3, max: 1.5, step: 0.01 },
+	{ key: 'calves', label: 'Calves', group: 'legs', min: -1.2, max: 1.3, step: 0.01 },
+	{ key: 'thighUpper', label: 'Upper thigh', group: 'legs', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'thighOuter', label: 'Outer thigh', group: 'legs', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'thighInner', label: 'Inner thigh', group: 'legs', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'hamstring', label: 'Back of thigh', group: 'legs', min: -1, max: 1.5, step: 0.01 },
+	{ key: 'headSize', label: 'Head size', group: 'head', min: -1, max: 1, step: 0.01 },
+	{ key: 'neckWidth', label: 'Neck width', group: 'head', min: -1.2, max: 1.2, step: 0.01 }
+];
+
+/** The tabs the sliders are grouped under, in order. */
+export const GROUPS = [['shape', 'Body'], ['lengths', 'Lengths'], ['torso', 'Torso'], ['chest', 'Chest'], ['butt', 'Butt'], ['legs', 'Legs'], ['head', 'Head']];
+
+/**
+ * The look of the starting figures, added under the sliders (so 0 still means "as the base"):
+ * a toned, fit build like the clay figures of character creators, rather than MakeHuman's
+ * plain average body.
+ */
+const BASE_TUNE = {
+	female: { muscle: 0.45, weight: -0.15, bust: 0.35, waist: -0.25, hips: 0.2, glutes: 0.25, legLength: 0.2, thighGap: 0.15, buttSplit: 1 },
+	male: { muscle: 0.75, weight: -0.25, shoulders: 0.35, chest: 0.3, waist: -0.2, legLength: 0.15, neckWidth: 0.2, buttSplit: 0.4 }
+};
+
+/** Which morph targets each slider drives, and how strongly. */
+const DRIVES = {
+	neckLength: [['neck-height', 1]],
+	torsoLength: [['napetowaist-dist', 1], ['waisttohip-dist', 0.5]],
+	legLength: [['upperleg-height', 1], ['lowerleg-height', 1]],
+	armLength: [['upperarm-length', 1], ['lowerarm-length', 1]],
+	headSize: [['head-height', 1], ['head-width', 1]],
+	neckWidth: [['neck-circ', 1]],
+	shoulders: [['shoulder-dist', 1]],
+	chest: [['frontchest-dist', 1], ['torso-depth', 0.5]],
+	bust: [['cup', 1]],
+	waist: [['waist-circ', 1]],
+	hips: [['hips-circ', 1], ['hip-depth', 0.4]],
+	glutes: [['glutes', 1]],
+	belly: [['belly', 1]],
+	thighs: [['thigh-circ', 1]],
+	thighGap: [['thigh-gap', 1]],
+	pecs: [['pecs', 1]],
+	lats: [['lats', 1]],
+	vshape: [['vshape', 1]],
+	abs: [['abs', 1]],
+	breastFirm: [['firmness', 1]],
+	breastHeight: [['breast', 1]],
+	breastSpacing: [['breast-dist', 1]],
+	breastFullness: [['breast-fullness', 1]],
+	breastPoint: [['breast-point', 1]],
+	buttLift: [['glute-lift', 1], ['hip-height', 0.35]],
+	buttOut: [['glute-out', 1]],
+	buttWidth: [['glute-width', 1]],
+	buttSplit: [['glute-split', 1]],
+	waistLength: [['midsection-long', 1]],
+	midWidth: [['midsection-wide', 1]],
+	navelHeight: [['navel', 1]],
+	buttFullness: [['glute-top', 1]],
+	gluteUpper: [['glute-upper', 1]],
+	gluteLower: [['glute-lower', 1]],
+	gluteShelf: [['glute-shelf', 1]],
+	gluteInner: [['glute-inner', 1]],
+	gluteOuter: [['glute-outer', 1]],
+	iliacWidth: [['iliac-width', 1]],
+	pelvicTilt: [['pelvic-tilt', 1]],
+	thighUpper: [['thigh-upper', 1]],
+	thighOuter: [['thigh-outer', 1]],
+	thighInner: [['thigh-inner', 1]],
+	hamstring: [['hamstring', 1]],
+	bowLegs: [['bowlegs', 1]],
+	calves: [['calf-circ', 1]],
+	arms: [['upperarm-circ', 1], ['wrist-circ', 0.4]]
+};
+
+/** Head shapes, each a MakeHuman head target. */
+export const HEAD_SHAPES = { oval: 'head-oval', round: 'head-round', long: 'head-rectangular', heart: 'head-invertedtriangular', square: 'head-square', diamond: 'head-diamond' };
+const HEAD_AMOUNT = 0.7;
+
+const BASE_HEIGHT = { female: 168, male: 178 };
+
+/** Default values for a base body (0 means "average"). */
+export function defaults(base = 'female') {
+	const v = { version: VERSION, base: base === 'male' ? 'male' : 'female', headShape: 'oval', armL: 'down', armR: 'down', posing: false, pose: structuredClone(DEFAULT_POSE) };
+	for (const s of SLIDERS) v[s.key] = s.key === 'height' ? BASE_HEIGHT[v.base] : 0;
+	return v;
+}
+
+/**
+ * Bring saved values up to date. The first mannequin stored ratios around 1 (bust and glutes
+ * around their base amount); those become the nearest positions on the new sliders.
+ */
+export function migrate(values) {
+	if (!values || typeof values !== 'object') return defaults();
+	const out = defaults(values.base);
+	if (values.version === VERSION) {
+		for (const s of SLIDERS) if (Number.isFinite(values[s.key])) out[s.key] = clamp(values[s.key], s.min, s.max);
+	} else {
+		for (const s of SLIDERS) {
+			const old = values[s.key];
+			if (!Number.isFinite(old)) continue;
+			out[s.key] = s.key === 'height' ? old : s.key === 'bust' || s.key === 'glutes' ? (old - (out.base === 'male' ? 0.5 : 1)) * 0.8 : (old - 1) * 3;
+			out[s.key] = clamp(out[s.key], s.min, s.max);
+		}
+	}
+	// Saved bodies from before the under-fold merge: fold definition becomes the negative side.
+	if (Number.isFinite(values.gluteFold) && values.gluteFold) out.gluteThighBlend = clamp((out.gluteThighBlend || 0) - values.gluteFold, -1.5, 1.5);
+	if (values.headShape in HEAD_SHAPES) out.headShape = values.headShape;
+	for (const k of ['armL', 'armR']) if (values[k] in ARM_POSES) out[k] = values[k];
+	// Pose mode: on or off, and the pose itself (kept while off, so switching back restores it).
+	out.posing = values.posing === true;
+	if (values.pose && typeof values.pose === 'object') out.pose = cleanPose(values.pose);
+	if (values.name) out.name = values.name;
+	return out;
+}
+
+function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
+
+/**
+ * Whole-body templates on top of a base. Names and ideas follow the full-body dials of Daz's
+ * Genesis 9 Body Shapes (Emaciated, Thin, Lithe, Fitness, Muscular, Heavy, Pear, Voluptuous,
+ * Portly, Stocky), rebuilt from this body's own sliders.
+ */
+export const PRESETS = {
+	female: {
+		Emaciated: { weight: -1, muscle: -0.6, bust: -0.6, glutes: -0.7, hips: -0.5, thighs: -0.8, calves: -0.6, arms: -0.8, thighGap: 0.8, breastFirm: -0.3 },
+		Thin: { weight: -0.65, muscle: -0.2, bust: -0.3, glutes: -0.4, hips: -0.3, thighs: -0.5, arms: -0.4, thighGap: 0.5 },
+		Lithe: { weight: -0.4, muscle: 0.2, waist: -0.3, legLength: 0.3, bust: -0.2, thighs: -0.2, thighGap: 0.4, abs: 0.4 },
+		Fitness: { muscle: 0.7, weight: -0.35, abs: 0.9, shoulders: 0.25, glutes: 0.4, buttLift: 0.5, thighs: 0.25, calves: 0.3, breastFirm: 0.5 },
+		Athletic: { muscle: 0.6, weight: -0.2, shoulders: 0.3, waist: -0.2, thighs: 0.2, glutes: 0.3, buttLift: 0.3, abs: 0.5 },
+		Muscular: { muscle: 1, weight: 0.1, shoulders: 0.6, lats: 0.7, pecs: 0.4, arms: 0.7, thighs: 0.7, calves: 0.6, glutes: 0.5, abs: 1, neckWidth: 0.4 },
+		Hourglass: { waist: -0.8, hips: 0.8, bust: 0.9, glutes: 0.8, thighs: 0.4, breastFirm: 0.3 },
+		Pear: { shoulders: -0.3, bust: -0.3, waist: -0.2, hips: 1, glutes: 1, thighs: 0.9, buttFullness: -0.4 },
+		Voluptuous: { weight: 0.3, bust: 1.3, waist: -0.5, hips: 1.1, glutes: 1.2, thighs: 0.8, buttOut: 0.5, breastFullness: 0.3 },
+		Curvy: { weight: 0.45, hips: 1, bust: 1.2, glutes: 1.1, thighs: 0.8, waist: 0.1 },
+		Heavy: { weight: 1, muscle: -0.2, belly: 0.6, bust: 0.9, hips: 0.9, glutes: 0.8, thighs: 1, arms: 0.9, calves: 0.6, thighGap: -0.8, breastFirm: -0.4 }
+	},
+	male: {
+		Emaciated: { weight: -1, muscle: -0.6, shoulders: -0.4, arms: -0.8, thighs: -0.8, calves: -0.6, pecs: -0.6 },
+		Thin: { weight: -0.65, muscle: -0.3, shoulders: -0.3, chest: -0.3, arms: -0.4 },
+		Lithe: { weight: -0.4, muscle: 0.3, waist: -0.3, legLength: 0.3, abs: 0.6, vshape: 0.3 },
+		Fitness: { muscle: 0.8, weight: -0.35, abs: 1, pecs: 0.6, vshape: 0.6, shoulders: 0.35, arms: 0.4 },
+		Athletic: { muscle: 0.6, weight: -0.2, shoulders: 0.4, chest: 0.3, waist: -0.3, pecs: 0.4, abs: 0.6 },
+		Muscular: { muscle: 1, weight: 0.2, shoulders: 0.8, chest: 0.7, pecs: 1, lats: 1, vshape: 0.8, arms: 0.8, thighs: 0.6, neckWidth: 0.8, abs: 1 },
+		Stocky: { weight: 0.7, muscle: 0.3, waist: 0.6, belly: 0.4, legLength: -0.5, neckWidth: 0.5 },
+		Portly: { weight: 0.9, muscle: -0.3, belly: 1, waist: 0.9, pecs: -0.3, abs: -1, chest: 0.3 },
+		Heavy: { weight: 1, muscle: -0.1, belly: 0.7, waist: 0.8, arms: 0.8, thighs: 0.9, neckWidth: 0.6 },
+		Tall: { height: 192, legLength: 0.4, torsoLength: 0.2 }
+	}
+};
+
+/**
+ * Breast types, after the shapes commonly used to describe breasts (round, teardrop, bell,
+ * east-west, side-set, close-set, slender, athletic, relaxed). Each sets the chest sliders
+ * other than size.
+ */
+export const BREAST_TYPES = {
+	Round: { breastFirm: 0.6, breastFullness: 0.5, breastPoint: 0.2 },
+	Teardrop: { breastFirm: 0.2, breastFullness: -0.6, breastPoint: 0.1 },
+	Bell: { breastFirm: -0.3, breastFullness: -0.9, breastHeight: -0.3 },
+	'East-west': { breastSpacing: 0.8, breastPoint: -0.3, breastFirm: 0.1 },
+	'Side-set': { breastSpacing: 1, breastFullness: -0.2 },
+	'Close-set': { breastSpacing: -0.8, breastFirm: 0.3 },
+	Slender: { breastHeight: -0.5, breastFirm: -0.4, breastPoint: 0.4, breastFullness: -0.4 },
+	Athletic: { breastSpacing: 0.5, breastFirm: 0.6, breastPoint: -0.3, breastHeight: 0.2 },
+	Relaxed: { breastFirm: -0.9, breastHeight: -0.6, breastFullness: -0.5 }
+};
+const BREAST_KEYS = ['breastFirm', 'breastHeight', 'breastSpacing', 'breastFullness', 'breastPoint'];
+
+/**
+ * Butt types, after the four shapes used by plastic surgeons and fitness guides (round "O",
+ * heart "A", square "H", inverted "V"), the high, projecting "bubble" shape, and the owner's
+ * phone session's library presets (upper-full, teardrop, wide, high and lifted, natural).
+ */
+export const BUTT_TYPES = {
+	Round: { glutes: 0.7, buttOut: 0.6, buttLift: 0.2, gluteUpper: 0.5, gluteLower: 0.5, gluteOuter: 0.3 },
+	Heart: { glutes: 0.6, hips: 0.5, buttWidth: 0.3, gluteLower: 1, gluteOuter: 0.6, iliacWidth: 0.6, thighOuter: 0.3 },
+	'Upper-full': { glutes: 0.6, buttOut: 0.5, buttLift: 0.5, gluteShelf: 1, gluteUpper: 0.8, pelvicTilt: 0.5 },
+	Teardrop: { glutes: 0.6, buttLift: -0.3, gluteLower: 1.2, gluteThighBlend: 0.8, gluteInner: 0.5 },
+	Wide: { glutes: 0.5, hips: 0.9, buttWidth: 0.8, gluteOuter: 1, iliacWidth: 0.8, thighOuter: 0.7 },
+	'High and lifted': { glutes: 0.7, buttOut: 0.8, buttLift: 0.8, gluteUpper: 1, gluteShelf: 0.5, gluteThighBlend: -0.8, pelvicTilt: 0.6 },
+	Natural: { glutes: 0.2, buttOut: 0.1, gluteLower: 0.2, thighUpper: 0.2 },
+	Square: { glutes: 0.1, buttWidth: 0.5, buttFullness: 0.1, buttOut: -0.2, buttLift: -0.2 },
+	'Inverted V': { glutes: 0.2, buttFullness: 0.8, buttWidth: -0.3, buttLift: 0.1, buttOut: -0.1 },
+	Bubble: { glutes: 0.8, buttOut: 1, buttLift: 0.7, buttFullness: 0.3 },
+	Flat: { glutes: -0.7, buttOut: -0.8, buttLift: -0.3 }
+};
+const BUTT_KEYS = ['glutes', 'buttOut', 'buttFullness', 'buttWidth', 'buttLift', 'hips', 'gluteUpper', 'gluteLower', 'gluteShelf', 'gluteInner', 'gluteOuter', 'gluteThighBlend', 'iliacWidth', 'pelvicTilt', 'thighUpper', 'thighOuter', 'thighInner'];
+
+/** Apply a breast or butt type: its sliders take the type's values, the others in that set reset. */
+export function applyType(values, kind, name) {
+	const [types, keys] = kind === 'breast' ? [BREAST_TYPES, BREAST_KEYS] : [BUTT_TYPES, BUTT_KEYS];
+	const out = { ...values };
+	for (const k of keys) out[k] = 0;
+	Object.assign(out, types[name] || {});
+	return out;
+}
+
+// ---------- the mesh ----------
+
+let meshData = null;
+
+/** Load the converted MakeHuman body once: base positions, triangles and sparse morph targets. */
+/** `read(url)` (optional) returns the file's bytes, for loading without fetch (the server). */
+export async function loadHuman(url = new URL('./vendor/makehuman/', import.meta.url), read = null) {
+	if (meshData) return meshData;
+	const [layout, bin] = read
+		? await Promise.all([read(new URL('human.json', url)).then((b) => JSON.parse(Buffer.from(b).toString('utf8'))), read(new URL('human.bin', url)).then((b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))])
+		: await Promise.all([
+			fetch(new URL('human.json', url)).then((r) => { if (!r.ok) throw new Error(`body model: HTTP ${r.status}`); return r.json(); }),
+			fetch(new URL('human.bin', url)).then((r) => { if (!r.ok) throw new Error(`body model: HTTP ${r.status}`); return r.arrayBuffer(); })
+		]);
+	const Index = layout.indexType === 'uint32' ? Uint32Array : Uint16Array;
+	const morphs = {};
+	for (const m of layout.morphs) morphs[m.name] = { idx: new Index(bin, m.indices, m.count), off: new Float32Array(bin, m.offsets, m.count * 3) };
+	meshData = {
+		count: layout.vertices,
+		base: new Float32Array(bin, layout.positions, layout.vertices * 3),
+		index: new Index(bin, layout.indices, layout.triangles * 3),
+		eyes: layout.eyes,
+		markers: layout.markers || {},
+		subdiv: layout.subdiv && {
+			count: layout.subdiv.vertices,
+			starts: new Uint32Array(bin, layout.subdiv.starts, layout.subdiv.vertices + 1),
+			cols: new Index(bin, layout.subdiv.cols, layout.subdiv.nnz),
+			weights: new Float32Array(bin, layout.subdiv.weights, layout.subdiv.nnz),
+			index: new (layout.subdiv.indexType === 'uint32' ? Uint32Array : Uint16Array)(bin, layout.subdiv.indices, layout.subdiv.triangles * 3)
+		},
+		rig: layout.rig && {
+			parts: layout.rig.parts,
+			parents: layout.rig.parents,
+			joints: new Uint8Array(bin, layout.rig.joints, layout.vertices * 4),
+			w: new Float32Array(bin, layout.rig.weights, layout.vertices * 4)
+		},
+		skin: Object.fromEntries(Object.entries(layout.skin || {}).map(([k, e]) => [k, { idx: new Index(bin, e.indices, e.count), w: new Float32Array(bin, e.weights, e.count) }])),
+		morphs
+	};
+	[meshData.skin2, meshData.skin2coarse] = await Promise.all([loadSkin(url, read).catch(() => null), loadSkin(url, read, 'skin-coarse').catch(() => null)]);
+	// The surface that is drawn: the realistic skin bound to this mesh, else the smoothed mesh itself.
+	meshData.surface = meshData.skin2 ? { count: meshData.skin2.count, index: meshData.skin2.index } : meshData.subdiv;
+	return meshData;
+}
+
+/** The weight of every morph target for a set of slider values. */
+export function weights(v) {
+	const w = {};
+	const add = (name, x) => { if (x) w[name] = (w[name] || 0) + x; };
+	const two = (name, x) => { if (x > 0) add(`${name}-up`, x); else if (x < 0) add(`${name}-down`, -x); };
+	const g = v.base === 'male' ? 'male' : 'female';
+	const tune = BASE_TUNE[g];
+	const at = (key) => (v[key] || 0) + (tune[key] || 0);
+	add(g, 1);
+	two(`${g}-weight`, at('weight'));
+	two(`${g}-muscle`, at('muscle'));
+	for (const [key, drives] of Object.entries(DRIVES)) for (const [name, k] of drives) two(name, at(key) * k);
+	// Hip dips and the lower belly are stored at five heights; their height sliders blend the
+	// two nearest, so they slide up and down.
+	const placed = (name, amount, place) => {
+		if (!amount) return;
+		const f = (Math.max(-1, Math.min(1, Number(place) || 0)) + 1) * 2;
+		const i = Math.min(3, Math.floor(f)), t = f - i;
+		two(`${name}-${i}`, amount * (1 - t));
+		two(`${name}-${i + 1}`, amount * t);
+	};
+	placed('hip-dips', at('hipDips'), v.hipDipHeight);
+	placed('fupa', at('fupa'), v.fupaHeight);
+	// One glute fuller than the other: + her left, - her right.
+	const asym = Math.max(-1, Math.min(1, Number(v.gluteAsym) || 0));
+	if (asym > 0) add('glutes-L-up', asym); else if (asym < 0) add('glutes-R-up', -asym);
+	// Lower back to butt: the slider, plus an automatic share when the butt projects strongly, so a big
+	// projection rises from the waist instead of starting as a step (sharp crease in side view).
+	const proj = Math.max(0, at('buttOut')) + 0.5 * Math.max(0, at('glutes')) + 0.5 * Math.max(0, at('gluteUpper')) + 0.5 * Math.max(0, at('gluteShelf'));
+	const topBlend = at('gluteTopBlend') + Math.min(1.5, Math.max(0, proj - 0.4) * 0.8);
+	if (topBlend > 0) add('glute-top-blend-up', topBlend); else if (topBlend < 0) add('glute-top-blend-down', -topBlend);
+	// One under-fold slider: + fills the glute-to-thigh crease, - defines it (the two targets were one axis, cos -0.98).
+	const fold = at('gluteThighBlend');
+	if (fold > 0) add('glute-thigh-blend-up', fold); else if (fold < 0) add('glute-fold-up', -fold);
+	add('navel-in', 0.8); // a visible belly button, so its height can be seen and set
+	if (HEAD_SHAPES[v.headShape]) add(HEAD_SHAPES[v.headShape], HEAD_AMOUNT);
+	return w;
+}
+
+/** Whether a body is posed with the rig (Pose mode) rather than the simple arm and stance settings. */
+export const isPosing = (v) => Boolean(v?.posing && meshData?.rig);
+
+/**
+ * Morphs applied (and, outside Pose mode, the arm and stance settings), in model units, plus what
+ * it takes to stand the figure in centimetres: scale k (cm per unit), the centre, the floor.
+ */
+function prepare(v, p) {
+	const d = meshData;
+	p.set(d.base);
+	const w = weights(v);
+	const addMorph = (name, k) => {
+		const m = d.morphs[name];
+		if (!m) return;
+		for (let i = 0; i < m.idx.length; i++) {
+			const j = m.idx[i] * 3;
+			p[j] += m.off[i * 3] * k;
+			p[j + 1] += m.off[i * 3 + 1] * k;
+			p[j + 2] += m.off[i * 3 + 2] * k;
+		}
+	};
+	// The midsection length is added after the figure is scaled to its height, so it makes the
+	// figure taller or shorter instead of shortening the legs to compensate.
+	const after = (name) => name.startsWith('midsection-long');
+	for (const [name, k] of Object.entries(w)) if (!after(name)) addMorph(name, k);
+	if (!isPosing(v)) {
+		poseArms(p, v.armPose || 0, { L: v.armL, R: v.armR });
+		poseLegs(p, v.stance || 0);
+	}
+	midlineContact(p);
+	// Measure the drawn skin only (the eye markers sit inside the head), then scale to the height.
+	const skin = d.eyes[0][0];
+	let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
+	for (let i = 0; i < skin; i++) {
+		const y = p[i * 3 + 1];
+		if (y < minY) minY = y;
+		if (y > maxY) maxY = y;
+		cx += p[i * 3]; cz += p[i * 3 + 2];
+	}
+	cx /= skin; cz /= skin;
+	const k = (v.height || BASE_HEIGHT[v.base] || 170) / (maxY - minY);
+	for (const [name, x] of Object.entries(w)) if (after(name)) addMorph(name, x);
+	return { k, cx, cz, minY };
+}
+
+/**
+ * Same result as shapeBody, for an editor that reshapes many times a second: the sum of the morphs
+ * is kept between calls and only the morphs whose weights changed are added again, so dragging one
+ * slider costs a few hundred vertices instead of every morph (about 24 ms -> 2-3 ms on a phone).
+ * A full rebuild happens every 300 calls, so rounding can't drift.
+ */
+export function createShaper() {
+	let acc = null, last = {}, calls = 0;
+	const after = (name) => name.startsWith('midsection-long');
+	const add = (p, name, k) => { const m = meshData.morphs[name]; if (!m || !k) return; for (let i = 0; i < m.idx.length; i++) { const j = m.idx[i] * 3; p[j] += m.off[i * 3] * k; p[j + 1] += m.off[i * 3 + 1] * k; p[j + 2] += m.off[i * 3 + 2] * k; } };
+	return function shape(v, out) {
+		const d = meshData, p = out || new Float32Array(d.count * 3);
+		const w = weights(v);
+		if (!acc || ++calls % 300 === 0) { acc = Float32Array.from(d.base); last = {}; }
+		for (const name of new Set([...Object.keys(w), ...Object.keys(last)])) {
+			if (after(name)) continue;
+			const dk = (w[name] || 0) - (last[name] || 0);
+			if (dk) add(acc, name, dk);
+		}
+		last = w;
+		p.set(acc);
+		if (!isPosing(v)) { poseArms(p, v.armPose || 0, { L: v.armL, R: v.armR }); poseLegs(p, v.stance || 0); }
+		midlineContact(p);
+		const skin = d.eyes[0][0];
+		let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
+		for (let i = 0; i < skin; i++) { const y = p[i * 3 + 1]; if (y < minY) minY = y; if (y > maxY) maxY = y; cx += p[i * 3]; cz += p[i * 3 + 2]; }
+		cx /= skin; cz /= skin;
+		const k = (v.height || BASE_HEIGHT[v.base] || 170) / (maxY - minY);
+		for (const [name, x] of Object.entries(w)) if (after(name)) add(p, name, x);
+		const st = { k, cx, cz, minY };
+		if (isPosing(v)) {
+			const rest = rigRest(d, p), f = rigFrames(rest, v.pose, 1 / k);
+			skinRig(d, p, rest, f);
+			if (v.correctives !== false) correctRig(d, p, rest, f, v.pose, d.eyes[0][0]);
+			st.minY = floorOf(p);
+		}
+		return finish(p, st);
+	};
+}
+
+/**
+ * Left and right never pass through each other at the body's centre line (x = 0). Skin that rests on
+ * one side may move towards the middle, but softly stops short of it: thick inner thighs meet and
+ * flatten against each other instead of crossing, and the walls of the gluteal cleft and the sternal
+ * valley can narrow but never close (a vertex never gets closer to the middle than half its distance
+ * in the unshaped mesh, nor than 0.02 cm: touching skin meets without a slit). Exactly nothing changes for skin moving outwards or staying
+ * clear of the middle. Runs on the shaped body before posing, so posed limbs (arms crossed) are free.
+ */
+const MIDLINE_FLOOR = 0.002, MIDLINE_SOFT = 0.1; // model units (decimetres): skin meets at 0.02 cm (no visible slit between touching thighs), soft over 1 cm
+let midlineSides = null;
+function midlineContact(p) {
+	const d = meshData, skin = d.eyes[0][0];
+	if (!midlineSides || midlineSides.mesh !== d) {
+		// Per vertex: which side it rests on, its floor and the width of the soft zone (from the unshaped mesh).
+		const side = new Int8Array(skin), floor = new Float32Array(skin), soft = new Float32Array(skin);
+		for (let i = 0; i < skin; i++) {
+			const u0 = Math.abs(d.base[i * 3]);
+			if (u0 < 0.002) continue; // on the centre line itself
+			side[i] = Math.sign(d.base[i * 3]);
+			floor[i] = Math.min(MIDLINE_FLOOR, 0.5 * u0);
+			soft[i] = Math.min(MIDLINE_SOFT, Math.max(1e-4, u0 - floor[i]));
+		}
+		midlineSides = { mesh: d, side, floor, soft };
+	}
+	const { side, floor, soft } = midlineSides;
+	for (let i = 0; i < skin; i++) {
+		const s = side[i];
+		if (!s) continue;
+		const u = s * p[i * 3], f = floor[i], w = soft[i];
+		if (u >= f + w) continue;
+		p[i * 3] = s * (f + w * Math.exp((u - f - w) / w));
+	}
+}
+
+/** The lowest point of the drawn skin, so a posed body stands (or lies) on the floor. */
+function floorOf(p) {
+	let minY = Infinity;
+	for (let i = 0; i < meshData.eyes[0][0]; i++) if (p[i * 3 + 1] < minY) minY = p[i * 3 + 1];
+	return minY;
+}
+
+/** Model units to centimetres: centred, standing on y = 0. */
+function finish(p, { k, cx, cz, minY }) {
+	for (let i = 0; i < meshData.count; i++) {
+		p[i * 3] = (p[i * 3] - cx) * k;
+		p[i * 3 + 1] = (p[i * 3 + 1] - minY) * k;
+		p[i * 3 + 2] = (p[i * 3 + 2] - cz) * k;
+	}
+	return p;
+}
+
+/** Positions (centimetres, standing on y = 0, exactly v.height tall) for the given values. */
+export function shapeBody(v, out) {
+	const p = out || new Float32Array(meshData.count * 3);
+	const s = prepare(v, p);
+	if (isPosing(v)) {
+		const rest = rigRest(meshData, p);
+		const f = rigFrames(rest, v.pose, 1 / s.k);
+		skinRig(meshData, p, rest, f);
+		if (v.correctives !== false) correctRig(meshData, p, rest, f, v.pose, meshData.eyes[0][0]);
+		s.minY = floorOf(p);
+	}
+	return finish(p, s);
+}
+
+/**
+ * Posing one body shape over and over (dragging, or solving a pose on the server): the shaped,
+ * unposed body is kept, so each new pose only re-poses it. Points are in centimetres as drawn.
+ */
+export function createPoser(v) {
+	const raw = new Float32Array(meshData.count * 3);
+	const s = prepare({ ...v, posing: true }, raw);
+	const rest = rigRest(meshData, raw);
+	const upc = 1 / s.k;
+	const ground = (pose) => { const p = new Float32Array(raw); skinRig(meshData, p, rest, rigFrames(rest, pose, upc)); return floorOf(p); };
+	const toCm = (x, floor) => [(x[0] - s.cx) * s.k, (x[1] - floor) * s.k, (x[2] - s.cz) * s.k];
+	const toUnits = (x, floor) => [x[0] / s.k + s.cx, x[1] / s.k + floor, x[2] / s.k + s.cz];
+	return {
+		rest,
+		/** Pose into `out` (centimetres). `floor` keeps the floor level from before (while dragging). */
+		apply(pose, out, floor = null) {
+			out.set(raw);
+			const fr = rigFrames(rest, pose, upc);
+			skinRig(meshData, out, rest, fr);
+			correctRig(meshData, out, rest, fr, pose, meshData.eyes[0][0]);
+			const f = floor ?? floorOf(out);
+			finish(out, { ...s, minY: f });
+			return f;
+		},
+		floor: ground,
+		/** Every draggable point and joint for a pose, in centimetres. */
+		points(pose, floor = ground(pose)) {
+			const f = rigFrames(rest, pose, upc);
+			return Object.fromEntries(Object.keys(rest.effectors).map((e) => [e, toCm(effectorAt(rest, f, e), floor).map((x) => Math.round(x * 10) / 10)]));
+		},
+		/**
+		 * Turn joints so the named points reach targets (centimetres): goals { 'hand.L': [x, y, z] }.
+		 * The floor stays where it is for `pose`, so heights are from the floor as it stands now.
+		 */
+		solve(pose, goals, { feetPlanted = true, iterations = 12, floor = ground(pose), pins = null, anchor = null } = {}) {
+			const list = Object.entries(goals).map(([effector, target]) => ({ effector, target: toUnits(target, floor) }));
+			return solveRig(rest, pose, list, { feetPlanted, iterations, unitsPerCm: upc, pinTargets: pins, anchor });
+		},
+		pins: (pose) => footPins(rest, pose, upc),
+		toUnits
+	};
+}
+
+/**
+ * Camera distances to the front of the torso and to behind the body's middle. The front is taken
+ * from the trunk only (hands and fingers reach forward in this pose and have many vertices).
+ */
+export function depthRange(p, count, angle, cameraZ) {
+	let skin = count;
+	// Depth along the view for every vertex (the figure is turned about its vertical axis).
+	const sin = Math.sin(angle), cos = Math.cos(angle);
+	// Forearms and hands are left out of the range (fingers alone are a large share of the mesh's
+	// points, and hands reaching towards the camera would set "near"); they are clamped instead.
+	const skip = new Set();
+	for (const side of ['L', 'R']) { const e = meshData?.skin?.[`forearm.${side}`]; if (e) for (let i = 0; i < e.idx.length; i++) if (e.w[i] > 0.3) skip.add(e.idx[i]); }
+	const z = [];
+	let sum = 0;
+	for (let i = 0; i < skin; i++) { if (skip.has(i)) continue; const d = -p[i * 3] * sin + p[i * 3 + 2] * cos; z.push(d); sum += d; }
+	const sorted = Float32Array.from(z).sort();
+	skin = sorted.length;
+	// Nearest: the 97th percentile, so a hand or the near arm reaching towards the camera is
+	// clamped to white instead of squeezing the whole body into grey. This works from any side.
+	const front = sorted[Math.floor(skin * 0.97)];
+	const back = sorted[0];
+	// Only the near half shows, so the range ends a little behind the body's middle plane.
+	const middle = sum / skin;
+	return [cameraZ - front - 1, cameraZ - middle + (middle - back) * 0.7];
+}
+
+function depthMaterial(near, far) {
+	return new THREE.ShaderMaterial({
+		uniforms: { near: { value: near }, far: { value: far } },
+		vertexShader: 'varying float vDist; void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vDist = -mv.z; gl_Position = projectionMatrix * mv; }',
+		fragmentShader: 'uniform float near; uniform float far; varying float vDist; void main() { float d = clamp((far - vDist) / (far - near), 0.0, 1.0); gl_FragColor = vec4(vec3(0.08 + 0.92 * d), 1.0); }'
+	});
+}
+
+/** Arms hang this many degrees out from straight down when "Arms out" is 0. */
+const ARMS_DOWN_DEGREES = 9;
+
+function marker(p, [start, count]) {
+	let x = 0, y = 0, z = 0;
+	for (let i = start; i < start + count; i++) { x += p[i * 3]; y += p[i * 3 + 1]; z += p[i * 3 + 2]; }
+	return [x / count, y / count, z / count];
+}
+
+/**
+ * Pose the arms in the body's front plane. MakeHuman's mesh is modelled with the arms raised
+ * about 45 degrees; amount 0 lowers them to the sides like a standing figure, 1 leaves them as
+ * modelled. Linear blend skinning with MakeHuman's own weights: the shoulder bone turns a
+ * fifth of the way, the whole arm below it the rest, each about its own joint.
+ */
+/**
+ * Arm poses besides "down/out": each arm can rest a hand on the hip or behind the head. The
+ * upper arm turns in the body's front plane to `upper` degrees from straight down, and the
+ * forearm folds at the elbow by `bend` degrees (positive folds a hanging arm in towards the body),
+ * and with `back` (decimetres) the hand also moves back by up to that much, so it can go behind the head.
+ */
+export const ARM_POSES = { down: null, hip: { upper: 48, bend: 78 }, head: { upper: 168, bend: -100, back: 2.1 } };
+
+/** Rotation about a point in the x/y plane, as numbers (no arrays: this runs for thousands of vertices). */
+function rotor(angle, px, py) { return { c: Math.cos(angle), s: Math.sin(angle), px, py }; }
+const rx_ = (r, x, y) => r.px + (x - r.px) * r.c + (y - r.py) * r.s;
+const ry_ = (r, x, y) => r.py - (x - r.px) * r.s + (y - r.py) * r.c;
+
+/** Union of several skin groups' vertices with each group's weight, built once per mesh (cached). */
+const skinTables = new Map();
+function skinTable(names) {
+	const key = names.join('|');
+	let t = skinTables.get(key);
+	if (t && t.mesh === meshData) return t;
+	const maps = names.map((n) => { const m = new Map(), e = meshData.skin[n]; if (e) for (let i = 0; i < e.idx.length; i++) m.set(e.idx[i], e.w[i]); return m; });
+	const ids = [...new Set(maps.flatMap((m) => [...m.keys()]))];
+	t = { mesh: meshData, idx: Int32Array.from(ids), w: maps.map((m) => Float32Array.from(ids, (i) => m.get(i) || 0)) };
+	skinTables.set(key, t);
+	return t;
+}
+
+function poseArms(p, amount, poses = {}) {
+	const d = meshData;
+	if (!d.skin['arm.L'] || !d.markers['upperarm01.L']) return;
+	for (const side of ['L', 'R']) {
+		const preset = ARM_POSES[poses[side]] || null;
+		if (amount >= 1 && !preset) continue;
+		const shoulder = marker(p, d.markers[`shoulder01.${side}`]);
+		const upper = marker(p, d.markers[`upperarm01.${side}`]);
+		const wrist = marker(p, d.markers[`wrist.${side}`]);
+		const out = Math.sign(wrist[0] - upper[0]) || 1;
+		const now = Math.atan2(Math.abs(wrist[0] - upper[0]), upper[1] - wrist[1]);
+		const down = (ARMS_DOWN_DEGREES * Math.PI) / 180;
+		const target = preset ? (preset.upper * Math.PI) / 180 : down + amount * (now - down);
+		const turn = (now - target) * out; // positive lowers the arm towards the body
+		const bend = preset && d.markers[`lowerarm01.${side}`] && d.skin[`forearm.${side}`] ? ((preset.bend * Math.PI) / 180) * out : 0;
+		if (Math.abs(turn) < 1e-4 && !bend) continue;
+		const rot = (angle, [px, py]) => { const c = Math.cos(angle), s = Math.sin(angle); return (x, y) => [px + (x - px) * c + (y - py) * s, py - (x - px) * s + (y - py) * c]; };
+		const rs = rot(turn * 0.2, shoulder);
+		const ru = rot(turn * 0.8, upper);
+		const elbow = d.markers[`lowerarm01.${side}`] ? marker(p, d.markers[`lowerarm01.${side}`]) : null;
+		const re = bend ? rot(bend, elbow) : (x, y) => [x, y];
+		const reach = elbow ? Math.hypot(wrist[0] - elbow[0], wrist[1] - elbow[1]) || 1 : 1;
+		const tb = skinTable([`shoulder.${side}`, `arm.${side}`, `forearm.${side}`]);
+		const [SW, AW, FW] = tb.w;
+		const RS = rotor(turn * 0.2, shoulder[0], shoulder[1]), RU = rotor(turn * 0.8, upper[0], upper[1]), RE = bend ? rotor(bend, elbow[0], elbow[1]) : null;
+		for (let n = 0; n < tb.idx.length; n++) {
+			const ws = SW[n], wa = AW[n];
+			if (!ws && !wa) continue;
+			const i = tb.idx[n], x = p[i * 3], y = p[i * 3 + 1];
+			const wf = bend ? Math.min(wa, FW[n]) : 0;
+			const sx = rx_(RS, x, y), sy = ry_(RS, x, y);
+			const ux = rx_(RU, x, y), uy = ry_(RU, x, y), ax = rx_(RS, ux, uy), ay = ry_(RS, ux, uy);
+			let fx = 0, fy = 0;
+			if (wf) { const ex = rx_(RE, x, y), ey = ry_(RE, x, y), vx = rx_(RU, ex, ey), vy = ry_(RU, ex, ey); fx = rx_(RS, vx, vy); fy = ry_(RS, vx, vy); }
+			const keep = Math.max(0, 1 - ws - wa);
+			p[i * 3] = keep * x + ws * sx + (wa - wf) * ax + wf * fx;
+			p[i * 3 + 1] = keep * y + ws * sy + (wa - wf) * ay + wf * fy;
+			// Back towards the head: more the further along the forearm (the elbow itself stays).
+			if (preset?.back && wf) p[i * 3 + 2] -= preset.back * wf * Math.min(1.2, Math.hypot(x - elbow[0], y - elbow[1]) / reach);
+		}
+		// Move the joint markers too, so they stay where the posed arm is.
+		const move = ([start, count], f) => { for (let i = start; i < start + count; i++) { const [x, y] = f(p[i * 3], p[i * 3 + 1]); p[i * 3] = x; p[i * 3 + 1] = y; } };
+		move(d.markers[`upperarm01.${side}`], rs);
+		if (d.markers[`lowerarm01.${side}`]) move(d.markers[`lowerarm01.${side}`], (x, y) => rs(...ru(x, y)));
+		move(d.markers[`wrist.${side}`], (x, y) => rs(...ru(...re(x, y))));
+		if (preset?.back) { const [start, count] = d.markers[`wrist.${side}`]; for (let i = start; i < start + count; i++) p[i * 3 + 2] -= preset.back; }
+	}
+}
+
+/**
+ * The realistic skin (Blender Studio's Human Base Meshes female, CC0; ~42k vertices) bound to this
+ * mesh: every skin vertex follows a point of a triangle here (barycentric) plus a small offset in that
+ * point's local frame, so all the sliders, body types, poses and correctives drive it. Only the new
+ * body's detail (anatomy under about a hand's width) rides on top; overall proportions stay the
+ * sliders'. The hands can't be matched finger by finger, so each hand moves as one solid piece
+ * with this mesh's hand (best-fit rotation, scale and position), blended into the forearm.
+ * Built by ~/pipeline/body-configurator/basemesh (wrap.py, build_skin.mjs).
+ */
+async function loadSkin(url, read, name = 'skin') {
+	const [layout, bin] = read
+		? await Promise.all([read(new URL(`${name}.json`, url)).then((b) => JSON.parse(Buffer.from(b).toString('utf8'))), read(new URL(`${name}.bin`, url)).then((b) => { const u = new Uint8Array(b); return u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength); })])
+		: await Promise.all([
+			fetch(new URL(`${name}.json`, url)).then((r) => { if (!r.ok) throw new Error(`skin: HTTP ${r.status}`); return r.json(); }),
+			fetch(new URL(`${name}.bin`, url)).then((r) => { if (!r.ok) throw new Error(`skin: HTTP ${r.status}`); return r.arrayBuffer(); })
+		]);
+	if (layout.format !== 'body-skin/1' || layout.refVertices !== meshData.count) return null;
+	const n = layout.vertices, r = layout.rigidCount;
+	const skin = meshData.eyes[0][0], idx = meshData.index, tris = [];
+	for (let t = 0; t < idx.length; t += 3) if (idx[t] < skin && idx[t + 1] < skin && idx[t + 2] < skin) tris.push(idx[t], idx[t + 1], idx[t + 2]);
+	return {
+		count: n,
+		index: new Uint16Array(bin, layout.indices, layout.triangles * 3),
+		tri: new Uint16Array(bin, layout.tri, n * 3),
+		bary: new Float32Array(bin, layout.bary, n * 2),
+		offset: new Float32Array(bin, layout.offset, n * 3),
+		ref: new Float32Array(bin, layout.ref, layout.refVertices * 3),
+		rigidIndex: new Uint16Array(bin, layout.rigidIndex, r),
+		rigidGroup: new Uint8Array(bin, layout.rigidGroup, r),
+		rigidWeight: new Float32Array(bin, layout.rigidWeight, r),
+		rigidRest: new Float32Array(bin, layout.rigidRest, r * 3),
+		groups: layout.groups.map((g, k) => new Uint16Array(bin, layout['group' + k], g.count)),
+		skinTris: Uint32Array.from(tris),
+		refArea: refAreas(new Float32Array(bin, layout.ref, layout.refVertices * 3), new Uint16Array(bin, layout.tri, n * 3)),
+		mhNormals: new Float32Array(meshData.count * 3)
+	};
+}
+
+/** Doubled area of each skin vertex's bound triangle, in the reference body (to measure squeezing). */
+function refAreas(ref, tri) {
+	const a = new Float32Array(tri.length / 3);
+	for (let i = 0; i < a.length; i++) {
+		const A = tri[i * 3] * 3, B = tri[i * 3 + 1] * 3, C = tri[i * 3 + 2] * 3;
+		const ux = ref[B] - ref[A], uy = ref[B + 1] - ref[A + 1], uz = ref[B + 2] - ref[A + 2], vx = ref[C] - ref[A], vy = ref[C + 1] - ref[A + 1], vz = ref[C + 2] - ref[A + 2];
+		a[i] = Math.sqrt((uy * vz - uz * vy) ** 2 + (uz * vx - ux * vz) ** 2 + (ux * vy - uy * vx) ** 2) || 1e-9;
+	}
+	return a;
+}
+
+/** Best-fit move (scale, rotation, translation) of points `ids` from A to B (Horn's quaternion method). */
+function bestFit(A, B, ids) {
+	let ax = 0, ay = 0, az = 0, bx = 0, by = 0, bz = 0;
+	for (const i of ids) { ax += A[i * 3]; ay += A[i * 3 + 1]; az += A[i * 3 + 2]; bx += B[i * 3]; by += B[i * 3 + 1]; bz += B[i * 3 + 2]; }
+	const m = ids.length; ax /= m; ay /= m; az /= m; bx /= m; by /= m; bz /= m;
+	let xx = 0, xy = 0, xz = 0, yx = 0, yy = 0, yz = 0, zx = 0, zy = 0, zz = 0, sa = 0, sb = 0;
+	for (const i of ids) {
+		const p = A[i * 3] - ax, q = A[i * 3 + 1] - ay, r = A[i * 3 + 2] - az, u = B[i * 3] - bx, v = B[i * 3 + 1] - by, w = B[i * 3 + 2] - bz;
+		xx += p * u; xy += p * v; xz += p * w; yx += q * u; yy += q * v; yz += q * w; zx += r * u; zy += r * v; zz += r * w;
+		sa += p * p + q * q + r * r; sb += u * u + v * v + w * w;
+	}
+	const N = [[xx + yy + zz, yz - zy, zx - xz, xy - yx], [yz - zy, xx - yy - zz, xy + yx, zx + xz], [zx - xz, xy + yx, -xx + yy - zz, yz + zy], [xy - yx, zx + xz, yz + zy, -xx - yy + zz]];
+	const shift = Math.sqrt(sa * sb) + 1e-9;
+	let q0 = 1, q1 = 0, q2 = 0, q3 = 0;
+	for (let it = 0; it < 40; it++) {
+		const n0 = N[0][0] * q0 + N[0][1] * q1 + N[0][2] * q2 + N[0][3] * q3 + shift * q0, n1 = N[1][0] * q0 + N[1][1] * q1 + N[1][2] * q2 + N[1][3] * q3 + shift * q1;
+		const n2 = N[2][0] * q0 + N[2][1] * q1 + N[2][2] * q2 + N[2][3] * q3 + shift * q2, n3 = N[3][0] * q0 + N[3][1] * q1 + N[3][2] * q2 + N[3][3] * q3 + shift * q3;
+		const l = Math.hypot(n0, n1, n2, n3); q0 = n0 / l; q1 = n1 / l; q2 = n2 / l; q3 = n3 / l;
+	}
+	const R = [q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3, 2 * (q1 * q2 - q0 * q3), 2 * (q1 * q3 + q0 * q2), 2 * (q1 * q2 + q0 * q3), q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3, 2 * (q2 * q3 - q0 * q1), 2 * (q1 * q3 - q0 * q2), 2 * (q2 * q3 + q0 * q1), q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3];
+	const s = Math.sqrt(sb / sa);
+	return { s, R, t: [bx - s * (R[0] * ax + R[1] * ay + R[2] * az), by - s * (R[3] * ax + R[4] * ay + R[5] * az), bz - s * (R[6] * ax + R[7] * ay + R[8] * az)] };
+}
+
+/** The realistic skin for shaped (and posed) mesh positions `p` (as from shapeBody), into `out`. */
+function bindSkin(p, out, k = meshData.skin2) {
+	const n = k.mhNormals, T = k.skinTris;
+	n.fill(0);
+	for (let t = 0; t < T.length; t += 3) {
+		const A = T[t] * 3, B = T[t + 1] * 3, C = T[t + 2] * 3;
+		const ux = p[B] - p[A], uy = p[B + 1] - p[A + 1], uz = p[B + 2] - p[A + 2], vx = p[C] - p[A], vy = p[C + 1] - p[A + 1], vz = p[C + 2] - p[A + 2];
+		const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+		n[A] += x; n[A + 1] += y; n[A + 2] += z; n[B] += x; n[B + 1] += y; n[B + 2] += z; n[C] += x; n[C + 1] += y; n[C + 2] += z;
+	}
+	const o = out || new Float32Array(k.count * 3), tri = k.tri, bary = k.bary, off = k.offset;
+	for (let i = 0; i < k.count; i++) {
+		const a = tri[i * 3] * 3, b = tri[i * 3 + 1] * 3, c = tri[i * 3 + 2] * 3, v = bary[i * 2], w = bary[i * 2 + 1], u = 1 - v - w;
+		const qx = u * p[a] + v * p[b] + w * p[c], qy = u * p[a + 1] + v * p[b + 1] + w * p[c + 1], qz = u * p[a + 2] + v * p[b + 2] + w * p[c + 2];
+		let nx = u * n[a] + v * n[b] + w * n[c], ny = u * n[a + 1] + v * n[b + 1] + w * n[c + 1], nz = u * n[a + 2] + v * n[b + 2] + w * n[c + 2];
+		let l = 1 / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1); nx *= l; ny *= l; nz *= l;
+		let ex = p[b] - p[a], ey = p[b + 1] - p[a + 1], ez = p[b + 2] - p[a + 2];
+		const d = ex * nx + ey * ny + ez * nz; ex -= nx * d; ey -= ny * d; ez -= nz * d;
+		l = 1 / (Math.sqrt(ex * ex + ey * ey + ez * ez) || 1); ex *= l; ey *= l; ez *= l;
+		const fx = ny * ez - nz * ey, fy = nz * ex - nx * ez, fz = nx * ey - ny * ex;
+		// Where a bend squeezes the triangle underneath (inside of an elbow, knee, armpit), the detail
+		// shrinks with it, so it can't fold over itself; stretched or unchanged areas keep it in full.
+		const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2], vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+		const ax = uy * vz - uz * vy, ay = uz * vx - ux * vz, az = ux * vy - uy * vx;
+		const sq = Math.min(1, Math.sqrt(ax * ax + ay * ay + az * az) / k.refArea[i]);
+		const s1 = off[i * 3] * sq, s2 = off[i * 3 + 1] * sq, s3 = off[i * 3 + 2] * sq;
+		o[i * 3] = qx + s1 * ex + s2 * fx + s3 * nx; o[i * 3 + 1] = qy + s1 * ey + s2 * fy + s3 * ny; o[i * 3 + 2] = qz + s1 * ez + s2 * fz + s3 * nz;
+	}
+	const fits = k.groups.map((g) => bestFit(k.ref, p, g));
+	for (let j = 0; j < k.rigidIndex.length; j++) {
+		const i = k.rigidIndex[j], { s, R, t } = fits[k.rigidGroup[j]], w = k.rigidWeight[j];
+		const x = k.rigidRest[j * 3], y = k.rigidRest[j * 3 + 1], z = k.rigidRest[j * 3 + 2];
+		o[i * 3] += w * (s * (R[0] * x + R[1] * y + R[2] * z) + t[0] - o[i * 3]);
+		o[i * 3 + 1] += w * (s * (R[3] * x + R[4] * y + R[5] * z) + t[1] - o[i * 3 + 1]);
+		o[i * 3 + 2] += w * (s * (R[6] * x + R[7] * y + R[8] * z) + t[2] - o[i * 3 + 2]);
+	}
+	return o;
+}
+
+/** The drawn surface for shaped base positions `p`: the realistic skin if loaded, else the subdivided mesh. */
+export function surface(p, out) { return meshData.skin2 ? bindSkin(p, out) : subdivide(p, out); }
+/** The coarse level of the realistic skin (about a quarter of the points; for drawing while a slider is dragged). */
+export const coarseSurface = (p, out) => bindSkin(p, out, meshData.skin2coarse);
+
+/** Unit normals of the drawn surface: from its own triangles (realistic skin) or smoothed base normals. */
+export function surfaceNormals(p, surfacePos, out, k = meshData.skin2) {
+	if (!k) { const o = subdivide(baseNormals(p), out); normalize(o); return o; }
+	const idx = k.index, P = surfacePos, o = out || new Float32Array(surfacePos.length);
+	o.fill(0);
+	for (let t = 0; t < idx.length; t += 3) {
+		const A = idx[t] * 3, B = idx[t + 1] * 3, C = idx[t + 2] * 3;
+		const ux = P[B] - P[A], uy = P[B + 1] - P[A + 1], uz = P[B + 2] - P[A + 2], vx = P[C] - P[A], vy = P[C + 1] - P[A + 1], vz = P[C + 2] - P[A + 2];
+		const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+		o[A] += x; o[A + 1] += y; o[A + 2] += z; o[B] += x; o[B + 1] += y; o[B + 2] += z; o[C] += x; o[C + 1] += y; o[C + 2] += z;
+	}
+	normalize(o);
+	return o;
+}
+
+/** The smooth (subdivided) surface for shaped base positions `p`, written into `out`. */
+export function subdivide(p, out) {
+	const s = meshData.subdiv;
+	const o = out || new Float32Array(s.count * 3);
+	for (let r = 0; r < s.count; r++) {
+		let x = 0, y = 0, z = 0;
+		for (let k = s.starts[r]; k < s.starts[r + 1]; k++) {
+			const c = s.cols[k] * 3, w = s.weights[k];
+			x += p[c] * w; y += p[c + 1] * w; z += p[c + 2] * w;
+		}
+		o[r * 3] = x; o[r * 3 + 1] = y; o[r * 3 + 2] = z;
+	}
+	return o;
+}
+
+/**
+ * Vertex normals of the base mesh (area-weighted), for smoothing with subdivide(): about ten
+ * times cheaper than computing them on the fine mesh, so dragging a slider stays fluid.
+ */
+export function baseNormals(p, out) {
+	const idx = meshData.index;
+	const n = out || new Float32Array(p.length);
+	n.fill(0);
+	for (let t = 0; t < idx.length; t += 3) {
+		const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+		const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+		const vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+		const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+		for (const k of [a, b, c]) { n[k] += nx; n[k + 1] += ny; n[k + 2] += nz; }
+	}
+	return n;
+}
+
+function normalize(n) {
+	for (let i = 0; i < n.length; i += 3) {
+		const l = 1 / (Math.sqrt(n[i] * n[i] + n[i + 1] * n[i + 1] + n[i + 2] * n[i + 2]) || 1);
+		n[i] *= l; n[i + 1] *= l; n[i + 2] *= l;
+	}
+}
+
+/**
+ * Bring the feet together, as character creators stand their figures: MakeHuman's mesh stands
+ * with the feet wide apart. Each leg turns in at the hip; the foot turns back the same amount
+ * about the ankle so the soles stay flat. "Feet apart" 1 keeps the modelled stance.
+ */
+const FEET_TOGETHER = 0.6; // ankles end at this fraction of the hip joints' spread
+
+function poseLegs(p, amount) {
+	const d = meshData;
+	if (amount >= 1 || !d.skin['leg.L'] || !d.markers['upperleg01.L']) return;
+	for (const side of ['L', 'R']) {
+		const hip = marker(p, d.markers[`upperleg01.${side}`]);
+		const ankle = marker(p, d.markers[`foot.${side}`]);
+		const drop = hip[1] - ankle[1];
+		const now = Math.atan2(ankle[0] - hip[0], drop);
+		const targetX = hip[0] * FEET_TOGETHER + amount * (ankle[0] - hip[0] * FEET_TOGETHER);
+		const turn = now - Math.atan2(targetX - hip[0], drop);
+		if (Math.abs(turn) < 1e-4) continue;
+		const rot = (angle, [px, py]) => { const c = Math.cos(angle), s = Math.sin(angle); return (x, y) => [px + (x - px) * c + (y - py) * s, py - (x - px) * s + (y - py) * c]; };
+		const rh = rot(turn, hip);
+		const ra = rot(-turn, ankle);
+		const tb = skinTable([`leg.${side}`, `foot.${side}`]);
+		const [LW, FW] = tb.w;
+		const RH = rotor(turn, hip[0], hip[1]), RA = rotor(-turn, ankle[0], ankle[1]);
+		for (let n = 0; n < tb.idx.length; n++) {
+			const i = tb.idx[n], x = p[i * 3], y = p[i * 3 + 1];
+			const l = LW[n], f = FW[n];
+			let fx = 0, fy = 0;
+			if (f) { const qx = rx_(RA, x, y), qy = ry_(RA, x, y); fx = rx_(RH, qx, qy); fy = ry_(RH, qx, qy); }
+			const keep = Math.max(0, 1 - l - f);
+			p[i * 3] = keep * x + l * rx_(RH, x, y) + f * fx;
+			p[i * 3 + 1] = keep * y + l * ry_(RH, x, y) + f * fy;
+		}
+		const move = ([start, count], fn) => { for (let i = start; i < start + count; i++) { const [x, y] = fn(p[i * 3], p[i * 3 + 1]); p[i * 3] = x; p[i * 3 + 1] = y; } };
+		move(d.markers[`foot.${side}`], rh);
+	}
+}
+
+function eyeCentre(p, [start, count]) {
+	const c = new THREE.Vector3();
+	for (let i = start; i < start + count; i++) c.add(new THREE.Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]));
+	return c.divideScalar(count);
+}
+
+// ---------- the viewer ----------
+
+/**
+ * A live 3D view inside `container`. Drag sideways to turn the figure. `update(values)` reshapes
+ * it; `snapshot(w, h, angle, mode)` renders a plain picture of it for the image engine.
+ */
+/** options.handles (default true): show the draggable pose dots; false = display only (no poser work). */
+export function createViewer(container, { handles: showHandles = true, ground = false } = {}) {
+	// Transparent, so the studio backdrop behind it (in CSS) shows through.
+	const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+	renderer.toneMapping = THREE.ACESFilmicToneMapping;
+	renderer.toneMappingExposure = 1.05;
+	renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+	container.append(renderer.domElement);
+	const scene = new THREE.Scene();
+	scene.background = null;
+	// Studio lighting for a clay figure: soft sky fill, a key light from the upper left, a fill
+	// from the right and a rim from behind, so muscle and curves read clearly.
+	scene.add(new THREE.HemisphereLight('#ffffff', '#5c6068', 1.25));
+	const key = new THREE.DirectionalLight('#ffffff', 2.4);
+	key.position.set(-120, 220, 160);
+	scene.add(key);
+	const fill = new THREE.DirectionalLight('#eef2ff', 0.7);
+	fill.position.set(150, 80, 120);
+	scene.add(fill);
+	const rim = new THREE.DirectionalLight('#ffffff', 1.1);
+	rim.position.set(60, 160, -180);
+	scene.add(rim);
+	// Warm brown skin (the owner's reference character, #9A6243), matte with a soft sheen at the
+	// edges like skin under studio light.
+	const material = new THREE.MeshPhysicalMaterial({ color: '#9a6243', roughness: 0.56, metalness: 0, sheen: 0.45, sheenColor: '#f0b48a', sheenRoughness: 0.55, clearcoat: 0.06, clearcoatRoughness: 0.6 });
+	const group = new THREE.Group();
+	scene.add(group);
+	// The floor (option `ground`): a glass pedestal disc at y = 0, where the feet stand, fading into
+	// the page behind, and a soft contact shadow under the soles that follows the feet.
+	const stageFloor = new THREE.Group();
+	let shadow = null;
+	if (ground) {
+		const tex = (draw) => { const c = document.createElement('canvas'); c.width = c.height = 256; draw(c.getContext('2d')); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; };
+		const disc = tex((g) => {
+			const r = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+			r.addColorStop(0, 'rgba(255,255,255,0.42)'); r.addColorStop(0.55, 'rgba(225,252,255,0.22)');
+			r.addColorStop(0.9, 'rgba(225,252,255,0.30)'); r.addColorStop(0.95, 'rgba(255,255,255,0.75)'); r.addColorStop(0.985, 'rgba(255,255,255,0.18)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+			g.fillStyle = r; g.fillRect(0, 0, 256, 256);
+		});
+		const pedestal = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshBasicMaterial({ map: disc, transparent: true, depthWrite: false }));
+		pedestal.rotation.x = -Math.PI / 2;
+		pedestal.name = 'pedestal';
+		stageFloor.add(pedestal);
+		const blob = tex((g) => {
+			const r = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+			r.addColorStop(0, 'rgba(0,15,30,0.75)'); r.addColorStop(0.45, 'rgba(0,15,30,0.42)'); r.addColorStop(1, 'rgba(0,15,30,0)');
+			g.fillStyle = r; g.fillRect(0, 0, 256, 256);
+		});
+		shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, depthWrite: false }));
+		shadow.rotation.x = -Math.PI / 2;
+		shadow.position.y = 0.05;
+		shadow.renderOrder = 1;
+		group.add(shadow);
+		scene.add(stageFloor);
+	}
+	/** Size the pedestal to the figure, and put the contact shadow under the feet as they stand now. */
+	function placeGround() {
+		if (!ground || !basePos) return;
+		stageFloor.children[0].scale.setScalar(Math.max(reach * 1.25, height * 0.3));
+		let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, n = 0;
+		for (let i = 0; i < meshData.eyes[0][0]; i++) {
+			if (basePos[i * 3 + 1] > height * 0.025) continue;
+			const x = basePos[i * 3], z = basePos[i * 3 + 2];
+			if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; n++;
+		}
+		shadow.visible = n > 0;
+		if (!n) return;
+		const pad = height * 0.06;
+		shadow.position.set((x0 + x1) / 2, 0.05, (z0 + z1) / 2);
+		shadow.scale.set(x1 - x0 + pad * 2, z1 - z0 + pad * 2, 1);
+	}
+	const camera = new THREE.PerspectiveCamera(22, 1, 1, 5000);
+	let yaw = 0;
+	let height = 170;
+	let reach = 40;
+	// On screen in Pose mode the framing only grows, so the figure does not jump in and out as a
+	// pose changes under the finger. Pictures are always framed to the figure itself.
+	let viewH = 170, viewR = 40, posingView = false;
+	let geometry = null;
+	let basePos = null;
+	let baseNrm = null;
+	let fineMesh = null, coarseMesh = null, coarseGeo = null;
+	const shaper = createShaper();
+	const eyes = [];
+	let ready = null;
+	let current = null;
+	// Pose mode: dots on the draggable points; dragging one poses the body like a puppet.
+	const handleMat = new THREE.MeshBasicMaterial({ color: '#ff7a3d', depthTest: false, transparent: true, opacity: 0.9 });
+	const handleOn = new THREE.MeshBasicMaterial({ color: '#2f80ff', depthTest: false, transparent: true, opacity: 0.95 });
+	const handles = {};
+	for (const name of HANDLES) {
+		const h = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), handleMat);
+		h.renderOrder = 10;
+		h.visible = false;
+		handles[name] = h;
+		group.add(h);
+	}
+	let poser = null, poserKey = '';
+	let feetPlanted = true;
+	let onPose = null;
+	let drag = null; // { name, plane, floor, pins }
+	const shapeKey = (v) => JSON.stringify({ ...v, pose: undefined, posing: undefined, name: undefined });
+	const getPoser = (v) => { const k = shapeKey(v); if (k !== poserKey) { poser = createPoser(v); poserKey = k; } return poser; };
+	function placeHandles() {
+		const on = Boolean(showHandles && current && isPosing(current));
+		const pts = on ? getPoser(current).points(current.pose, drag?.floor ?? undefined) : null;
+		for (const [name, h] of Object.entries(handles)) {
+			h.visible = on;
+			if (!on) continue;
+			h.position.set(...pts[name]);
+			h.scale.setScalar(height * (name === 'hips' || name === 'chest' ? 0.016 : 0.013));
+			h.material = drag?.name === name ? handleOn : handleMat;
+		}
+	}
+
+	function frame(cam, aspect, screen = false) {
+		const height_ = screen ? viewH : height, reach_ = screen ? viewR : reach;
+		// Fit the figure's height and its widest reach (whichever turn it is at), so it fills
+		// a narrow column as well as a wide one.
+		const t = Math.tan((cam.fov * Math.PI) / 360);
+		if (screen && ground) {
+			// Standing on the floor: room for the pedestal below the feet, and the camera looking down
+			// a little (about 5 degrees), as in a character creator's viewport.
+			const span = height_ * 1.12, mid = height_ * 0.47;
+			const distance = Math.max((span / 0.92 / 2) / t, (reach_ * 1.3 / 0.92) / (t * aspect)) + 20;
+			cam.aspect = aspect;
+			cam.position.set(0, mid + distance * Math.tan(5 * Math.PI / 180), distance);
+			cam.lookAt(0, mid, 0);
+			cam.updateProjectionMatrix();
+			return;
+		}
+		const distance = Math.max((height_ / 0.88 / 2) / t, (reach_ / 0.92) / (t * aspect)) + 20;
+		cam.aspect = aspect;
+		cam.position.set(0, height_ * 0.5, distance);
+		cam.lookAt(0, height_ * 0.49, 0);
+		cam.updateProjectionMatrix();
+	}
+
+	// Resizing the canvas makes the browser rebuild its drawing buffers: only do it when the
+	// container's size really changed (not on every slider step, which also calls this).
+	let sizeW = 0, sizeH = 0, sizeRatio = 0;
+	function resize() {
+		const w = container.clientWidth || 300;
+		const h = container.clientHeight || 400;
+		const ratio = renderer.getPixelRatio();
+		if (w !== sizeW || h !== sizeH || ratio !== sizeRatio) { renderer.setSize(w, h, false); sizeW = w; sizeH = h; sizeRatio = ratio; }
+		frame(camera, w / h, true);
+		draw();
+	}
+
+	function draw() {
+		group.rotation.y = yaw;
+		renderer.render(scene, camera);
+	}
+
+	function loaded(d) {
+		// Shapes and poses work on the base mesh; what is drawn is its smoothed version.
+		basePos = new Float32Array(d.count * 3);
+		const smooth = Boolean(d.surface);
+		geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((smooth ? d.surface.count : d.count) * 3), 3));
+		geometry.setIndex(new THREE.BufferAttribute(smooth ? d.surface.index : d.index, 1));
+		if (smooth) { geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.surface.count * 3), 3)); baseNrm = new Float32Array(d.count * 3); }
+		fineMesh = new THREE.Mesh(geometry, material);
+		group.add(fineMesh);
+		// While a slider is being dragged the unsmoothed base mesh is drawn instead (4x fewer points,
+		// no subdivision): same shape, updated every frame; the smooth one returns when the drag stops.
+		if (smooth) {
+			coarseGeo = new THREE.BufferGeometry();
+			// The realistic skin's coarse level when it is there (same look), else the unsmoothed base mesh.
+			const cn = d.skin2coarse ? d.skin2coarse.count : d.count;
+			coarseGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cn * 3), 3));
+			coarseGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(cn * 3), 3));
+			coarseGeo.setIndex(new THREE.BufferAttribute(d.skin2coarse ? d.skin2coarse.index : d.index, 1));
+			coarseMesh = new THREE.Mesh(coarseGeo, material);
+			coarseMesh.visible = false;
+			group.add(coarseMesh);
+		}
+		// The base mesh has open eye sockets; plain eyeballs close them, as on a shop mannequin.
+		for (let i = 0; i < 2; i++) {
+			const eye = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), material);
+			eyes.push(eye);
+			group.add(eye);
+		}
+	}
+
+	ready = loadHuman().then(loaded).catch((err) => {
+		container.textContent = `The body model could not load: ${err.message}`;
+		throw err;
+	});
+
+	// While a slider is dragged it can fire many times per frame; reshape once per frame at most.
+	// Updates closer together than 200 ms count as a drag: the quick unsmoothed mesh is drawn, and the
+	// smooth one is rebuilt once the values stop changing.
+	let pending = null, lastUpdate = 0, settleTimer = 0;
+	function update(values) {
+		const now = performance.now(), dragging = now - lastUpdate < 200;
+		lastUpdate = now;
+		const first = pending === null;
+		pending = values;
+		if (first) ready.then(() => requestAnimationFrame(() => { if (pending) { const v = pending; pending = null; reshape(v, dragging && Boolean(coarseMesh)); } }), () => {});
+		clearTimeout(settleTimer);
+		if (coarseMesh) settleTimer = setTimeout(() => { if (current && coarseMesh.visible) reshape(current, false); }, 220);
+	}
+
+	function reshape(values, quick = false) {
+		current = values;
+		const pos = geometry.attributes.position;
+		shaper(values, basePos);
+		if (quick) {
+			const cp = coarseGeo.attributes.position, cn = coarseGeo.attributes.normal;
+			if (meshData.skin2coarse) { coarseSurface(basePos, cp.array); surfaceNormals(basePos, cp.array, cn.array, meshData.skin2coarse); } else { cp.array.set(basePos); normalize(baseNormals(basePos, cn.array)); }
+			cp.needsUpdate = true; cn.needsUpdate = true;
+			coarseGeo.computeBoundingSphere();
+			coarseMesh.visible = true; fineMesh.visible = false;
+		} else if (meshData.surface) {
+			if (coarseMesh) { coarseMesh.visible = false; fineMesh.visible = true; }
+			surface(basePos, pos.array);
+			const nrm = geometry.attributes.normal;
+			surfaceNormals(basePos, pos.array, nrm.array);
+			nrm.needsUpdate = true;
+		} else {
+			pos.array.set(basePos.subarray(0, pos.array.length));
+			geometry.computeVertexNormals();
+		}
+		pos.needsUpdate = true;
+		geometry.computeBoundingBox();
+		geometry.computeBoundingSphere();
+		// Frame by the real height: the waist-to-chest length can make the figure taller than the
+		// Height slider says.
+		height = 0;
+		for (let i = 0; i < meshData.eyes[0][0]; i++) height = Math.max(height, basePos[i * 3 + 1]);
+		reach = 0;
+		const arr = basePos;
+		for (let i = 0; i < meshData.eyes[0][0]; i++) reach = Math.max(reach, Math.hypot(arr[i * 3], arr[i * 3 + 2]));
+		const posing = isPosing(values);
+		if (posing && posingView) { viewH = Math.max(viewH, height); viewR = Math.max(viewR, reach); } else { viewH = height; viewR = reach; }
+		posingView = posing;
+		const r = height * 0.0068;
+		meshData.eyes.forEach((e, i) => {
+			eyes[i].position.copy(eyeCentre(basePos, e));
+			eyes[i].scale.setScalar(r);
+		});
+		placeHandles();
+		placeGround();
+		resize();
+	}
+
+	/** While dragging: re-pose the kept body shape only, with the floor held where it was. */
+	function repose(values, floor) {
+		current = values;
+		getPoser(values).apply(values.pose, basePos, floor);
+		const pos = geometry.attributes.position;
+		surface(basePos, pos.array);
+		const nrm = geometry.attributes.normal;
+		surfaceNormals(basePos, pos.array, nrm.array);
+		nrm.needsUpdate = true;
+		pos.needsUpdate = true;
+		geometry.computeBoundingSphere();
+		meshData.eyes.forEach((e, i) => eyes[i].position.copy(eyeCentre(basePos, e)));
+		placeHandles();
+		placeGround();
+		draw();
+	}
+
+	// Pointer position to a ray, and the ray to the point where it meets the drag plane (figure space).
+	const raycaster = new THREE.Raycaster();
+	function pointerRay(e) {
+		const rect = renderer.domElement.getBoundingClientRect();
+		raycaster.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+		return raycaster.ray;
+	}
+	/** The handle nearest the finger (within about a fingertip), or null. */
+	function pick(e) {
+		if (!current || !isPosing(current) || !meshData?.subdiv) return null;
+		const rect = renderer.domElement.getBoundingClientRect();
+		group.updateMatrixWorld(true);
+		let best = null, bestD = Math.max(26, rect.width * 0.07);
+		for (const name of HANDLES) {
+			const p = handles[name].getWorldPosition(new THREE.Vector3()).project(camera);
+			const x = rect.left + ((p.x + 1) / 2) * rect.width, y = rect.top + ((1 - p.y) / 2) * rect.height;
+			const dd = Math.hypot(x - e.clientX, y - e.clientY);
+			if (dd < bestD) { bestD = dd; best = name; }
+		}
+		return best;
+	}
+	// Where a dot is on the screen (client pixels), for tests that drag it like a finger would.
+	renderer.domElement.poseHandle = (name) => {
+		const rect = renderer.domElement.getBoundingClientRect();
+		group.updateMatrixWorld(true);
+		const p = handles[name].getWorldPosition(new THREE.Vector3()).project(camera);
+		return handles[name].visible ? { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height } : null;
+	};
+	let solving = null;
+	function dragTo(e) {
+		const hit = pointerRay(e).intersectPlane(drag.plane, new THREE.Vector3());
+		if (!hit) return;
+		const local = group.worldToLocal(hit.clone());
+		drag.target = [local.x, local.y, local.z];
+		if (solving) return;
+		solving = requestAnimationFrame(() => {
+			solving = null;
+			const values = { ...current, pose: getPoser(current).solve(current.pose, { [drag.name]: drag.target }, { feetPlanted, floor: drag.floor, pins: drag.pins, anchor: drag.start, iterations: 10 }) };
+			repose(values, drag.floor);
+			onPose?.(values.pose, false);
+		});
+	}
+
+	// Turn by dragging; tap the view buttons to snap. In Pose mode, dragging a dot poses the body.
+	let dragging = null;
+	renderer.domElement.addEventListener('pointerdown', (e) => {
+		renderer.domElement.setPointerCapture(e.pointerId);
+		const name = pick(e);
+		if (name) {
+			const P = getPoser(current);
+			const floor = P.floor(current.pose);
+			const at = handles[name].getWorldPosition(new THREE.Vector3());
+			drag = { name, floor, start: current.pose, pins: P.pins(current.pose), plane: new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), at) };
+			placeHandles(); draw();
+			return;
+		}
+		dragging = e.clientX;
+	});
+	renderer.domElement.addEventListener('pointermove', (e) => {
+		if (drag) { dragTo(e); return; }
+		if (dragging === null) return; yaw += (e.clientX - dragging) * 0.012; dragging = e.clientX; draw();
+	});
+	const endDrag = () => {
+		dragging = null;
+		if (!drag) return;
+		if (solving) { cancelAnimationFrame(solving); solving = null; }
+		// Finish following the finger to where it was lifted, then let go.
+		if (drag.target) current = { ...current, pose: getPoser(current).solve(current.pose, { [drag.name]: drag.target }, { feetPlanted, floor: drag.floor, pins: drag.pins, anchor: drag.start, iterations: 40 }) };
+		drag = null;
+		// Let go: the body settles back onto the floor.
+		reshape(current);
+		onPose?.(current.pose, true);
+	};
+	renderer.domElement.addEventListener('pointerup', endDrag);
+	renderer.domElement.addEventListener('pointercancel', endDrag);
+	// The page scrolls with up-and-down swipes outside Pose mode; in Pose mode the view takes every gesture.
+	renderer.domElement.style.touchAction = 'pan-y';
+	new ResizeObserver(resize).observe(container);
+
+	return {
+		update,
+		ready: () => ready,
+		setView(angle) { yaw = angle; draw(); },
+		/** Pose mode on the screen: the dots, and whether the view keeps every gesture for dragging. */
+		setPoseMode(on, options = {}) {
+			if ('feetPlanted' in options) feetPlanted = options.feetPlanted;
+			renderer.domElement.style.touchAction = on ? 'none' : 'pan-y';
+			if (current) { placeHandles(); draw(); }
+		},
+		/** Called with (pose, finished) as a drag poses the body (finished when the finger lifts). */
+		onPose(fn) { onPose = fn; },
+		/** Draggable points of the body as drawn now, in centimetres (figure space, before turning). */
+		points: () => (current && meshData?.rig ? getPoser(current).points(current.pose) : null),
+		/** The angle the figure is turned to now (radians), for 'Use this body'. */
+		view: () => yaw,
+		/**
+		 * A front (or chosen) view at exactly w by h pixels as a PNG blob. 'shape' is the shaded
+		 * figure on white; 'depth' is a depth map (near = white, far and background = black), the
+		 * kind of picture the Krea 2 depth add-on follows.
+		 */
+		async snapshot(w, h, angle = 0, mode = 'shape') {
+			await ready;
+			if (pending) { const v = pending; pending = null; reshape(v); }
+			if (!current) throw new Error('the body is still loading');
+			const cam = camera.clone();
+			const prevBg = scene.background;
+			// Pictures are of the figure alone: no floor or shadow in them.
+			stageFloor.visible = false; if (shadow) shadow.visible = false;
+			const prevYaw = yaw;
+			scene.background = new THREE.Color(mode === 'depth' ? '#000000' : '#ffffff');
+			yaw = angle;
+			group.rotation.y = yaw;
+			group.updateMatrixWorld(true);
+			renderer.setPixelRatio(1);
+			renderer.setSize(w, h, false);
+			frame(cam, w / h);
+			if (mode === 'depth') {
+				// Linear depth over the body's own front-to-back range: the front of the torso is
+				// white and the back is dark. The hands reach a little forward in this pose; they
+				// are simply clamped to white so they do not squash the body's range into grey.
+				const [near, far] = depthRange(basePos, meshData.eyes[0][0], angle, cam.position.z);
+				scene.overrideMaterial = depthMaterial(near, far);
+			}
+			const tone = renderer.toneMapping;
+			if (mode === 'depth') renderer.toneMapping = THREE.NoToneMapping;
+			renderer.render(scene, cam);
+			renderer.toneMapping = tone;
+			const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));
+			scene.overrideMaterial = null;
+			scene.background = prevBg;
+			stageFloor.visible = true; placeGround();
+			yaw = prevYaw;
+			renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+			sizeW = 0; // the snapshot changed the canvas size: put the screen size back
+			resize();
+			return blob;
+		}
+	};
+}

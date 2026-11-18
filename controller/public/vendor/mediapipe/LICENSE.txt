@@ -1,0 +1,4 @@
+MediaPipe Tasks Vision 1.2.3 (npm @mediapipe/tasks-vision), Apache-2.0, Google LLC.
+vision_bundle.mjs and wasm/vision_wasm_internal.{js,wasm} copied unchanged from the npm package.
+pose_landmarker_lite.task (float16, latest as of 2026-11-16) from https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task (Apache-2.0).
+Used only in the browser, on the phone: photos never leave the device.

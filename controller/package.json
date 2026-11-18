@@ -1,0 +1,15 @@
+{
+	"name": "assistant-controller",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Phone-hosted (Termux) controller: chat UI, history, and an OpenAI-compatible model client.",
+	"license": "MIT",
+	"engines": { "node": ">=22.13" },
+	"bin": { "assistant-controller": "./src/cli.js" },
+	"scripts": {
+		"start": "node src/cli.js",
+		"test": "node --test test/*.test.js",
+		"stress": "node test/ui/stress.mjs"
+	}
+}
