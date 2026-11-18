@@ -96,6 +96,10 @@ def rp(method, path, body=None):
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"RunPod {e.code}: {e.read().decode()[:300]}")
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            # Never repeat a pod start: the first request may have reached RunPod, and a second
+            # would rent (and charge for) another GPU.
+            if method == "POST" and path == "/pods":
+                raise RuntimeError(f"Couldn't reach RunPod to start the pod (phone internet dropped?): {getattr(e, 'reason', e)}. Check the RunPod app for a v2a- pod before pressing Start again.")
             if attempt == 3:
                 raise RuntimeError(f"Couldn't reach RunPod (phone internet dropped?): {getattr(e, 'reason', e)}")
             time.sleep(3 * (attempt + 1))
