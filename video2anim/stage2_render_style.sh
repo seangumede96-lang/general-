@@ -66,7 +66,7 @@ cd ComfyUI && pip install -q -r requirements.txt
 M=models; mkdir -p $M/diffusion_models $M/text_encoders $M/vae $M/loras $M/upscale_models
 b2 sync --no-progress "b2://$B2_BUCKET/cache/comfy-models" $M || true
 fetch_hf () { # repo file dest_dir
-  [ -f "$3/$(basename $2)" ] || { hf download "$1" "$2" --local-dir /tmp/hf --token "$HF_TOKEN" >/dev/null && mv "/tmp/hf/$2" "$3/"; }
+  [ -f "$3/$(basename $2)" ] || { hf download "$1" "$2" --local-dir /tmp/hf ${HF_TOKEN:+--token "$HF_TOKEN"} >/dev/null && mv "/tmp/hf/$2" "$3/"; }
 }
 fetch_hf Comfy-Org/Krea-2 split_files/diffusion_models/krea2_turbo_fp8_scaled.safetensors $M/diffusion_models \
   || fetch_hf Comfy-Org/Krea2 split_files/diffusion_models/krea2_turbo_fp8_scaled.safetensors $M/diffusion_models
@@ -74,7 +74,9 @@ fetch_hf Comfy-Org/Krea-2 split_files/text_encoders/qwen3vl_4b_fp8_scaled.safete
   || fetch_hf Comfy-Org/Krea2 split_files/text_encoders/qwen3vl_4b_fp8_scaled.safetensors $M/text_encoders
 fetch_hf Comfy-Org/Krea-2 split_files/vae/qwen_image_vae.safetensors $M/vae \
   || fetch_hf Comfy-Org/Krea2 split_files/vae/qwen_image_vae.safetensors $M/vae
-[ -f "$M/loras/$LORA_FILE" ] || b2 file download --no-progress "b2://$B2_BUCKET/loras/$LORA_FILE" "$M/loras/$LORA_FILE" || fetch_hf "$LORA_HF_REPO" "$LORA_FILE" $M/loras
+[ -f "$M/loras/$LORA_FILE" ] || b2 file download --no-progress "b2://$B2_BUCKET/loras/$LORA_FILE" "$M/loras/$LORA_FILE" \
+  || { [ -n "$LORA_HF_REPO" ] && fetch_hf "$LORA_HF_REPO" "$LORA_FILE" $M/loras; } \
+  || { st failed "LoRA $LORA_FILE is not in B2 loras/" "" force; exit 1; }
 [ -f $M/upscale_models/RealESRGAN_x2plus.pth ] || wget -q -P $M/upscale_models \
   https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth
 b2 sync --no-progress $M "b2://$B2_BUCKET/cache/comfy-models"

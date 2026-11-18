@@ -105,13 +105,28 @@ STAGE_POD = {
 IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 
 
+def pod_keys(stage, job):
+    """What a pod is given. Never the RunPod key (the phone deletes pods itself) and never the main
+    Backblaze key: a new Backblaze key for this one bucket, without delete or key-management rights,
+    that expires a little after the stage's spending cap would be reached. The Hugging Face token
+    (read-only) only goes to the mocap stage, for the gated SAM models when they aren't cached in B2."""
+    hours = float(C[STAGE_POD[stage]["cap"]]) / float(C[STAGE_POD[stage]["rate"]]) + 1
+    out = b2("key", "create", "--bucket", BUCKET, "--duration", str(int(hours * 3600)),
+             f"v2a-{stage}-{job}"[:50], "listBuckets,listFiles,readFiles,writeFiles", timeout=60).split()
+    if len(out) < 2: raise RuntimeError("Couldn't make a limited Backblaze key for the pod")
+    keys = {"B2_APPLICATION_KEY_ID": out[0], "B2_APPLICATION_KEY": out[1]}
+    if stage == "mocap" and KEYS["HF_TOKEN"]: keys["HF_TOKEN"] = KEYS["HF_TOKEN"]
+    return keys
+
+
 def launch(stage, job_env):
     s = STAGE_POD[stage]
     cmd = (f"pip -q install b2 && b2 sync --no-progress b2://{BUCKET}/code/video2anim /workspace/v2a "
            f"&& bash /workspace/v2a/{s['script']}; sleep 30")
-    envs = {**{k: v for k, v in KEYS.items() if v}, **job_env}
+    envs = {**pod_keys(stage, job_env["JOB_NAME"]), **job_env}
     last = None
-    for cloud in ("COMMUNITY", "SECURE"):
+    # RunPod's own data centres only: community machines are run by strangers.
+    for cloud in ("SECURE",):
         try:
             pod = rp("POST", "/pods", {
                 "name": f"v2a-{stage}-{job_env['JOB_NAME']}"[:60], "imageName": IMAGE,
@@ -191,8 +206,9 @@ def watch(job, stage, pid, rate):
             except Exception: pass
             S["log"] = b2_read(f"jobs/{job}/log_tail.txt") or S["log"]
         stage_now = (S["status"] or {}).get("stage")
-        if stage_now == done_key: return
-        if stage_now == "failed": raise RuntimeError((S["status"] or {}).get("msg", "pod reported a failure"))
+        # The phone deletes the pod itself (pods don't get the RunPod key).
+        if stage_now == done_key: kill(pid); return
+        if stage_now == "failed": kill(pid); raise RuntimeError((S["status"] or {}).get("msg", "pod reported a failure"))
         spent = (time.time() - S["run"]["pod_start"]) / 3600 * rate
         if S["run"].get("cancel") or spent > cap:
             kill(pid);
@@ -206,6 +222,7 @@ def watch(job, stage, pid, rate):
         if gone >= 3:
             time.sleep(20)       # let the final status upload land
             st = b2_read(f"jobs/{job}/status.json") or "{}"
+            kill(pid)
             if json.loads(st).get("stage") == done_key: return
             raise RuntimeError(f"{stage} pod disappeared before finishing — check the log")
 
