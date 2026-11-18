@@ -48,3 +48,15 @@ Checked off:
   - The cheapest real run is Full with preview-every-10: about $1.50-4 (mocap cap $6 + render cap $3, secure prices).
   - That's over the owner's $3-per-task "ask first" line, so I'm waiting for the owner's OK.
 
+### 2026-11-18 later, phone Claude Code: first real run (owner approved)
+- **Attempt 1 failed after ~2 min.** "Installing SAM-Body4D": the cu118 venv couldn't build detectron2 against the image's CUDA 12.4 compiler. Fixed in 975cf36: the image's own PyTorch, runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404, plus PIP_BREAK_SYSTEM_PACKAGES for all pods.
+- **Attempt 2: install and checkpoints OK** (23 GB, now cached in B2 cache/sam-body4d-ckpts). Tracking 783 frames took 51 s, but 4D generation ran at 8.7 min per 64-frame batch (6 of 13 batches in 52 min), so it would have passed the $6 cap. The owner chose to stop it at about $4.42.
+- The person detector found one box covering most of the frame: [0,118,1126,713] on 1280x720. That's the same pattern as the 12 Nov video, so the tracks may merge.
+- **Found while fixing:** the stock scripts/offline_app.py writes only .ply meshes (no .npz/.pkl), so export_joints.py would have found nothing at the end. It also renders overlay frames and an mp4 of the video.
+- **Changed:**
+  - stage1 now runs a data-only copy (patch_offline_app.py, from mocap-prep, 12 Nov): joints/<frame>.npz with pred_keypoints_3d per person, no overlay pictures or video, working frames deleted.
+  - export_joints is checked on the 12 Nov joint files: 150 frames x 70 joints.
+  - Occlusion completion is off in configs/body4d.yaml.
+- Also added portal/pod_guard.sh (fa50b45): a phone-side backstop that deletes v2a-* pods if the portal stops, or after 170 min.
+- Ledger corrected by hand: +$4.42 and +$0.08, total $4.55 of $45.
+

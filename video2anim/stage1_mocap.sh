@@ -34,6 +34,10 @@ python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version
 pip install -q 'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' --no-build-isolation --no-deps
 pip install -q -e models/sam3
 pip install -q -e .
+# Data-only copy of the tool's script (patch_offline_app.py): saves joints/<frame>.npz for every
+# tracked person, renders NO overlay pictures or video, deletes its working frames at the end.
+# (The stock script saves only .ply meshes, which the joint exporter can't read, and renders every frame.)
+python "$HERE/patch_offline_app.py" .
 
 st mocap_setup "Loading model checkpoints (B2 cache, else Hugging Face)" 30 force
 if b2 ls "b2://$B2_BUCKET/cache/sam-body4d-ckpts/" | grep -q .; then
@@ -41,16 +45,20 @@ if b2 ls "b2://$B2_BUCKET/cache/sam-body4d-ckpts/" | grep -q .; then
 fi
 hf auth login --token "$HF_TOKEN" >/dev/null 2>&1 || huggingface-cli login --token "$HF_TOKEN"
 python scripts/setup.py --ckpt-root "$CK"
+# Occlusion completion (a diffusion model run on every batch) roughly tripled the time per batch
+# (8.7 min per 64 frames on an A100) and isn't needed for joints: off.
+sed -i '/^completion:/,/^[^ ]/ s/^  enable: true/  enable: false/' configs/body4d.yaml
+grep -A1 '^completion:' configs/body4d.yaml
 b2 sync --no-progress "$CK" "b2://$B2_BUCKET/cache/sam-body4d-ckpts"
 
 st mocap_run "Extracting body motion from the video" 45 force
 T0=$(date +%s)
-python scripts/offline_app.py --input_video $W/in/video.mp4 2>&1 | while IFS= read -r line; do
+python scripts/offline_app_data.py --input_video $W/in/video.mp4 --output_dir $W/b4d_out 2>&1 | while IFS= read -r line; do
   echo "$line"; st mocap_run "Extracting body motion ($(( $(date +%s) - T0 ))s so far)" 60
 done
 st mocap_run "Saving skeleton data" 90 force
-python "$HERE/export_joints.py" --search . --inspect > "$OUT/inspect.txt" || true
-python "$HERE/export_joints.py" --search . --out "$OUT" --fps "$FPS"
+python "$HERE/export_joints.py" --search $W/b4d_out --inspect > "$OUT/inspect.txt" || true
+python "$HERE/export_joints.py" --search $W/b4d_out --out "$OUT" --fps "$FPS"
 
 b2 sync --no-progress "$OUT" "b2://$DEST"
 b2 file upload --no-progress "$B2_BUCKET" /tmp/pipeline.log "jobs/$JOB_NAME/stage1/pipeline.log"
