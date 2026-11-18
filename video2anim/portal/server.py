@@ -211,6 +211,10 @@ def claude_bin():
 STAGE_POD = {
     "mocap":  {"script": "stage1_mocap.sh", "image": "runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404", "gpus": ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB", "NVIDIA H100 PCIe"],
                "disk": 60, "rate": "STAGE1_RATE_USD_HR", "cap": "STAGE1_CAP_USD"},
+    # The cheap mocap: SAM 2 follows each person the owner tapped, 4D-Humans reads each body (~$0.30-0.45 a run).
+    "mocap4dh": {"script": "stage1_4dhumans.sh", "image": "runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404",
+                 "gpus": ["NVIDIA GeForce RTX 4090", "NVIDIA RTX A6000", "NVIDIA L40S", "NVIDIA RTX A5000"],
+                 "disk": 40, "rate": "STAGE1B_RATE_USD_HR", "cap": "STAGE1B_CAP_USD"},
     "render": {"script": "stage2_render_style.sh", "gpus": ["NVIDIA GeForce RTX 4090", "NVIDIA RTX A6000", "NVIDIA L40S"],
                "disk": 80, "rate": "STAGE2_RATE_USD_HR", "cap": "STAGE2_CAP_USD"},
 }
@@ -301,7 +305,15 @@ def run_job(p):
         note("Uploading the latest pipeline code to B2", phase="prep")
         b2("sync", "--no-progress", "--exclude-regex", r"(portal/.*|.*\.zip)", CODE, f"b2://{BUCKET}/code/video2anim")
         b2_write(f"jobs/{job}/status.json", json.dumps({"stage": "queued", "msg": "Waiting for first pod", "ts": int(time.time())}))
-        stages = (["mocap"] if p["mode"] == "full" else []) + ["render"]
+        mocap = "mocap4dh" if p.get("mocap") == "4dhumans" else "mocap"
+        if p["mode"] == "full" and mocap == "mocap4dh":
+            seeds = p.get("seeds") or {}
+            if not [q for q in seeds.get("people", []) if q]:
+                raise RuntimeError("4D-Humans needs each person marked: tap each person on the video first.")
+            if not [f for f in b2_ls("smpl/") if f.lower().endswith((".zip", ".pkl"))]:
+                raise RuntimeError("Upload the SMPL body file first (Mocap section, 'SMPL file').")
+            b2_write(f"jobs/{job}/seeds.json", json.dumps({"t": float(seeds.get("t", 0)), "people": seeds["people"]}))
+        stages = ([mocap] if p["mode"] == "full" else []) + ["render"]
         for stage in stages:
             if S["run"].get("cancel"): break
             led = ledger()
@@ -310,7 +322,8 @@ def run_job(p):
                 raise RuntimeError(f"Budget: ${led['spent']} spent of ${TOTAL}; this stage could pass it.")
             if "balance" in led and led["balance"] < cap_usd + 0.5:
                 raise RuntimeError(f"RunPod balance is ${led['balance']:.2f}, less than this stage's ${cap_usd:.2f} cap. Top up first.")
-            note(f"Starting the {stage} pod on RunPod", phase=stage)
+            phase = "mocap" if stage.startswith("mocap") else stage
+            note(f"Starting the {stage} pod on RunPod", phase=phase)
             pod, cloud = launch(stage, {**job_env, STAGE_POD[stage]["rate"]: str(C[STAGE_POD[stage]["rate"]])})
             pid = pod.get("id"); rate = float(pod.get("cost") or pod.get("costPerHr") or C[STAGE_POD[stage]["rate"]])
             note(f"{stage} pod {pid} started ({cloud.lower()} cloud, ${rate:.2f}/hr)", pod=pid, pod_rate=rate, pod_start=time.time())
@@ -329,7 +342,7 @@ def run_job(p):
 
 def watch(job, stage, pid, rate):
     cap = float(C[STAGE_POD[stage]["cap"]]) + 0.5          # phone-side backstop above the pod's own guard
-    done_key = "mocap_done" if stage == "mocap" else "done"
+    done_key = "mocap_done" if stage.startswith("mocap") else "done"
     gone = 0
     while True:
         time.sleep(15)
@@ -377,6 +390,7 @@ def _refresh():
     lists = {"results": results(S["run"]["job"]) if S["run"] else [],
              "refs": [f for f in b2_ls("refs/") if f.lower().endswith(IMG_EXT)],"characters": [f for f in b2_ls("characters/") if f.lower().endswith((".fbx", ".glb", ".gltf", ".blend"))],
              "bone_maps": b2_ls("bone_maps/"), "loras": [f for f in b2_ls("loras/") if f.endswith(".safetensors")],
+             "smpl": [f for f in b2_ls("smpl/") if f.lower().endswith((".zip", ".pkl"))],
              "videos": b2_ls("input/"), "jobs": b2_ls("jobs/"), "ledger": ledger()}
     try:
         lists["pods"] = [{"id": x.get("id"), "name": x.get("name"), "status": x.get("status") or x.get("desiredStatus"),
@@ -478,6 +492,7 @@ def selftest(pod_test=False, log=print):
                  "listBuckets,listFiles,readFiles,writeFiles", timeout=60).split()
         b2("key", "delete", out[0], timeout=60); return "made and deleted a limited pod key"
     check("Limited pod keys", b2key)
+    check("SMPL body file in B2 (for 4D-Humans mocap)", lambda: ", ".join(f for f in b2_ls("smpl/") if f.lower().endswith((".zip", ".pkl"))) or (_ for _ in ()).throw(RuntimeError("not uploaded yet: Mocap section, 'SMPL body file'")))
     check("LoRAs in B2", lambda: ", ".join(b2_ls("loras/")) or (_ for _ in ()).throw(RuntimeError("no .safetensors in loras/")))
     def hf():
         if not KEYS["HF_TOKEN"]: return "no token (fine if SAM checkpoints are cached in B2)"
@@ -620,7 +635,7 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = parse_qs(u.query)
         if u.path == "/api/upload":                       # raw file body -> B2 input/ characters/ loras/ bone_maps/
             kind = q.get("kind", ["input"])[0]; name = os.path.basename(q.get("name", ["upload.bin"])[0])
-            if kind not in ("input", "characters", "loras", "bone_maps", "refs"): return self.send(400, {"error": "bad kind"})
+            if kind not in ("input", "characters", "loras", "bone_maps", "refs", "smpl"): return self.send(400, {"error": "bad kind"})
             name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
             n = int(self.headers.get("Content-Length", 0))
             tmp = os.path.join(tempfile.gettempdir(), f"up_{int(time.time()*1000)}_{name}")

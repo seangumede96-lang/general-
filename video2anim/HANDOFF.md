@@ -60,3 +60,16 @@ Checked off:
 - Also added portal/pod_guard.sh (fa50b45): a phone-side backstop that deletes v2a-* pods if the portal stops, or after 170 min.
 - Ledger corrected by hand: +$4.42 and +$0.08, total $4.55 of $45.
 
+### 2026-11-18 evening, phone Claude Code: cheaper mocap (owner asked: separate the people, then 4D-Humans)
+- New mocap option, "4D-Humans" (default in New video):
+  - The owner pauses the video in the portal (played locally in the browser, never uploaded for this) and taps each person.
+  - On an RTX 4090-class pod: SAM 2.1 large follows each tapped person, with the other people's taps as negatives. HMR 2.0 (4D-Humans) then reads each body per frame, with the other people blacked out.
+  - Output: jobs/<job>/stage1/joints_p<N>.npz. joints are (T,44,3) in camera axes, metres, plus SMPL rotations, betas and cam_t. Also qc.json, numbers only: frames seen, gaps, jitter, jumps, box overlap.
+- Files:
+  - Portal: STAGE_POD mocap4dh, seeds written to jobs/<job>/seeds.json, upload kind `smpl`, self-test check.
+  - New: stage1_4dhumans.sh, fourdh_track.py, smpl_convert.py (chumpy-free SMPL pickle; tested on stand-in files).
+  - index.html: Mocap chooser, marking panel, SMPL upload.
+- Caps: STAGE1B_* 0.89 USD/h, cap $2.
+- Checked on the phone: page script valid; without SMPL the run stops before any pod. NOT yet run on a GPU: the first real run is the test (~$0.30-0.45). Ask the owner first.
+- Waiting on the owner: free SMPL sign-up at smplify.is.tue.mpg.de, then upload the "SMPLify code and model" .zip in the portal.
+

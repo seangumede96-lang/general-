@@ -53,6 +53,12 @@
   .ref.none{display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mute);font-size:12px;padding:6px}
   .pick{display:flex;align-items:center;gap:10px;background:#0f1115;border:1px dashed var(--line);border-radius:12px;padding:14px;color:var(--ink);width:100%;font:inherit;text-align:left}
   .pick b{color:var(--acc)} .up{margin-top:6px} .up .bar{height:6px}
+  .markwrap{position:relative;margin-top:8px;border-radius:10px;overflow:hidden;background:#000}
+  .markwrap video{display:block;width:100%;max-height:60vh}
+  .markwrap canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+  .markwrap.marking canvas{pointer-events:auto;cursor:crosshair}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px} .row button{flex:1;min-width:90px}
+  .p0{color:#ff5a5a} .p1{color:#4da3ff} .p2{color:#4dd68a} .p3{color:#ffc23d}
 </style>
 </head>
 <body>
@@ -94,6 +100,29 @@
     <label>Video (sealed: sent straight to B2, never viewed)</label>
     <button class="pick" id="pick-video" type="button"><b>＋</b><span id="vname">Choose a video</span></button>
     <div class="up hidden" id="vup"><div class="bar"><i style="width:0"></i></div><div class="mute"></div></div>
+    <h2 style="margin-top:16px">Mocap</h2>
+    <div class="seg" id="mocapsel">
+      <button data-k="4dhumans" class="on" type="button"><b>4D-Humans</b><span>you tap each person · about $0.40</span></button>
+      <button data-k="body4d" type="button"><b>SAM-Body4D</b><span>automatic · slow, $5 or more</span></button>
+    </div>
+    <div id="markbox">
+      <div class="mute">Play the video, pause where the people are clearly apart, tap <b>Mark people here</b>, then tap once on each person
+        (tap a person again to make it surer; <b>Next person</b> between people). Only you see the video, on your phone; it isn't sent anywhere for this.</div>
+      <div class="markwrap" id="mwrap"><video id="mv" playsinline muted controls preload="metadata"></video><canvas id="mc"></canvas></div>
+      <div class="row">
+        <button type="button" id="m-start">Mark people here</button><button type="button" id="m-next">Next person</button>
+        <button type="button" id="m-undo">Undo</button><button type="button" id="m-clear">Clear</button>
+      </div>
+      <div class="mute" id="m-status" style="margin-top:6px">Choose a video first.</div>
+      <label style="margin-top:12px">SMPL body file (once)</label>
+      <div class="mute" id="smplstate"></div>
+      <details><summary>How to get it (free, needs a sign-up)</summary>
+        <div class="mute">1. Register at <b>smplify.is.tue.mpg.de</b> (free for non-commercial use). 2. Under Downloads, get
+          <b>“SMPLify code and model”</b> (a .zip). 3. Upload that .zip here as it is. (The SMPL “for Python” .zip from smpl.is.tue.mpg.de works too.)</div>
+      </details>
+      <input type="file" id="up-smpl" accept=".zip,.pkl">
+      <div class="up hidden" id="sup"><div class="bar"><i style="width:0"></i></div><div class="mute"></div></div>
+    </div>
   </div>
   <div id="f-job" class="hidden"><label>Which earlier video (job)</label><select id="jobsel"></select></div>
   <label>Job name</label><input type="text" id="job" placeholder="e.g. void_dance_01">
@@ -148,6 +177,7 @@
 
 <script>
 const $=id=>document.getElementById(id);
+let mocapKind="4dhumans", marks={t:0, people:[[]]}, curP=0, marking=false;
 let ST=null, mode="full", uploadedVideo="", selRef="", dnTouched=false, descTouched=false, picking=false;
 const last={};   // last rendered JSON per section — only touch the page when something changed
 const changed=(k,v)=>{const j=JSON.stringify(v); if(last[k]===j) return false; last[k]=j; return true;};
@@ -177,10 +207,23 @@ function planHTML(m, cur, failed){
     return `<li class="${cls}"><span class="dot"></span><div><div class="t">${s.t}</div><div class="d">${s.d}</div></div><span class="c">${cls==="s-skip"?"skipped":"~"+money(c)}</span></li>`;
   }).join("");
 }
+// The two mocap methods differ in what the mocap steps say and cost.
+function mocapSteps(){
+  const set=(k,t,d,c)=>{const s=STEPS.find(x=>x.k===k); s.t=t; s.d=d; s.cost=c;};
+  if(mocapKind==="4dhumans"){ set("mocap_setup","Start mocap pod (RTX 4090)","Install SAM 2 + 4D-Humans, models from B2",0.12);
+    set("mocap_run","Extract each person's skeleton","SAM 2 follows each person you tapped, 4D-Humans reads each body",0.25); }
+  else { set("mocap_setup","Start mocap pod (A100 80GB)","Install SAM-Body4D, load checkpoints from B2",0.45);
+    set("mocap_run","Extract the skeleton","SAM-Body4D tracks every body in the clip (slow)",4.5); }
+}
 const estimate=m=>STEPS.filter(s=>s.modes.includes(m)).reduce((a,s)=>a+(s.k==="style"&&m==="preview"?s.cost/10:s.cost),0);
 const usingModel=()=>$("adv3d").open && $("char").value;
 
 function renderNew(){
+  mocapSteps();
+  document.querySelectorAll("#mocapsel button").forEach(b=>b.classList.toggle("on",b.dataset.k===mocapKind));
+  $("markbox").classList.toggle("hidden",mocapKind!=="4dhumans");
+  const sm=(ST&&ST.lists&&ST.lists.smpl)||[];
+  $("smplstate").innerHTML=sm.length?`<span class="ok">In B2: ${esc(sm[0])}</span>`:'<span class="warn">Not uploaded yet: needed once for 4D-Humans.</span>';
   document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.m===mode));
   $("f-video").classList.toggle("hidden",mode!=="full");
   $("f-job").classList.toggle("hidden",mode==="full");
@@ -192,6 +235,35 @@ function renderNew(){
     :"With the mannequin, 0.55–0.7 turns it into your character. Higher = closer to the reference, more flicker.";
 }
 document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>{mode=b.dataset.m;renderNew();});
+document.querySelectorAll("#mocapsel button").forEach(b=>b.onclick=()=>{mocapKind=b.dataset.k;renderNew();});
+
+// ---------- marking each person on the video (all in this browser; the video never leaves the phone for this) ----------
+const COLS=["#ff5a5a","#4da3ff","#4dd68a","#ffc23d"];
+function videoBox(){ // where the picture actually is inside the <video> element (letterboxing)
+  const v=$("mv"), w=v.clientWidth, h=v.clientHeight, vw=v.videoWidth||w, vh=v.videoHeight||h, k=Math.min(w/vw,h/vh);
+  return {x:(w-vw*k)/2, y:(h-vh*k)/2, w:vw*k, h:vh*k, cw:w, ch:h};
+}
+function drawMarks(){
+  const c=$("mc"), b=videoBox(); c.width=b.cw; c.height=b.ch; const g=c.getContext("2d"); g.clearRect(0,0,c.width,c.height);
+  marks.people.forEach((pts,i)=>pts.forEach(([x,y])=>{ g.fillStyle=COLS[i%4]; g.strokeStyle="#fff"; g.lineWidth=2;
+    g.beginPath(); g.arc(b.x+x*b.w,b.y+y*b.h,9,0,7); g.fill(); g.stroke();
+    g.fillStyle="#fff"; g.font="bold 11px sans-serif"; g.fillText(String(i+1),b.x+x*b.w-3,b.y+y*b.h+4); }));
+  const n=marks.people.filter(p=>p.length).length;
+  $("m-status").innerHTML=!$("mv").src?"Choose a video first.":
+    (marking?`Marking on the frame at ${marks.t.toFixed(2)} s. Now tapping <b class="p${curP%4}">person ${curP+1}</b>. `:"")+
+    (n?marks.people.map((p,i)=>p.length?`<span class="p${i%4}">Person ${i+1}: ${p.length} tap${p.length>1?"s":""}</span>`:"").filter(Boolean).join(" · "):"No one marked yet.");
+}
+$("m-start").onclick=()=>{ const v=$("mv"); if(!v.src) return; v.pause(); v.controls=false; marking=true;
+  if(Math.abs(v.currentTime-marks.t)>0.04){ marks={t:v.currentTime, people:[[]]}; curP=0; }
+  $("mwrap").classList.add("marking"); drawMarks(); };
+$("mc").addEventListener("pointerdown",e=>{ if(!marking) return; const r=$("mc").getBoundingClientRect(), b=videoBox();
+  const x=(e.clientX-r.left-b.x)/b.w, y=(e.clientY-r.top-b.y)/b.h; if(x<0||x>1||y<0||y>1) return;
+  (marks.people[curP] ||= []).push([+x.toFixed(4),+y.toFixed(4)]); drawMarks(); });
+$("m-next").onclick=()=>{ if(!marking||!(marks.people[curP]||[]).length) return; curP++; marks.people[curP] ||= []; drawMarks(); };
+$("m-undo").onclick=()=>{ const p=marks.people[curP]; if(p&&p.length) p.pop(); else if(curP>0){ marks.people.pop(); curP--; } drawMarks(); };
+$("m-clear").onclick=()=>{ marks={t:$("mv").currentTime||0, people:[[]]}; curP=0; marking=false; $("mv").controls=true; $("mwrap").classList.remove("marking"); drawMarks(); };
+$("mv").addEventListener("loadedmetadata",drawMarks); window.addEventListener("resize",drawMarks);
+$("up-smpl").onchange=async e=>{ picking=false; const f=e.target.files[0]; if(!f) return; await upload(f,"smpl",$("sup")); poll(); };
 $("dn").oninput=()=>{dnTouched=true;renderNew();};
 $("adv3d").ontoggle=renderNew; $("char").onchange=()=>{renderNew();bmWarn();};
 $("desc").oninput=()=>{descTouched=true;};
@@ -214,6 +286,8 @@ function openPicker(input){ picking=true; input.value=""; input.click(); setTime
 $("pick-video").onclick=()=>openPicker($("video"));
 $("video").onchange=async e=>{ picking=false; const f=e.target.files[0]; if(!f) return;
   $("vname").textContent=f.name;
+  const v=$("mv"); if(v.src) URL.revokeObjectURL(v.src); v.src=URL.createObjectURL(f); v.controls=true;
+  marks={t:0, people:[[]]}; curP=0; marking=false; $("mwrap").classList.remove("marking"); drawMarks();
   if(!$("job").value) $("job").value=f.name.replace(/\.[^.]+$/,"").replace(/[^A-Za-z0-9_-]/g,"_");
   uploadedVideo=await upload(f,"input",$("vup")); };
 $("refimg").onchange=async e=>{ picking=false; const f=e.target.files[0]; if(!f) return;
@@ -253,8 +327,13 @@ $("go").onclick=async()=>{
   const look=$("prompt").value.trim(), desc=$("desc").value.trim();
   const body={mode, job:$("job").value || $("jobsel").value, video:uploadedVideo, character:usingModel()?$("char").value:"",
     ref:selRef, lora:$("lora").value, prompt:[look,desc].filter(Boolean).join(", "), style_tag:$("tag").value||"v1",
-    denoise:+$("dn").value, preview_every:mode==="preview"?10:1};
+    denoise:+$("dn").value, preview_every:mode==="preview"?10:1,
+    mocap:mocapKind, seeds:{t:marks.t, people:marks.people.filter(p=>p.length)}};
   if(mode==="full"&&!uploadedVideo) return $("goerr").textContent="Choose a video first.";
+  if(mode==="full"&&mocapKind==="4dhumans"){
+    if(!body.seeds.people.length) return $("goerr").textContent="Mark the people first: pause the video, tap Mark people here, tap each person.";
+    if(!((ST&&ST.lists&&ST.lists.smpl)||[]).length) return $("goerr").textContent="Upload the SMPL body file first (under Mocap).";
+  }
   if(!usingModel()&&!selRef&&!desc) return $("goerr").textContent="Pick a reference image (or describe the character).";
   if(!body.lora) return $("goerr").textContent="Pick a LoRA (upload one under Look if the list is empty).";
   $("go").disabled=true;
@@ -286,6 +365,7 @@ function renderState(){
     $("t-quick").disabled=$("t-pod").disabled=T.state==="running"; }
   if(changed("ver",ST.version)) $("ver").textContent=ST.version?`Version: ${ST.version} · updates itself from GitHub`:"";
   fill($("char"),L.characters||[],"char","(no rigged models uploaded)"); fill($("lora"),L.loras||[],"lora","(no LoRAs in B2 yet: upload one)");
+  if(changed("smpl",(ST.lists||{}).smpl||[])) renderNew();
   fill($("jobsel"),L.jobs||[],"jobs","(no earlier videos yet)"); bmWarn();
   if(!$("prompt").value && ST.config && !last.promptSet){ $("prompt").value=(ST.config.STYLE_PROMPT||"").replace(/,?\s*pure white background/,""); last.promptSet=1; }
   drawRefs(false);
