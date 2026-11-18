@@ -21,6 +21,8 @@ class _Stub:
 class _Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
         if module.startswith("chumpy"): return _Stub
+        # old SciPy paths (scipy.sparse.csc ...) are being retired: the classes live in scipy.sparse
+        if module.startswith("scipy.sparse."): module = "scipy.sparse"
         return super().find_class(module, name)
 
 
