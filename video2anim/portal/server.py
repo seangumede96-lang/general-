@@ -12,6 +12,39 @@ Keys come from the environment you already set up in Termux:
 import json, os, re, shutil, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
+import socket
+
+# ---- phone DNS sometimes can't find a host (e.g. rest.runpod.io) while others work.
+# Fall back to DNS-over-HTTPS by IP (Cloudflare, Google), so no DNS lookup is needed for the fallback itself.
+# TLS still checks the real hostname's certificate.
+_orig_gai = socket.getaddrinfo
+_doh_cache = {}
+
+
+def _doh(host):
+    for url in ("https://1.1.1.1/dns-query?name={}&type=A", "https://8.8.8.8/resolve?name={}&type=A"):
+        try:
+            req = urllib.request.Request(url.format(host), headers={"accept": "application/dns-json"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                ips = [a["data"] for a in json.load(r).get("Answer", []) if a.get("type") == 1]
+            if ips: return ips
+        except Exception:
+            pass
+    return []
+
+
+def _gai(host, *a, **k):
+    try:
+        return _orig_gai(host, *a, **k)
+    except socket.gaierror:
+        if not host or re.match(r"^[\d.:]+$", str(host)): raise
+        ips = _doh_cache.get(host) or _doh(host)
+        if not ips: raise
+        _doh_cache[host] = ips
+        return _orig_gai(ips[0], *a, **k)
+
+
+socket.getaddrinfo = _gai
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CODE = os.path.dirname(HERE)                       # the video2anim folder
@@ -96,6 +129,9 @@ def rp(method, path, body=None):
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"RunPod {e.code}: {e.read().decode()[:300]}")
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            never_sent = isinstance(getattr(e, "reason", None), socket.gaierror)   # name lookup failed: nothing reached RunPod
+            if never_sent and attempt < 3:
+                time.sleep(3 * (attempt + 1)); continue
             # Never repeat a pod start: the first request may have reached RunPod, and a second
             # would rent (and charge for) another GPU.
             if method == "POST" and path == "/pods":
@@ -103,6 +139,35 @@ def rp(method, path, body=None):
             if attempt == 3:
                 raise RuntimeError(f"Couldn't reach RunPod (phone internet dropped?): {getattr(e, 'reason', e)}")
             time.sleep(3 * (attempt + 1))
+
+
+def runpod_balance():
+    """Real account balance from RunPod (GraphQL `myself`)."""
+    req = urllib.request.Request("https://api.runpod.io/graphql", method="POST",
+                                 data=json.dumps({"query": "query { myself { clientBalance currentSpendPerHr } }"}).encode(),
+                                 headers={"Authorization": f"Bearer {KEYS['RUNPOD_API_KEY']}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        d = json.load(r)
+    me = (d.get("data") or {}).get("myself") or {}
+    if "clientBalance" not in me: raise RuntimeError(str(d.get("errors") or d)[:200])
+    return {"balance": round(float(me["clientBalance"]), 2), "spend_per_hr": round(float(me.get("currentSpendPerHr") or 0), 2)}
+
+
+def claude_bin():
+    """Find Claude Code even when the portal was started at boot with a bare PATH."""
+    cands = [os.environ.get("CLAUDE_BIN", ""), shutil.which("claude") or ""]
+    home = os.path.expanduser("~"); pre = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    cands += [f"{home}/.local/bin/claude", f"{home}/.claude/local/claude", f"{home}/.npm-global/bin/claude",
+              "/usr/local/bin/claude", "/usr/bin/claude", f"{pre}/bin/claude", "/root/.local/bin/claude"]
+    cands += sorted(__import__("glob").glob(f"{home}/.nvm/versions/node/*/bin/claude"))
+    for c in cands:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK): return c
+    try:   # last resort: ask a login shell, which loads the user's PATH
+        out = subprocess.run(["bash", "-lc", "command -v claude"], capture_output=True, text=True, timeout=15).stdout.strip()
+        if out: return out
+    except Exception: pass
+    raise RuntimeError("Claude Code ('claude') isn't installed where the portal can find it. "
+                       "Set CLAUDE_BIN in ~/.cloud-keys/credentials.env to its full path.")
 
 
 STAGE_POD = {
@@ -174,7 +239,12 @@ def ledger():
     txt = b2_read("ledger/ledger.csv") or "date,job,stage,usd\n"
     rows = [l.split(",") for l in txt.strip().splitlines()[1:] if l.count(",") >= 3]
     spent = round(sum(float(r[3]) for r in rows), 2)
-    return {"spent": spent, "remaining": round(TOTAL - spent, 2), "total": TOTAL, "rows": rows[-15:]}
+    out = {"spent": spent, "remaining": round(TOTAL - spent, 2), "total": TOTAL, "rows": rows[-15:]}
+    try:
+        out.update(runpod_balance())                 # the real money in the RunPod account
+    except Exception as e:
+        out["balance_error"] = str(e)[:200]
+    return out
 
 
 def run_job(p):
@@ -204,8 +274,11 @@ def run_job(p):
         for stage in stages:
             if S["run"].get("cancel"): break
             led = ledger()
-            if led["spent"] + float(C[STAGE_POD[stage]["cap"]]) > TOTAL:
+            cap_usd = float(C[STAGE_POD[stage]["cap"]])
+            if led["spent"] + cap_usd > TOTAL:
                 raise RuntimeError(f"Budget: ${led['spent']} spent of ${TOTAL}; this stage could pass it.")
+            if "balance" in led and led["balance"] < cap_usd + 0.5:
+                raise RuntimeError(f"RunPod balance is ${led['balance']:.2f}, less than this stage's ${cap_usd:.2f} cap. Top up first.")
             note(f"Starting the {stage} pod on RunPod", phase=stage)
             pod, cloud = launch(stage, {**job_env, STAGE_POD[stage]["rate"]: str(C[STAGE_POD[stage]["rate"]])})
             pid = pod.get("id"); rate = float(pod.get("costPerHr") or C[STAGE_POD[stage]["rate"]])
@@ -215,6 +288,10 @@ def run_job(p):
         else: note("All done — your video is in Results", phase="done")
     except Exception as e:
         note(f"Problem: {e}", phase="failed", error=str(e), failed_at=S["run"].get("phase"))
+        try:   # keep the details in your private B2 bucket, for Claude Code to read when fixing
+            b2_write("reports/last_failure.json", json.dumps({"run": S["run"], "status": S["status"],
+                     "log_tail": (S["log"] or "")[-6000:]}, indent=1, default=str))
+        except Exception: pass
     finally:
         refresh_lists(force=True)
 
@@ -296,7 +373,7 @@ def ask_claude():
               "Do not start any pods yourself. Never open or view the input video.")
     S["claude"] = {"state": "running", "text": "Claude is looking at the log…"}
     try:
-        res = subprocess.run(["claude", "-p", prompt, "--permission-mode", "acceptEdits",
+        res = subprocess.run([claude_bin(), "-p", prompt, "--permission-mode", "acceptEdits",
                               "--allowedTools", "Read,Edit,Write,Grep,Glob,Bash(bash -n:*),Bash(python3 -m py_compile:*)"],
                              cwd=CODE, capture_output=True, text=True, timeout=900)
         S["claude"] = {"state": "done", "text": (res.stdout or res.stderr).strip()[-3000:]}
@@ -312,7 +389,7 @@ def describe_ref(name, path):
               "face, hair style and colour, every piece of clothing with colours and materials, accessories, and the art style. "
               "Output only the prompt.")
     try:
-        r = subprocess.run(["claude", "-p", prompt, "--allowedTools", "Read"], capture_output=True, text=True, timeout=300)
+        r = subprocess.run([claude_bin(), "-p", prompt, "--allowedTools", "Read"], capture_output=True, text=True, timeout=300)
         text = (r.stdout or "").strip()
         if not text: raise RuntimeError((r.stderr or "no answer").strip()[-300:])
         S["ref_desc"][name] = {"state": "done", "text": text}
@@ -334,6 +411,107 @@ def push_upload(kind, name, tmp):
     finally:
         os.path.exists(tmp) and os.remove(tmp)
         refresh_lists(force=True)
+
+
+# ---------------- self-test (real accounts, on this phone) ----------------
+def selftest(pod_test=False, log=print):
+    res = []
+    def check(name, fn):
+        t0 = time.time()
+        try: detail = fn() or "ok"; ok = True
+        except Exception as e: detail = str(e)[:300]; ok = False
+        res.append({"name": name, "ok": ok, "detail": str(detail), "secs": round(time.time() - t0, 1)})
+        log(("PASS " if ok else "FAIL ") + name + ": " + str(detail)); S["selftest"] = {"state": "running", "results": res}
+    def keys():
+        miss = [k for k, v in KEYS.items() if not v]
+        if miss: raise RuntimeError("missing: " + ", ".join(miss))
+    check("Keys loaded", keys)
+    for host in ("rest.runpod.io", "api.runpod.io", "api.backblazeb2.com", "huggingface.co"):
+        def dns(h=host):
+            try: _orig_gai(h, 443); return "phone DNS ok"
+            except socket.gaierror:
+                ips = _doh(h)
+                if not ips: raise RuntimeError("not found by phone DNS or the DNS-over-HTTPS fallback")
+                return f"phone DNS failed; fallback found {ips[0]} (portal will use it)"
+        check(f"Find {host}", dns)
+    check("RunPod key works (list pods)", lambda: f"{len(rp('GET', '/pods') or [])} pods on the account")
+    check("RunPod balance", lambda: "${balance} left, spending ${spend_per_hr}/hr now".format(**runpod_balance()))
+    def b2rw():
+        name = f"selftest/{int(time.time())}.txt"; b2_write(name, "hello")
+        got = b2_read(name); b2("rm", f"b2://{BUCKET}/{name}", timeout=60)
+        if got != "hello": raise RuntimeError("wrote a test file but couldn't read it back")
+        return "write, read and delete ok"
+    check("Backblaze B2 read/write", b2rw)
+    def b2key():
+        out = b2("key", "create", "--bucket", BUCKET, "--duration", "600", "v2a-selftest",
+                 "listBuckets,listFiles,readFiles,writeFiles", timeout=60).split()
+        b2("key", "delete", out[0], timeout=60); return "made and deleted a limited pod key"
+    check("Limited pod keys", b2key)
+    check("LoRAs in B2", lambda: ", ".join(b2_ls("loras/")) or (_ for _ in ()).throw(RuntimeError("no .safetensors in loras/")))
+    def hf():
+        if not KEYS["HF_TOKEN"]: return "no token (fine if SAM checkpoints are cached in B2)"
+        req = urllib.request.Request("https://huggingface.co/api/whoami-v2", headers={"Authorization": f"Bearer {KEYS['HF_TOKEN']}"})
+        with urllib.request.urlopen(req, timeout=30) as r: return "token ok for " + json.load(r).get("name", "?")
+    check("Hugging Face token", hf)
+    def cl():
+        b = claude_bin()
+        r = subprocess.run([b, "-p", "Reply with exactly: OK"], capture_output=True, text=True, timeout=180)
+        if "OK" not in r.stdout: raise RuntimeError((r.stderr or r.stdout).strip()[-200:] or "no reply")
+        return f"{b} answered"
+    check("Claude Code runs headless", cl)
+    if pod_test:
+        def pod():
+            pod = rp("POST", "/pods", {"name": "v2a-selftest", "imageName": "runpod/base:0.6.2-cpu", "gpuTypeIds":
+                     ["NVIDIA RTX A4000", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 3090", "NVIDIA GeForce RTX 4090"],
+                     "gpuCount": 1, "cloudType": "SECURE", "containerDiskInGb": 10, "volumeInGb": 0,
+                     "dockerStartCmd": ["bash", "-c", "sleep 300"]})
+            pid = pod.get("id"); t0 = time.time()
+            try:
+                while time.time() - t0 < 240:
+                    info = rp("GET", f"/pods/{pid}")
+                    if info.get("desiredStatus") == "RUNNING" and (info.get("runtime") or info.get("publicIp") or time.time() - t0 > 60):
+                        break
+                    time.sleep(10)
+                return f"pod {pid} started in {int(time.time()-t0)}s at ${pod.get('costPerHr', '?')}/hr"
+            finally:
+                rp("DELETE", f"/pods/{pid}")
+                time.sleep(5)
+                left = [p for p in (rp("GET", "/pods") or []) if p.get("id") == pid and p.get("desiredStatus") != "TERMINATED"]
+                if left: raise RuntimeError(f"pod {pid} may still exist: delete it in the RunPod app!")
+        check("Start + delete a real GPU pod (~$0.01)", pod)
+    S["selftest"] = {"state": "done", "results": res, "ts": int(time.time())}
+    b2_write(f"reports/selftest_{'pod' if pod_test else 'quick'}.json", json.dumps(S["selftest"], indent=1))
+    return res
+
+
+# ---------------- auto-update from GitHub ----------------
+REPO = os.path.dirname(CODE)
+
+
+def git(*a):
+    return subprocess.run(["git", "-C", REPO, *a], capture_output=True, text=True, timeout=120)
+
+
+def auto_update():
+    """Pull new code from GitHub every 3 minutes. When it changed and nothing is running, restart
+    with it, so changes from any Claude session reach the phone without copy-pasting."""
+    while True:
+        time.sleep(180)
+        try:
+            if git("rev-parse", "--git-dir").returncode: continue
+            before = git("rev-parse", "HEAD").stdout.strip()
+            git("pull", "--ff-only", "-q")
+            after = git("rev-parse", "HEAD").stdout.strip()
+            S["version"] = git("log", "-1", "--format=%h %s (%cr)").stdout.strip()
+            if after != before:
+                with lock: busy = S["run"] and S["run"].get("phase") in ("prep", "mocap", "render")
+                S["pending_restart"] = True
+                while busy:
+                    time.sleep(30)
+                    with lock: busy = S["run"] and S["run"].get("phase") in ("prep", "mocap", "render")
+                save(); os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as e:
+            S["update_error"] = str(e)[:200]
 
 
 # ---------------- HTTP ----------------
@@ -364,6 +542,7 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"run": r, "status": S["status"], "log": S["log"], "lists": S["lists"],
                                    "results": S["lists"].get("results", []), "claude": S["claude"],
                                    "uploads": S["uploads"], "ref_desc": S["ref_desc"],
+                                   "selftest": S.get("selftest"), "version": S.get("version"),
                                    "config": {k: C[k] for k in C if not k.startswith("B2_")}, "missing_keys": missing,
                                    "now": int(time.time())})
         if u.path == "/api/ref":                          # thumbnail of a reference image
@@ -440,12 +619,22 @@ class H(BaseHTTPRequestHandler):
                 if (pod.get("name") or "").startswith("v2a-"): kill(pod["id"])
             refresh_lists(force=True)
             return self.send(200, {"ok": True})
+        if u.path == "/api/selftest":
+            if (S.get("selftest") or {}).get("state") == "running": return self.send(409, {"error": "already running"})
+            S["selftest"] = {"state": "running", "results": []}
+            threading.Thread(target=selftest, kwargs={"pod_test": q.get("pod", ["0"])[0] == "1"}, daemon=True).start()
+            return self.send(200, {"ok": True})
         if u.path == "/api/ask_claude":
             threading.Thread(target=ask_claude, daemon=True).start(); return self.send(200, {"ok": True})
         self.send(404, {"error": "not found"})
 
 
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:          # python3 portal/server.py --selftest [--pod]
+        r = selftest(pod_test="--pod" in sys.argv)
+        sys.exit(0 if all(x["ok"] for x in r) else 1)
+    S["version"] = git("log", "-1", "--format=%h %s (%cr)").stdout.strip() if os.path.isdir(os.path.join(REPO, ".git")) else ""
+    threading.Thread(target=auto_update, daemon=True).start()
     if not shutil.which("b2"): sys.exit("Install the B2 CLI first: pip install b2")
     if S["run"] and S["run"].get("phase") in ("mocap", "render") and S["run"].get("pod"):
         # resume watching after a phone restart

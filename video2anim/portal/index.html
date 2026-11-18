@@ -61,8 +61,8 @@
 <div class="card" id="keys" style="display:none"></div>
 
 <div class="card">
-  <h2>Budget</h2>
-  <div class="row"><div class="big" id="b-left">$—</div><div class="mute" id="b-sub">left of $45</div></div>
+  <h2>RunPod balance</h2>
+  <div class="row"><div class="big" id="b-left">$—</div><div class="mute" id="b-sub">in your RunPod account</div></div>
   <div class="bar" style="margin:10px 0 6px"><i id="b-bar" style="width:0"></i></div>
   <div class="mute" id="b-runs"></div>
 </div>
@@ -133,6 +133,14 @@
 <div class="card" id="res"><h2>Results</h2><div id="reslist" class="mute">Nothing yet.</div></div>
 
 <div class="card"><h2>Pods on your RunPod account</h2><div id="pods" class="mute">—</div></div>
+
+<div class="card"><h2>Check everything works</h2>
+  <div class="mute">Tests your real accounts from this phone: keys, internet, RunPod, B2, LoRAs, Hugging Face and Claude Code.</div>
+  <button class="btn ghost" id="t-quick">Quick check (free)</button>
+  <button class="btn ghost" id="t-pod">Full check: also start &amp; delete a real GPU pod (~$0.01)</button>
+  <div id="tests"></div>
+  <div class="mute" id="ver" style="margin-top:10px"></div>
+</div>
 
 <!-- hidden pickers: created once, opened by the buttons above -->
 <input type="file" id="video" accept="video/*" class="hidden">
@@ -253,6 +261,8 @@ $("go").onclick=async()=>{
   const r=await fetch("/api/start",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
   $("go").disabled=false; if(!j.ok) $("goerr").textContent=j.error; else { last.run=null; poll(); window.scrollTo(0,0); }
 };
+$("t-quick").onclick=()=>fetch("/api/selftest",{method:"POST"}).then(poll);
+$("t-pod").onclick=()=>{ if(confirm("Start and delete a real GPU pod? Costs about one US cent.")) fetch("/api/selftest?pod=1",{method:"POST"}).then(poll); };
 $("stop").onclick=async()=>{ if(confirm("Stop the run and delete every video2anim pod?")){ await fetch("/api/stop",{method:"POST"}); poll(); } };
 
 function fill(sel, items, key, empty){ if(!changed("sel_"+key,items)) return; const v=sel.value;
@@ -264,9 +274,17 @@ function renderState(){
   if(changed("keys",ST.missing_keys)){ const m=ST.missing_keys||[];
     $("keys").style.display=m.length?"":"none";
     $("keys").innerHTML=m.length?`<b class="warn">Keys not found:</b> ${m.join(", ")}<div class="mute">Start the portal from the Termux shell where your keys load.</div>`:""; }
-  if(led && changed("led",led)){ $("b-left").textContent=money(led.remaining); $("b-sub").textContent=`left of ${money(led.total)} · ${money(led.spent)} spent`;
+  if(led && changed("led",led)){
+    const real = led.balance!=null, left = real ? led.balance : led.remaining;
+    $("b-left").textContent = money(left);
+    $("b-sub").innerHTML = real ? `in your RunPod account${led.spend_per_hr>0?` · <span class="warn">spending ${money(led.spend_per_hr)}/hr now</span>`:""}`
+                                : `<span class="warn">couldn't read RunPod (${esc(led.balance_error||"")}); showing pipeline budget</span>`;
     $("b-bar").style.width=Math.min(100,led.spent/led.total*100)+"%";
-    $("b-runs").textContent=`≈ ${Math.floor(led.remaining/estimate("full"))} new videos, or ≈ ${Math.floor(led.remaining/estimate("restyle"))} new looks left`; }
+    $("b-runs").textContent=`video2anim has spent ${money(led.spent)} of its ${money(led.total)} budget · ≈ ${Math.floor(Math.min(left,led.remaining)/estimate("full"))} new videos or ≈ ${Math.floor(Math.min(left,led.remaining)/estimate("restyle"))} new looks left`; }
+  const T=ST.selftest;
+  if(changed("tests",T) && T){ $("tests").innerHTML=(T.results||[]).map(r=>`<div class="ev"><span class="${r.ok?"ok":"bad"}">${r.ok?"✓":"✗"}</span> <b>${esc(r.name)}</b> · ${esc(r.detail)}</div>`).join("")+(T.state==="running"?'<div class="mute">Checking…</div>':"");
+    $("t-quick").disabled=$("t-pod").disabled=T.state==="running"; }
+  if(changed("ver",ST.version)) $("ver").textContent=ST.version?`Version: ${ST.version} · updates itself from GitHub`:"";
   fill($("char"),L.characters||[],"char","(no rigged models uploaded)"); fill($("lora"),L.loras||[],"lora","(no LoRAs in B2 yet: upload one)");
   fill($("jobsel"),L.jobs||[],"jobs","(no earlier videos yet)"); bmWarn();
   if(!$("prompt").value && ST.config && !last.promptSet){ $("prompt").value=(ST.config.STYLE_PROMPT||"").replace(/,?\s*pure white background/,""); last.promptSet=1; }
