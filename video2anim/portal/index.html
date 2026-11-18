@@ -285,7 +285,9 @@ function renderState(){
   if(R && changed("run",[R,S,ST.log,ST.claude])){
     $("l-job").textContent=R.job+" · "+R.mode;
     const failed=R.phase==="failed";
-    let cur = R.phase==="prep" ? (R.mode==="full"?"upload":"render_setup") : (S.stage&&S.stage!=="queued"?S.stage:(R.phase==="mocap"?"mocap_setup":"render_setup"));
+    const ph = failed ? (R.failed_at||"prep") : R.phase;   // where it actually stopped
+    let cur = (S.stage&&!["queued","failed"].includes(S.stage)) ? S.stage
+            : ph==="prep" ? (R.mode==="full"?"upload":"render_setup") : ph==="mocap" ? "mocap_setup" : "render_setup";
     if(R.phase==="done") cur="done";
     $("l-plan").innerHTML=planHTML(R.mode,cur,failed);
     $("l-msg").innerHTML = R.phase==="done" ? `<span class="ok">Finished.</span> Your video is in Results.` :

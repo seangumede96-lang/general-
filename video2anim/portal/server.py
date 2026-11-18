@@ -89,11 +89,16 @@ def rp(method, path, body=None):
                                  data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Authorization": f"Bearer {KEYS['RUNPOD_API_KEY']}",
                                           "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            t = r.read().decode(); return json.loads(t) if t else {}
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"RunPod {e.code}: {e.read().decode()[:300]}")
+    for attempt in range(4):              # phone data drops out now and then: retry before giving up
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                t = r.read().decode(); return json.loads(t) if t else {}
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"RunPod {e.code}: {e.read().decode()[:300]}")
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            if attempt == 3:
+                raise RuntimeError(f"Couldn't reach RunPod (phone internet dropped?): {getattr(e, 'reason', e)}")
+            time.sleep(3 * (attempt + 1))
 
 
 STAGE_POD = {
@@ -112,7 +117,8 @@ def pod_keys(stage, job):
     (read-only) only goes to the mocap stage, for the gated SAM models when they aren't cached in B2."""
     hours = float(C[STAGE_POD[stage]["cap"]]) / float(C[STAGE_POD[stage]["rate"]]) + 1
     out = b2("key", "create", "--bucket", BUCKET, "--duration", str(int(hours * 3600)),
-             f"v2a-{stage}-{job}"[:50], "listBuckets,listFiles,readFiles,writeFiles", timeout=60).split()
+             re.sub(r"[^A-Za-z0-9-]", "-", f"v2a-{stage}-{job}")[:50],   # B2 key names: letters, digits, '-' only
+             "listBuckets,listFiles,readFiles,writeFiles", timeout=60).split()
     if len(out) < 2: raise RuntimeError("Couldn't make a limited Backblaze key for the pod")
     keys = {"B2_APPLICATION_KEY_ID": out[0], "B2_APPLICATION_KEY": out[1]}
     if stage == "mocap" and KEYS["HF_TOKEN"]: keys["HF_TOKEN"] = KEYS["HF_TOKEN"]
@@ -204,7 +210,7 @@ def run_job(p):
         if S["run"].get("cancel"): note("Run stopped by you", phase="stopped")
         else: note("All done — your video is in Results", phase="done")
     except Exception as e:
-        note(f"Problem: {e}", phase="failed", error=str(e))
+        note(f"Problem: {e}", phase="failed", error=str(e), failed_at=S["run"].get("phase"))
     finally:
         refresh_lists(force=True)
 
