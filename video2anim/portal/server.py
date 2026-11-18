@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""video2anim portal — runs on your phone (Termux), opens in the phone browser.
+
+  python3 portal/server.py         then open http://127.0.0.1:8090
+
+You press Start; this server uploads the code to B2, starts each RunPod pod in turn,
+watches the live status each pod writes to B2, deletes pods that overrun, and shows
+everything (stage, progress, spend, log, results) on one page. Standard library only.
+Keys come from the environment you already set up in Termux:
+  RUNPOD_API_KEY, B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY, HF_TOKEN
+"""
+import json, os, re, shutil, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs, quote
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CODE = os.path.dirname(HERE)                       # the video2anim folder
+STATE_FILE = os.path.expanduser("~/.v2a_portal_state.json")
+PORT = int(os.environ.get("V2A_PORT", 8090))
+
+
+def cfg():
+    """Read config.env defaults (simple KEY=value / KEY="${KEY:-value}")."""
+    out = {}
+    for line in open(os.path.join(CODE, "config.env")):
+        m = re.match(r'^([A-Z0-9_]+)=("?)(.*?)\2(\s+#.*)?$', line.strip())
+        if m:
+            v = m.group(3)
+            d = re.match(r'^\$\{[A-Z0-9_]+:-(.*)\}$', v)
+            out[m.group(1)] = d.group(1) if d else v
+    return out
+
+
+C = cfg()
+BUCKET = C["B2_BUCKET"]
+TOTAL = float(C["TOTAL_BUDGET_USD"])
+
+
+def env(*names):
+    for n in names:
+        if os.environ.get(n): return os.environ[n]
+    return ""
+
+
+KEYS = {
+    "RUNPOD_API_KEY": env("RUNPOD_API_KEY"),
+    "B2_APPLICATION_KEY_ID": env("B2_APPLICATION_KEY_ID", "B2_KEY_ID"),
+    "B2_APPLICATION_KEY": env("B2_APPLICATION_KEY", "B2_APP_KEY"),
+    "HF_TOKEN": env("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"),
+}
+os.environ.setdefault("B2_APPLICATION_KEY_ID", KEYS["B2_APPLICATION_KEY_ID"])
+os.environ.setdefault("B2_APPLICATION_KEY", KEYS["B2_APPLICATION_KEY"])
+
+# ---------------- B2 helpers (b2 CLI) ----------------
+def b2(*args, timeout=600):
+    r = subprocess.run(["b2", *args], capture_output=True, text=True, timeout=timeout)
+    if r.returncode: raise RuntimeError((r.stderr or r.stdout).strip()[-400:])
+    return r.stdout
+
+
+def b2_ls(prefix):
+    try:
+        out = b2("ls", f"b2://{BUCKET}/{prefix}")
+        return [l.strip().rstrip("/").split("/")[-1] for l in out.splitlines() if l.strip()]
+    except Exception:
+        return []
+
+
+def b2_read(path):
+    fd, tmp = tempfile.mkstemp(); os.close(fd)
+    try:
+        b2("file", "download", "--no-progress", f"b2://{BUCKET}/{path}", tmp, timeout=60)
+        return open(tmp, encoding="utf-8", errors="replace").read()
+    except Exception:
+        return None
+    finally:
+        os.path.exists(tmp) and os.remove(tmp)
+
+
+def b2_write(path, text):
+    fd, tmp = tempfile.mkstemp(); os.write(fd, text.encode()); os.close(fd)
+    try: b2("file", "upload", "--no-progress", "--quiet", BUCKET, tmp, path, timeout=60)
+    finally: os.remove(tmp)
+
+
+# ---------------- RunPod REST ----------------
+def rp(method, path, body=None):
+    req = urllib.request.Request("https://rest.runpod.io/v1" + path, method=method,
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Authorization": f"Bearer {KEYS['RUNPOD_API_KEY']}",
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            t = r.read().decode(); return json.loads(t) if t else {}
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"RunPod {e.code}: {e.read().decode()[:300]}")
+
+
+STAGE_POD = {
+    "mocap":  {"script": "stage1_mocap.sh", "gpus": ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB", "NVIDIA H100 PCIe"],
+               "disk": 60, "rate": "STAGE1_RATE_USD_HR", "cap": "STAGE1_CAP_USD"},
+    "render": {"script": "stage2_render_style.sh", "gpus": ["NVIDIA GeForce RTX 4090", "NVIDIA RTX A6000", "NVIDIA L40S"],
+               "disk": 80, "rate": "STAGE2_RATE_USD_HR", "cap": "STAGE2_CAP_USD"},
+}
+IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
+
+
+def launch(stage, job_env):
+    s = STAGE_POD[stage]
+    cmd = (f"pip -q install b2 && b2 sync --no-progress b2://{BUCKET}/code/video2anim /workspace/v2a "
+           f"&& bash /workspace/v2a/{s['script']}; sleep 30")
+    envs = {**{k: v for k, v in KEYS.items() if v}, **job_env}
+    last = None
+    for cloud in ("COMMUNITY", "SECURE"):
+        try:
+            pod = rp("POST", "/pods", {
+                "name": f"v2a-{stage}-{job_env['JOB_NAME']}"[:60], "imageName": IMAGE,
+                "gpuTypeIds": s["gpus"], "gpuCount": 1, "cloudType": cloud,
+                "containerDiskInGb": s["disk"], "volumeInGb": 0, "env": envs,
+                "dockerStartCmd": ["bash", "-c", cmd]})
+            return pod, cloud
+        except Exception as e:
+            last = e
+    raise RuntimeError(f"Couldn't start a {stage} pod: {last}")
+
+
+# ---------------- run state ----------------
+lock = threading.Lock()
+S = {"run": None, "status": None, "log": "", "lists": {}, "lists_ts": 0, "claude": None}
+if os.path.exists(STATE_FILE):
+    try: S["run"] = json.load(open(STATE_FILE))
+    except Exception: pass
+
+
+def save():
+    with lock: json.dump(S["run"], open(STATE_FILE, "w"))
+
+
+def note(msg, **kw):
+    with lock:
+        r = S["run"]; r["events"].append([int(time.time()), msg]); r.update(kw)
+    save()
+
+
+def ledger():
+    txt = b2_read("ledger/ledger.csv") or "date,job,stage,usd\n"
+    rows = [l.split(",") for l in txt.strip().splitlines()[1:] if l.count(",") >= 3]
+    spent = round(sum(float(r[3]) for r in rows), 2)
+    return {"spent": spent, "remaining": round(TOTAL - spent, 2), "total": TOTAL, "rows": rows[-15:]}
+
+
+def run_job(p):
+    """Background thread: drives one run start to finish."""
+    try:
+        job = p["job"]
+        job_env = {"JOB_NAME": job, "INPUT_VIDEO": p.get("video", ""), "CHARACTER_FILE": "characters/" + p["character"],
+                   "BONE_MAP": "bone_maps/" + os.path.splitext(p["character"])[0] + ".json",
+                   "LORA_FILE": p["lora"], "STYLE_PROMPT": p["prompt"], "STYLE_TAG": p["style_tag"],
+                   "DENOISE": str(p["denoise"]), "PREVIEW_EVERY": str(p["preview_every"]),
+                   "RESTYLE_ONLY": "1" if p["mode"] in ("restyle", "preview") else "0",
+                   "PERSON_INDEX": str(p.get("person", 0))}
+        note("Uploading the latest pipeline code to B2", phase="prep")
+        b2("sync", "--no-progress", "--exclude-regex", r"(portal/.*|.*\.zip)", CODE, f"b2://{BUCKET}/code/video2anim")
+        b2_write(f"jobs/{job}/status.json", json.dumps({"stage": "queued", "msg": "Waiting for first pod", "ts": int(time.time())}))
+        stages = (["mocap"] if p["mode"] == "full" else []) + ["render"]
+        for stage in stages:
+            if S["run"].get("cancel"): break
+            led = ledger()
+            if led["spent"] + float(C[STAGE_POD[stage]["cap"]]) > TOTAL:
+                raise RuntimeError(f"Budget: ${led['spent']} spent of ${TOTAL}; this stage could pass it.")
+            note(f"Starting the {stage} pod on RunPod", phase=stage)
+            pod, cloud = launch(stage, {**job_env, STAGE_POD[stage]["rate"]: str(C[STAGE_POD[stage]["rate"]])})
+            pid = pod.get("id"); rate = float(pod.get("costPerHr") or C[STAGE_POD[stage]["rate"]])
+            note(f"{stage} pod {pid} started ({cloud.lower()} cloud, ${rate:.2f}/hr)", pod=pid, pod_rate=rate, pod_start=time.time())
+            watch(job, stage, pid, rate)
+        if S["run"].get("cancel"): note("Run stopped by you", phase="stopped")
+        else: note("All done — your video is in Results", phase="done")
+    except Exception as e:
+        note(f"Problem: {e}", phase="failed", error=str(e))
+
+
+def watch(job, stage, pid, rate):
+    cap = float(C[STAGE_POD[stage]["cap"]]) + 0.5          # phone-side backstop above the pod's own guard
+    done_key = "mocap_done" if stage == "mocap" else "done"
+    gone = 0
+    while True:
+        time.sleep(15)
+        st = b2_read(f"jobs/{job}/status.json")
+        with lock:
+            try: S["status"] = json.loads(st) if st else S["status"]
+            except Exception: pass
+            S["log"] = b2_read(f"jobs/{job}/log_tail.txt") or S["log"]
+        stage_now = (S["status"] or {}).get("stage")
+        if stage_now == done_key: return
+        if stage_now == "failed": raise RuntimeError((S["status"] or {}).get("msg", "pod reported a failure"))
+        spent = (time.time() - S["run"]["pod_start"]) / 3600 * rate
+        if S["run"].get("cancel") or spent > cap:
+            kill(pid);
+            if spent > cap: raise RuntimeError(f"{stage} pod passed its ${cap - 0.5:.2f} cap — deleted it")
+            return
+        try:
+            info = rp("GET", f"/pods/{pid}"); gone = 0
+            if info.get("desiredStatus") in ("EXITED", "TERMINATED"): gone += 3
+        except Exception:
+            gone += 1
+        if gone >= 3:
+            time.sleep(20)       # let the final status upload land
+            st = b2_read(f"jobs/{job}/status.json") or "{}"
+            if json.loads(st).get("stage") == done_key: return
+            raise RuntimeError(f"{stage} pod disappeared before finishing — check the log")
+
+
+def kill(pid):
+    try: rp("DELETE", f"/pods/{pid}"); note(f"Deleted pod {pid}")
+    except Exception as e: note(f"Couldn't delete pod {pid}: {e} — delete it in the RunPod app!")
+
+
+def refresh_lists(force=False):
+    if not force and time.time() - S["lists_ts"] < 60: return
+    lists = {"characters": [f for f in b2_ls("characters/") if f.lower().endswith((".fbx", ".glb", ".gltf", ".blend"))],
+             "bone_maps": b2_ls("bone_maps/"), "loras": [f for f in b2_ls("loras/") if f.endswith(".safetensors")],
+             "videos": b2_ls("input/"), "jobs": b2_ls("jobs/"), "ledger": ledger()}
+    try:
+        lists["pods"] = [{"id": x.get("id"), "name": x.get("name"), "status": x.get("desiredStatus"),
+                          "rate": x.get("costPerHr")} for x in (rp("GET", "/pods") or [])]
+    except Exception as e:
+        lists["pods"] = []; lists["pod_error"] = str(e)
+    with lock: S["lists"], S["lists_ts"] = lists, time.time()
+
+
+def results(job):
+    out = []
+    for sub in ("stage2",):
+        for f in b2_ls(f"jobs/{job}/{sub}/"):
+            if f.endswith(".mp4"): out.append(f"jobs/{job}/{sub}/{f}")
+    return out
+
+
+def ask_claude():
+    r = S["run"] or {}
+    log = (S["log"] or "")[-4000:]
+    prompt = (f"The video2anim pipeline run '{r.get('job')}' failed. Error: {r.get('error')}\n"
+              f"Last pod log lines:\n{log}\n\nThe code is in {CODE}. Find the cause, fix the scripts if it is a "
+              "script bug (check with bash -n / python3 -m py_compile), and reply in 3-5 plain sentences a "
+              "non-technical person understands: what went wrong, what you changed, and whether to press Start again. "
+              "Do not start any pods yourself. Never open or view the input video.")
+    S["claude"] = {"state": "running", "text": "Claude is looking at the log…"}
+    try:
+        res = subprocess.run(["claude", "-p", prompt, "--permission-mode", "acceptEdits",
+                              "--allowedTools", "Read,Edit,Write,Grep,Glob,Bash(bash -n:*),Bash(python3 -m py_compile:*)"],
+                             cwd=CODE, capture_output=True, text=True, timeout=900)
+        S["claude"] = {"state": "done", "text": (res.stdout or res.stderr).strip()[-3000:]}
+    except Exception as e:
+        S["claude"] = {"state": "done", "text": f"Couldn't run Claude Code here: {e}"}
+
+
+# ---------------- HTTP ----------------
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+
+    def send(self, code, body, ctype="application/json"):
+        b = body if isinstance(body, bytes) else (json.dumps(body) if ctype == "application/json" else body).encode()
+        self.send_response(code); self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(b))); self.send_header("Cache-Control", "no-store")
+        self.end_headers(); self.wfile.write(b)
+
+    def body(self):
+        n = int(self.headers.get("Content-Length", 0)); return self.rfile.read(n) if n else b""
+
+    def do_GET(self):
+        u = urlparse(self.path); q = parse_qs(u.query)
+        if u.path == "/":
+            return self.send(200, open(os.path.join(HERE, "index.html"), "rb").read(), "text/html; charset=utf-8")
+        if u.path == "/api/state":
+            threading.Thread(target=refresh_lists, daemon=True).start()
+            r = S["run"]
+            missing = [k for k, v in KEYS.items() if not v]
+            return self.send(200, {"run": r, "status": S["status"], "log": S["log"], "lists": S["lists"],
+                                   "results": results(r["job"]) if r else [], "claude": S["claude"],
+                                   "config": {k: C[k] for k in C if not k.startswith("B2_")}, "missing_keys": missing,
+                                   "now": int(time.time())})
+        if u.path == "/api/file":
+            path = q.get("path", [""])[0]
+            if not path.startswith("jobs/") or ".." in path: return self.send(400, {"error": "bad path"})
+            cache = os.path.join(tempfile.gettempdir(), "v2a_" + path.replace("/", "_"))
+            if not os.path.exists(cache): b2("file", "download", "--no-progress", f"b2://{BUCKET}/{path}", cache)
+            size = os.path.getsize(cache); rng = self.headers.get("Range")
+            start, end = 0, size - 1
+            if rng:
+                m = re.match(r"bytes=(\d*)-(\d*)", rng)
+                if m and m.group(1): start = int(m.group(1))
+                if m and m.group(2): end = int(m.group(2))
+            self.send_response(206 if rng else 200); self.send_header("Content-Type", "video/mp4")
+            self.send_header("Accept-Ranges", "bytes"); self.send_header("Content-Length", str(end - start + 1))
+            if rng: self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            with open(cache, "rb") as f:
+                f.seek(start); left = end - start + 1
+                while left > 0:
+                    chunk = f.read(min(1 << 20, left))
+                    if not chunk: break
+                    try: self.wfile.write(chunk)
+                    except BrokenPipeError: break
+                    left -= len(chunk)
+            return
+        self.send(404, {"error": "not found"})
+
+    def do_POST(self):
+        u = urlparse(self.path); q = parse_qs(u.query)
+        if u.path == "/api/upload":                       # raw file body -> B2 input/ characters/ loras/ bone_maps/
+            kind = q.get("kind", ["input"])[0]; name = os.path.basename(q.get("name", ["upload.bin"])[0])
+            if kind not in ("input", "characters", "loras", "bone_maps"): return self.send(400, {"error": "bad kind"})
+            name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+            n = int(self.headers.get("Content-Length", 0)); tmp = os.path.join(tempfile.gettempdir(), name)
+            with open(tmp, "wb") as f:
+                while n > 0:
+                    chunk = self.rfile.read(min(1 << 20, n)); f.write(chunk); n -= len(chunk)
+            try:
+                b2("file", "upload", "--no-progress", "--quiet", BUCKET, tmp, f"{kind}/{name}", timeout=3600)
+            except Exception as e:
+                return self.send(500, {"error": str(e)})
+            finally: os.remove(tmp)
+            refresh_lists(force=True)
+            return self.send(200, {"ok": True, "path": f"{kind}/{name}"})
+        if u.path == "/api/start":
+            if S["run"] and S["run"].get("phase") in ("prep", "mocap", "render"):
+                return self.send(409, {"error": "A run is already going"})
+            p = json.loads(self.body() or b"{}")
+            p["job"] = re.sub(r"[^A-Za-z0-9_-]", "_", p.get("job") or time.strftime("clip_%m%d_%H%M"))
+            if [k for k, v in KEYS.items() if not v]: return self.send(400, {"error": "Missing keys in Termux env"})
+            with lock:
+                S["run"] = {**p, "phase": "prep", "events": [], "started": int(time.time()), "cancel": False}
+                S["status"] = None; S["log"] = ""; S["claude"] = None
+            save(); threading.Thread(target=run_job, args=(p,), daemon=True).start()
+            return self.send(200, {"ok": True})
+        if u.path == "/api/stop":
+            if S["run"]: S["run"]["cancel"] = True
+            for pod in (S["lists"].get("pods") or []):
+                if (pod.get("name") or "").startswith("v2a-"): kill(pod["id"])
+            refresh_lists(force=True)
+            return self.send(200, {"ok": True})
+        if u.path == "/api/ask_claude":
+            threading.Thread(target=ask_claude, daemon=True).start(); return self.send(200, {"ok": True})
+        self.send(404, {"error": "not found"})
+
+
+if __name__ == "__main__":
+    if not shutil.which("b2"): sys.exit("Install the B2 CLI first: pip install b2")
+    if S["run"] and S["run"].get("phase") in ("mocap", "render") and S["run"].get("pod"):
+        # resume watching after a phone restart
+        r = S["run"]
+        def resume():
+            try:
+                watch(r["job"], r["phase"], r["pod"], r.get("pod_rate", 1.0))
+                if r["phase"] == "mocap":
+                    note("Resumed: mocap done — press Start with 'New character' to continue", phase="failed",
+                         error="Portal restarted mid-run")
+                else: note("All done — your video is in Results", phase="done")
+            except Exception as e: note(f"Problem: {e}", phase="failed", error=str(e))
+        threading.Thread(target=resume, daemon=True).start()
+    print(f"video2anim portal → http://127.0.0.1:{PORT}")
+    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

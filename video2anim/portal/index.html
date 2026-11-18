@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e0f12">
+<title>video2anim</title>
+<style>
+  :root{--bg:#0e0f12;--card:#17191e;--line:#262a31;--ink:#eceef2;--mute:#8b919c;--acc:#7cc4ff;--ok:#5fd39a;--warn:#ffc35c;--bad:#ff6b6b}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:14px 14px 90px}
+  h1{font-size:19px;margin:4px 2px 12px;letter-spacing:.2px} h1 small{color:var(--mute);font-weight:500;font-size:13px;margin-left:6px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--mute);margin:0 0 10px;font-weight:600}
+  .bar{height:8px;background:#22262d;border-radius:8px;overflow:hidden} .bar>i{display:block;height:100%;background:var(--acc);border-radius:8px;transition:width .6s}
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px} .big{font-size:24px;font-weight:700}
+  .mute{color:var(--mute);font-size:13px}
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px}
+  .seg button{background:#1e2127;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 8px;text-align:left;font-size:14px}
+  .seg button b{display:block;font-size:14px} .seg button span{color:var(--mute);font-size:12px}
+  .seg button.on{border-color:var(--acc);background:#1a2733}
+  label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+  select,input[type=text],textarea{width:100%;background:#0f1115;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px;font:inherit}
+  textarea{min-height:64px;resize:vertical} input[type=range]{width:100%}
+  .btn{display:block;width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:700;background:var(--acc);color:#06121d;margin-top:14px}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:600}
+  .btn.danger{background:var(--bad);color:#1a0606} .btn:disabled{opacity:.45}
+  .plan{margin:0;padding:0;list-style:none}
+  .plan li{display:grid;grid-template-columns:22px 1fr auto;gap:8px;padding:8px 0;border-top:1px solid var(--line);align-items:start}
+  .plan li:first-child{border-top:0}
+  .dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--line);margin-top:3px}
+  .s-done .dot{background:var(--ok);border-color:var(--ok)} .s-now .dot{border-color:var(--acc);box-shadow:0 0 0 4px #7cc4ff33;animation:p 1.4s infinite}
+  .s-skip{opacity:.38} .s-fail .dot{background:var(--bad);border-color:var(--bad)}
+  @keyframes p{50%{box-shadow:0 0 0 7px #7cc4ff11}}
+  .plan .t{font-weight:600} .plan .d{color:var(--mute);font-size:13px} .plan .c{color:var(--mute);font-size:12px;white-space:nowrap}
+  .now{background:#111820;border:1px solid #1f3446;border-radius:10px;padding:10px;margin:10px 0}
+  pre{background:#0b0c0f;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:11.5px;max-height:260px;overflow:auto;white-space:pre-wrap;margin:8px 0 0;color:#b9c0cc}
+  details summary{cursor:pointer;color:var(--mute);font-size:13px;margin-top:8px}
+  video{width:100%;border-radius:10px;margin-top:8px;background:#000}
+  .pill{display:inline-block;font-size:12px;border-radius:20px;padding:2px 9px;border:1px solid var(--line);color:var(--mute)}
+  .warn{color:var(--warn)} .bad{color:var(--bad)} .ok{color:var(--ok)}
+  .ev{font-size:12.5px;color:var(--mute);margin:3px 0} .ev b{color:var(--ink);font-weight:500}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<h1>video2anim <small id="conn">connecting…</small></h1>
+
+<div class="card" id="keys" style="display:none"></div>
+
+<div class="card">
+  <h2>Budget</h2>
+  <div class="row"><div class="big" id="b-left">$—</div><div class="mute" id="b-sub">left of $45</div></div>
+  <div class="bar" style="margin:10px 0 6px"><i id="b-bar" style="width:0"></i></div>
+  <div class="mute" id="b-runs"></div>
+</div>
+
+<!-- LIVE RUN -->
+<div class="card hidden" id="live">
+  <h2>Now running <span class="pill" id="l-job"></span></h2>
+  <div class="now"><div id="l-msg" style="font-weight:600">…</div>
+    <div class="bar" style="margin-top:8px"><i id="l-pct" style="width:0"></i></div>
+    <div class="row mute" style="margin-top:6px"><span id="l-pod"></span><span id="l-time"></span></div></div>
+  <ul class="plan" id="l-plan"></ul>
+  <details><summary>What Claude has done so far</summary><div id="l-events"></div></details>
+  <details><summary>Live pod log</summary><pre id="l-log">waiting…</pre></details>
+  <div id="l-claude"></div>
+  <button class="btn danger" id="stop">Stop everything &amp; delete pods</button>
+</div>
+
+<!-- NEW RUN -->
+<div class="card" id="new">
+  <h2>New run</h2>
+  <div class="seg" id="modes">
+    <button data-m="full" class="on"><b>New video</b><span>mocap + render + style</span></button>
+    <button data-m="character"><b>New character</b><span>reuse a video's mocap</span></button>
+    <button data-m="restyle"><b>New look</b><span>reuse render, restyle</span></button>
+    <button data-m="preview"><b>Preview a look</b><span>1 in 10 frames, cheap</span></button>
+  </div>
+
+  <div id="f-video"><label>Video (sealed — sent straight to B2, never viewed)</label>
+    <input type="file" id="video" accept="video/*"><div class="mute" id="vstat"></div></div>
+  <div id="f-job" class="hidden"><label>Which earlier video (job)</label><select id="jobsel"></select></div>
+  <label>Job name</label><input type="text" id="job" placeholder="e.g. void_dance_01">
+
+  <label>Character</label><select id="char"></select>
+  <div class="mute" id="bmwarn"></div>
+  <details><summary>Upload a character / LoRA / bone map</summary>
+    <label>Rigged character (.fbx / .glb / .blend)</label><input type="file" id="up-char">
+    <label>LoRA (.safetensors)</label><input type="file" id="up-lora" accept=".safetensors">
+    <label>Bone map (.json, same name as character)</label><input type="file" id="up-bm" accept=".json">
+    <div class="mute" id="upstat"></div>
+  </details>
+
+  <label>Style LoRA</label><select id="lora"></select>
+  <label>Style prompt (include your LoRA's trigger word)</label>
+  <textarea id="prompt"></textarea>
+  <label>Look name</label><input type="text" id="tag" value="v1">
+  <label>Style strength <span id="dnv"></span></label>
+  <input type="range" id="dn" min="0.2" max="0.65" step="0.05" value="0.4">
+  <div class="mute">Lower = steadier, closer to the render. Higher = more LoRA style, more flicker.</div>
+
+  <h2 style="margin-top:16px">What Claude will do</h2>
+  <ul class="plan" id="plan"></ul>
+  <div class="row" style="margin-top:8px"><span class="mute">Estimated cost</span><b id="est"></b></div>
+  <button class="btn" id="go">Start</button>
+  <div class="mute bad" id="goerr"></div>
+</div>
+
+<!-- RESULTS -->
+<div class="card" id="res"><h2>Results</h2><div id="reslist" class="mute">Nothing yet.</div></div>
+
+<div class="card"><h2>Pods on your RunPod account</h2><div id="pods" class="mute">—</div></div>
+
+<script>
+const $=id=>document.getElementById(id);
+let ST=null, mode="full", uploadedVideo="";
+const STEPS=[
+ {k:"upload",   t:"Upload video to B2", d:"Straight from your phone, unopened", cost:0, modes:["full"]},
+ {k:"mocap_setup",t:"Start mocap pod (A100 80GB)", d:"Install SAM-Body4D, load checkpoints from B2", cost:0.45, modes:["full"]},
+ {k:"mocap_run",t:"Extract the skeleton", d:"SAM-Body4D tracks every body in the clip", cost:0.6, modes:["full"]},
+ {k:"render_setup",t:"Start render pod (RTX 4090)", d:"Blender + ComfyUI, models from B2", cost:0.1, modes:["full","character","restyle","preview"]},
+ {k:"retarget",t:"Put the motion on your character", d:"Joints → bones, baked to keyframes", cost:0.02, modes:["full","character"]},
+ {k:"render", t:"Quick low-res render", d:"Eevee 540×960 in the white Void (Cycles if Eevee can't use the GPU)", cost:0.08, modes:["full","character"]},
+ {k:"style",  t:"Upscale 2× + Krea 2 LoRA style", d:"Each frame, fixed seed, speed-tested first", cost:0.6, modes:["full","character","restyle","preview"]},
+ {k:"assemble",t:"Final 1080×1920 MP4", d:"Deflicker, upload to B2, delete the pod", cost:0.01, modes:["full","character","restyle","preview"]},
+];
+const ORDER=["queued","upload","mocap_setup","mocap_run","mocap_done","render_setup","retarget","render","style_setup","style","assemble","done"];
+const stepOf=s=>s==="mocap_done"?"mocap_run":s==="style_setup"?"style":s==="done"?"assemble":s;
+const money=x=>"$"+(+x).toFixed(2);
+
+function planHTML(m, cur, failed){
+  const ci=cur?ORDER.indexOf(stepOf(cur)):-1;
+  return STEPS.map(s=>{
+    let cls="", c=s.k==="style"&&m==="preview"?s.cost/10:s.cost;
+    if(!s.modes.includes(m)) cls="s-skip";
+    else if(cur){ const si=ORDER.indexOf(s.k);
+      if(si<ci || cur==="done") cls="s-done"; else if(si===ci) cls=failed?"s-fail":"s-now"; }
+    return `<li class="${cls}"><span class="dot"></span><div><div class="t">${s.t}</div><div class="d">${s.d}</div></div><span class="c">${cls==="s-skip"?"skipped":"~"+money(c)}</span></li>`;
+  }).join("");
+}
+function estimate(m){ return STEPS.filter(s=>s.modes.includes(m)).reduce((a,s)=>a+(s.k==="style"&&m==="preview"?s.cost/10:s.cost),0); }
+
+function renderNew(){
+  document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.m===mode));
+  $("f-video").classList.toggle("hidden",mode!=="full");
+  $("f-job").classList.toggle("hidden",mode==="full");
+  $("plan").innerHTML=planHTML(mode);
+  $("est").textContent="~"+money(estimate(mode))+" (first run more: model downloads)";
+  $("dnv").textContent=$("dn").value;
+}
+document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>{mode=b.dataset.m;renderNew();});
+$("dn").oninput=renderNew;
+
+function fill(sel, items, keep){ const v=sel.value; sel.innerHTML=items.length?items.map(i=>`<option>${i}</option>`).join(""):`<option value="">(none in B2 yet)</option>`; if(items.includes(v)) sel.value=v; }
+
+async function upload(file, kind, statEl){
+  statEl.textContent=`Uploading ${file.name} (${(file.size/1e6).toFixed(0)} MB)…`;
+  const r=await fetch(`/api/upload?kind=${kind}&name=${encodeURIComponent(file.name)}`,{method:"POST",body:file});
+  const j=await r.json(); statEl.textContent=j.ok?`Saved to B2: ${j.path}`:`Upload failed: ${j.error}`; return j.ok?j.path:"";
+}
+$("video").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; uploadedVideo=await upload(f,"input",$("vstat"));
+  if(!$("job").value) $("job").value=f.name.replace(/\.[^.]+$/,"").replace(/[^A-Za-z0-9_-]/g,"_"); poll(); };
+$("up-char").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"characters",$("upstat")).then(poll);
+$("up-lora").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"loras",$("upstat")).then(poll);
+$("up-bm").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"bone_maps",$("upstat")).then(poll);
+$("jobsel").onchange=()=>{$("job").value=$("jobsel").value};
+
+$("go").onclick=async()=>{
+  $("goerr").textContent="";
+  const body={mode, job:$("job").value || $("jobsel").value, video:uploadedVideo, character:$("char").value, lora:$("lora").value,
+    prompt:$("prompt").value, style_tag:$("tag").value||"v1", denoise:+$("dn").value, preview_every:mode==="preview"?10:1};
+  if(mode==="full"&&!uploadedVideo) return $("goerr").textContent="Pick a video first.";
+  if(!body.character||!body.lora) return $("goerr").textContent="Pick a character and a LoRA (upload them above if the lists are empty).";
+  $("go").disabled=true;
+  const r=await fetch("/api/start",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
+  $("go").disabled=false; if(!j.ok) $("goerr").textContent=j.error; poll();
+};
+$("stop").onclick=async()=>{ if(confirm("Stop the run and delete every video2anim pod?")){ await fetch("/api/stop",{method:"POST"}); poll(); } };
+
+function ago(t){ const s=Math.max(0,(ST.now-t)); return s<90?s+"s":Math.round(s/60)+" min"; }
+
+function renderState(){
+  const L=ST.lists||{}, led=L.ledger;
+  if(ST.missing_keys&&ST.missing_keys.length){ $("keys").style.display=""; $("keys").innerHTML=`<b class="warn">Keys not found:</b> ${ST.missing_keys.join(", ")}<div class="mute">Start the portal from the Termux shell where your keys load.</div>`; } else $("keys").style.display="none";
+  if(led){ $("b-left").textContent=money(led.remaining); $("b-sub").textContent=`left of ${money(led.total)} · ${money(led.spent)} spent`;
+    $("b-bar").style.width=Math.min(100,led.spent/led.total*100)+"%";
+    $("b-runs").textContent=`≈ ${Math.floor(led.remaining/estimate("full"))} new videos, or ≈ ${Math.floor(led.remaining/estimate("restyle"))} new looks left`; }
+  fill($("char"),L.characters||[]); fill($("lora"),L.loras||[]); fill($("jobsel"),L.jobs||[]);
+  const ch=$("char").value, bm=ch.replace(/\.[^.]+$/,"")+".json";
+  $("bmwarn").innerHTML= ch && !(L.bone_maps||[]).includes(bm) ? `<span class="warn">No bone map yet (${bm}). Ask Claude Code: “make the bone map for ${ch}”.</span>`:"";
+  if(!$("prompt").value && ST.config) $("prompt").value=ST.config.STYLE_PROMPT||"";
+  // pods
+  const pods=L.pods||[]; $("pods").innerHTML=pods.length?pods.map(p=>`<div class="row"><span>${p.name||p.id}</span><span class="${p.status==="RUNNING"?"warn":""}">${p.status||""} ${p.rate?money(p.rate)+"/hr":""}</span></div>`).join(""):(L.pod_error?`<span class="bad">${L.pod_error}</span>`:"None running — nothing is billing.");
+  // live
+  const R=ST.run, S=ST.status||{};
+  const active=R&&["prep","mocap","render"].includes(R.phase);
+  $("live").classList.toggle("hidden",!R);
+  $("new").classList.toggle("hidden",!!active);
+  if(R){
+    $("l-job").textContent=R.job+" · "+R.mode;
+    const failed=R.phase==="failed";
+    let cur = R.phase==="prep" ? (R.mode==="full"?"upload":"render_setup") : (S.stage&&S.stage!=="queued"?S.stage:(R.phase==="mocap"?"mocap_setup":"render_setup"));
+    if(R.phase==="done") cur="done";
+    $("l-plan").innerHTML=planHTML(R.mode,cur,failed);
+    $("l-msg").innerHTML = R.phase==="done" ? `<span class="ok">Finished.</span> Your video is in Results.` :
+       failed ? `<span class="bad">Stopped:</span> ${R.error||S.msg||""}` :
+       R.phase==="stopped" ? "Stopped by you." : (S.msg || (R.events.at(-1)||[,""])[1]);
+    $("l-pct").style.width=(R.phase==="done"?100:(S.pct||0))+"%";
+    $("l-pod").textContent=R.pod&&active?`pod ${R.pod} · ${money(R.pod_rate||0)}/hr · ~${money(S.pod_spent||0)} so far`:"";
+    $("l-time").textContent=S.ts&&active?`updated ${ago(S.ts)} ago`:"";
+    $("l-events").innerHTML=(R.events||[]).slice().reverse().map(e=>`<div class="ev">${new Date(e[0]*1000).toLocaleTimeString()} · <b>${e[1]}</b></div>`).join("");
+    $("l-log").textContent=ST.log||"waiting for the pod…";
+    $("stop").classList.toggle("hidden",!active);
+    const cl=ST.claude;
+    $("l-claude").innerHTML = failed ? (cl ? `<div class="now"><b>Claude Code:</b><div style="white-space:pre-wrap;margin-top:6px">${cl.text.replace(/</g,"&lt;")}</div></div>${cl.state==="done"?'<button class="btn ghost" onclick="newRun()">Back to new run</button>':''}`
+        : `<button class="btn" onclick="fetch('/api/ask_claude',{method:'POST'}).then(poll)">Ask Claude to find &amp; fix the problem</button><button class="btn ghost" onclick="newRun()">Back to new run</button>`)
+      : (["done","stopped"].includes(R.phase)?'<button class="btn ghost" onclick="newRun()">Start another run</button>':"");
+  }
+  const res=ST.results||[];
+  $("reslist").innerHTML=res.length?res.map(p=>`<div style="margin-top:10px"><div class="row"><b>${p.split("/").pop()}</b><a class="mute" href="/api/file?path=${encodeURIComponent(p)}" download>save</a></div><video controls preload="none" src="/api/file?path=${encodeURIComponent(p)}"></video></div>`).join(""):"Nothing yet.";
+}
+function newRun(){ $("live").classList.add("hidden"); $("new").classList.remove("hidden"); window.scrollTo(0,0); }
+
+async function poll(){
+  try{ ST=await (await fetch("/api/state")).json(); $("conn").textContent="live"; $("conn").className="ok"; renderState(); }
+  catch(e){ $("conn").textContent="portal offline — is Termux running?"; $("conn").className="bad"; }
+}
+renderNew(); poll(); setInterval(poll,5000);
+</script>
+</body>
+</html>
