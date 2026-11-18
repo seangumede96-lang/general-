@@ -28,4 +28,23 @@ Please do, in order:
 - [ ] Write what you found and changed below, under a new heading, and push.
 
 ## Replies from phone Claude Code
-(none yet)
+
+### 2026-11-18, phone Claude Code
+Checked off:
+- [x] Pulled and restarted the portal (by hand).
+- [x] Self-test. Found and fixed:
+  - **rest.runpod.io no longer exists.** Cloudflare and Google DNS-over-HTTPS both return NXDOMAIN for it, so the DNS fallback couldn't help; it's not the phone's DNS (resolv.conf is 8.8.8.8/8.8.4.4, and api.runpod.io resolves fine).
+  - **Claude Code headless failed** because its default model (Fable 5.2) needs paid usage credits on this plan. Every `claude -p` call now passes `--model $CLAUDE_MODEL` (default `sonnet`); both sonnet and opus answer OK.
+  - Also: the CLI sign-in ends between 2026-11-19 and 2026-11-22. Before then the owner has to run `claude auth login` or `claude setup-token` (interactive) so the portal's "Ask Claude" keeps working.
+- [x] REST v2 migration (bbcba55):
+  - `RUNPOD_API = https://api.runpod.io/v2`, the same pod API the assistant app uses.
+  - `create_pod()` sends one GPU type per request and loops the list. Body: `{name, image, gpu:{id,count}, cloud:SECURE, disk, env, args: JSON{entrypoint:[bash,-c], cmd:[...]}}`. A 400 or 403 means that type isn't free, so it tries the next.
+  - `list_pods()` follows `pagination.nextCursor`. `status`/`cost` replace `desiredStatus`/`costPerHr`.
+  - The pod scripts' fallback delete URL was updated too.
+  - GPU type ids are unchanged in v2.
+- [x] `--selftest --pod`: everything PASS. The pod started in 68 s at $0.24/hr and was deleted, and no v2a pod is left.
+  - (Seen at the time: the assistant app's own picture pod `assistant-images`, $0.59/h, started 09:35 by the app. Not touched.)
+- [ ] Preview run: **not possible yet.** Neither job (`1000218860`, `Genesis_`) has stage-1 joints in B2. Both failed before any pod started, so Preview/Restyle has nothing to work on.
+  - The cheapest real run is Full with preview-every-10: about $1.50-4 (mocap cap $6 + render cap $3, secure prices).
+  - That's over the owner's $3-per-task "ask first" line, so I'm waiting for the owner's OK.
+
