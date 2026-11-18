@@ -271,6 +271,10 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = parse_qs(u.query)
         if u.path == "/":
             return self.send(200, open(os.path.join(HERE, "index.html"), "rb").read(), "text/html; charset=utf-8")
+        static = {"/manifest.json": "application/manifest+json", "/sw.js": "application/javascript",
+                  "/icon-192.png": "image/png", "/icon-512.png": "image/png", "/apple-touch-icon.png": "image/png"}
+        if u.path in static:
+            return self.send(200, open(os.path.join(HERE, u.path.lstrip("/")), "rb").read(), static[u.path])
         if u.path == "/api/state":
             threading.Thread(target=refresh_lists, daemon=True).start()
             r = S["run"]

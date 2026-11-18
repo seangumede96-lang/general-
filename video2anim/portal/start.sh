@@ -6,5 +6,5 @@ pip install -q b2 2>/dev/null || true
 pkill -f "portal/server.py" 2>/dev/null; sleep 1
 nohup python3 "$(pwd)/server.py" > ~/v2a_portal.log 2>&1 &
 sleep 2
-echo "Portal running → open http://127.0.0.1:8090 in your phone browser (Add to Home screen for an app icon)"
+echo "Portal running → open http://127.0.0.1:8090 in Chrome, then menu ⋮ → 'Install app' (or 'Add to Home screen')"
 (command -v termux-open-url >/dev/null && termux-open-url http://127.0.0.1:8090) || true
