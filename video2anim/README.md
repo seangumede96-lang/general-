@@ -26,6 +26,14 @@ Backblaze B2 (`Runpodmodels2099`); every pod deletes itself when finished or whe
 Pods report progress by writing `jobs/<job>/status.json` and `log_tail.txt` to B2 (`status.sh`), so the phone never connects to a pod directly.
 If the phone sleeps, pods still finish or hit their caps and delete themselves. When the portal starts again, it picks up the run where it left off.
 
+## Characters without a 3D model
+Pick a **reference image** in the portal. Claude Code (on the phone) looks at it and writes the character description the
+style step uses on every frame. Leave the rigged-model option closed and the render pod builds a grey **mannequin** straight from
+the mocap (`blender_mannequin.py`), with no bone map needed. Krea 2 then paints your character over it (style strength ~0.6).
+Optional stronger match: export ComfyUI's official *Krea 2 Image Style Reference* workflow in API format, put `{{FRAME}}`, `{{REF}}`,
+`{{PROMPT}}`, `{{PREFIX}}`, `{{SEED}}`, `{{DENOISE}}`, `{{LORA}}` where those values go, and save it to B2 as
+`workflows/style_ref_api.json`. Runs then feed the reference image itself into the model, not only its description.
+
 ## The $45 covers many runs
 `ledger.sh` keeps a running total of every pod's spend in `B2/ledger/ledger.csv`.
 Before any pod starts work it checks: *total so far + this stage's cap ≤ $45*. If not, it refuses and deletes itself.

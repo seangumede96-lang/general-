@@ -14,17 +14,20 @@ selfdestruct 2>/dev/null || curl -s -X DELETE "https://rest.runpod.io/v1/pods/$R
 st render_setup "Render pod is up, checking budget" 0 force
 bash ./ledger.sh check "$STAGE2_CAP_USD" || { st failed "Budget would run out — not starting" "" force; selfdestruct; exit 1; }
 nohup bash ./budget_guard.sh "$STAGE2_RATE_USD_HR" "$STAGE2_CAP_USD" $W/final "$JOB/stage2" render-style >/dev/null 2>&1 &
-RAW="$JOB/stage2/raw_frames_$(basename ${CHARACTER_FILE%.*})"
+CHAR_TAG=$([ -n "${CHARACTER_FILE:-}" ] && basename "${CHARACTER_FILE%.*}" || echo mannequin)
+RAW="$JOB/stage2/raw_frames_${CHAR_TAG}"
 
 if [ "${RESTYLE_ONLY:-0}" = "1" ] && b2 ls "b2://$RAW/" | grep -q png; then
   st render "Reusing saved render frames (style-only run)" 100 force
   b2 sync --no-progress "b2://$RAW" $W/frames
   apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null
 else
-st render_setup "Fetching mocap, character and bone map" 5 force
+st render_setup "Fetching the mocap${CHARACTER_FILE:+, character and bone map}" 5 force
 b2 sync --no-progress "b2://$JOB/stage1" $W/job/stage1
-b2 file download --no-progress "b2://$B2_BUCKET/$CHARACTER_FILE" "$W/job/$(basename $CHARACTER_FILE)"
-b2 file download --no-progress "b2://$B2_BUCKET/$BONE_MAP" $W/job/bonemap.json
+if [ -n "${CHARACTER_FILE:-}" ]; then
+  b2 file download --no-progress "b2://$B2_BUCKET/$CHARACTER_FILE" "$W/job/$(basename $CHARACTER_FILE)"
+  b2 file download --no-progress "b2://$B2_BUCKET/$BONE_MAP" $W/job/bonemap.json
+fi
 
 st render_setup "Getting Blender ready" 10 force
 BL_VER=4.5.3; BL=$W/blender-$BL_VER-linux-x64
@@ -36,10 +39,15 @@ if [ ! -x $BL/blender ]; then
 fi
 apt-get update -qq && apt-get install -y -qq libegl1 libgl1 libxi6 libxkbcommon0 libsm6 libxrender1 libxxf86vm1 libxfixes3 ffmpeg >/dev/null
 
-st retarget "Putting the mocap onto your character" 0 force
 cd "$HERE"
-$BL/blender -b -P blender_retarget.py -- --character "$W/job/$(basename $CHARACTER_FILE)" \
-  --joints $W/job/stage1/joints_p${PERSON_INDEX}.npz --map $W/job/bonemap.json --out $W/job/scene.blend
+if [ -n "${CHARACTER_FILE:-}" ]; then
+  st retarget "Putting the mocap onto your character" 0 force
+  $BL/blender -b -P blender_retarget.py -- --character "$W/job/$(basename $CHARACTER_FILE)" \
+    --joints $W/job/stage1/joints_p${PERSON_INDEX}.npz --map $W/job/bonemap.json --out $W/job/scene.blend
+else
+  st retarget "Building a mannequin from the motion (no 3D character needed)" 0 force
+  $BL/blender -b -P blender_mannequin.py -- --joints $W/job/stage1/joints_p${PERSON_INDEX}.npz --out $W/job/scene.blend
+fi
 
 st render "Testing whether Eevee can use the GPU here" 0 force
 ENGINE=eevee
@@ -86,7 +94,13 @@ until curl -s 127.0.0.1:8188/system_stats >/dev/null; do sleep 2; done
 st style "Upscaling and applying your LoRA style" 0 force
 cd "$HERE"
 EVERY=${PREVIEW_EVERY:-1}
-python stylize_comfy.py --frames $W/frames --comfy $W/ComfyUI --out $W/styled --every $EVERY | while IFS= read -r line; do
+REFARGS=()
+if [ -n "${REF_IMAGE:-}" ]; then
+  b2 file download --no-progress "b2://$B2_BUCKET/$REF_IMAGE" "$W/job/$(basename $REF_IMAGE)" && REFARGS+=(--ref "$W/job/$(basename $REF_IMAGE)")
+  b2 file download --no-progress "b2://$B2_BUCKET/workflows/style_ref_api.json" $W/job/style_ref_api.json 2>/dev/null \
+    && REFARGS+=(--template $W/job/style_ref_api.json) || true
+fi
+python stylize_comfy.py --frames $W/frames --comfy $W/ComfyUI --out $W/styled --every $EVERY "${REFARGS[@]}" | while IFS= read -r line; do
   echo "$line"
   case "$line" in styled*) A=${line#styled }; D=${A%%/*}; T=${A#*/}; st style "Styled $D / $T frames" $(( D*100/T ));;
                   BENCH*) st style "Speed test: ${line#BENCH }" 2 force;; esac

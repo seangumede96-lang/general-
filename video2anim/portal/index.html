@@ -44,6 +44,15 @@
   .warn{color:var(--warn)} .bad{color:var(--bad)} .ok{color:var(--ok)}
   .ev{font-size:12.5px;color:var(--mute);margin:3px 0} .ev b{color:var(--ink);font-weight:500}
   .hidden{display:none}
+  .refs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
+  .ref{position:relative;border:2px solid var(--line);border-radius:12px;overflow:hidden;aspect-ratio:3/4;background:#0f1115;padding:0}
+  .ref img{width:100%;height:100%;object-fit:cover;display:block}
+  .ref.on{border-color:var(--acc);box-shadow:0 0 0 3px #7cc4ff33}
+  .ref.add{display:flex;align-items:center;justify-content:center;flex-direction:column;color:var(--mute);font-size:13px;border-style:dashed}
+  .ref.add b{font-size:28px;color:var(--acc);line-height:1}
+  .ref.none{display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mute);font-size:12px;padding:6px}
+  .pick{display:flex;align-items:center;gap:10px;background:#0f1115;border:1px dashed var(--line);border-radius:12px;padding:14px;color:var(--ink);width:100%;font:inherit;text-align:left}
+  .pick b{color:var(--acc)} .up{margin-top:6px} .up .bar{height:6px}
 </style>
 </head>
 <body>
@@ -81,27 +90,37 @@
     <button data-m="preview"><b>Preview a look</b><span>1 in 10 frames, cheap</span></button>
   </div>
 
-  <div id="f-video"><label>Video (sealed — sent straight to B2, never viewed)</label>
-    <input type="file" id="video" accept="video/*"><div class="mute" id="vstat"></div></div>
+  <div id="f-video">
+    <label>Video (sealed: sent straight to B2, never viewed)</label>
+    <button class="pick" id="pick-video" type="button"><b>＋</b><span id="vname">Choose a video</span></button>
+    <div class="up hidden" id="vup"><div class="bar"><i style="width:0"></i></div><div class="mute"></div></div>
+  </div>
   <div id="f-job" class="hidden"><label>Which earlier video (job)</label><select id="jobsel"></select></div>
   <label>Job name</label><input type="text" id="job" placeholder="e.g. void_dance_01">
 
-  <label>Character</label><select id="char"></select>
-  <div class="mute" id="bmwarn"></div>
-  <details><summary>Upload a character / LoRA / bone map</summary>
-    <label>Rigged character (.fbx / .glb / .blend)</label><input type="file" id="up-char">
-    <label>LoRA (.safetensors)</label><input type="file" id="up-lora" accept=".safetensors">
-    <label>Bone map (.json, same name as character)</label><input type="file" id="up-bm" accept=".json">
-    <div class="mute" id="upstat"></div>
+  <h2 style="margin-top:18px">Character</h2>
+  <div class="mute">Tap a reference image. Claude Code looks at it and writes the description that the AI follows for every frame. No 3D model needed: a mannequin is built from the video's motion.</div>
+  <div class="refs" id="refs"></div>
+  <div class="up hidden" id="rup"><div class="bar"><i style="width:0"></i></div><div class="mute"></div></div>
+  <label>What the character looks like <span id="descstate" class="mute"></span></label>
+  <textarea id="desc" placeholder="Filled in automatically from the reference image. You can edit it."></textarea>
+  <details id="adv3d"><summary>Use a rigged 3D model instead (advanced)</summary>
+    <label>Rigged character</label><select id="char"></select>
+    <div class="mute" id="bmwarn"></div>
+    <label>Upload a rigged character (.fbx / .glb / .blend)</label><input type="file" id="up-char">
+    <label>Upload a bone map (.json, same name as the character)</label><input type="file" id="up-bm" accept=".json">
   </details>
 
+  <h2 style="margin-top:18px">Look</h2>
   <label>Style LoRA</label><select id="lora"></select>
-  <label>Style prompt (include your LoRA's trigger word)</label>
+  <details><summary>Upload a LoRA (.safetensors)</summary><input type="file" id="up-lora" accept=".safetensors">
+    <div class="up hidden" id="lup"><div class="bar"><i style="width:0"></i></div><div class="mute"></div></div></details>
+  <label>Style words (put your LoRA's trigger word first)</label>
   <textarea id="prompt"></textarea>
   <label>Look name</label><input type="text" id="tag" value="v1">
   <label>Style strength <span id="dnv"></span></label>
-  <input type="range" id="dn" min="0.2" max="0.65" step="0.05" value="0.4">
-  <div class="mute">Lower = steadier, closer to the render. Higher = more LoRA style, more flicker.</div>
+  <input type="range" id="dn" min="0.2" max="0.8" step="0.05" value="0.6">
+  <div class="mute" id="dnhint"></div>
 
   <h2 style="margin-top:16px">What Claude will do</h2>
   <ul class="plan" id="plan"></ul>
@@ -115,22 +134,30 @@
 
 <div class="card"><h2>Pods on your RunPod account</h2><div id="pods" class="mute">—</div></div>
 
+<!-- hidden pickers: created once, opened by the buttons above -->
+<input type="file" id="video" accept="video/*" class="hidden">
+<input type="file" id="refimg" accept="image/*" class="hidden">
+
 <script>
 const $=id=>document.getElementById(id);
-let ST=null, mode="full", uploadedVideo="";
+let ST=null, mode="full", uploadedVideo="", selRef="", dnTouched=false, descTouched=false, picking=false;
+const last={};   // last rendered JSON per section — only touch the page when something changed
+const changed=(k,v)=>{const j=JSON.stringify(v); if(last[k]===j) return false; last[k]=j; return true;};
+
 const STEPS=[
  {k:"upload",   t:"Upload video to B2", d:"Straight from your phone, unopened", cost:0, modes:["full"]},
  {k:"mocap_setup",t:"Start mocap pod (A100 80GB)", d:"Install SAM-Body4D, load checkpoints from B2", cost:0.45, modes:["full"]},
  {k:"mocap_run",t:"Extract the skeleton", d:"SAM-Body4D tracks every body in the clip", cost:0.6, modes:["full"]},
  {k:"render_setup",t:"Start render pod (RTX 4090)", d:"Blender + ComfyUI, models from B2", cost:0.1, modes:["full","character","restyle","preview"]},
- {k:"retarget",t:"Put the motion on your character", d:"Joints → bones, baked to keyframes", cost:0.02, modes:["full","character"]},
+ {k:"retarget",t:"Build the moving figure", d:"Mannequin from the motion, or your rigged model", cost:0.02, modes:["full","character"]},
  {k:"render", t:"Quick low-res render", d:"Eevee 540×960 in the white Void (Cycles if Eevee can't use the GPU)", cost:0.08, modes:["full","character"]},
- {k:"style",  t:"Upscale 2× + Krea 2 LoRA style", d:"Each frame, fixed seed, speed-tested first", cost:0.6, modes:["full","character","restyle","preview"]},
+ {k:"style",  t:"Upscale 2× + Krea 2 LoRA style", d:"Every frame follows your reference + LoRA, fixed seed", cost:0.6, modes:["full","character","restyle","preview"]},
  {k:"assemble",t:"Final 1080×1920 MP4", d:"Deflicker, upload to B2, delete the pod", cost:0.01, modes:["full","character","restyle","preview"]},
 ];
 const ORDER=["queued","upload","mocap_setup","mocap_run","mocap_done","render_setup","retarget","render","style_setup","style","assemble","done"];
 const stepOf=s=>s==="mocap_done"?"mocap_run":s==="style_setup"?"style":s==="done"?"assemble":s;
 const money=x=>"$"+(+x).toFixed(2);
+const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function planHTML(m, cur, failed){
   const ci=cur?ORDER.indexOf(stepOf(cur)):-1;
@@ -142,7 +169,8 @@ function planHTML(m, cur, failed){
     return `<li class="${cls}"><span class="dot"></span><div><div class="t">${s.t}</div><div class="d">${s.d}</div></div><span class="c">${cls==="s-skip"?"skipped":"~"+money(c)}</span></li>`;
   }).join("");
 }
-function estimate(m){ return STEPS.filter(s=>s.modes.includes(m)).reduce((a,s)=>a+(s.k==="style"&&m==="preview"?s.cost/10:s.cost),0); }
+const estimate=m=>STEPS.filter(s=>s.modes.includes(m)).reduce((a,s)=>a+(s.k==="style"&&m==="preview"?s.cost/10:s.cost),0);
+const usingModel=()=>$("adv3d").open && $("char").value;
 
 function renderNew(){
   document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.m===mode));
@@ -150,86 +178,142 @@ function renderNew(){
   $("f-job").classList.toggle("hidden",mode==="full");
   $("plan").innerHTML=planHTML(mode);
   $("est").textContent="~"+money(estimate(mode))+" (first run more: model downloads)";
+  if(!dnTouched) $("dn").value=usingModel()?0.4:0.6;
   $("dnv").textContent=$("dn").value;
+  $("dnhint").textContent=usingModel()?"Lower = steadier, closer to your model. Higher = more LoRA style, more flicker."
+    :"With the mannequin, 0.55–0.7 turns it into your character. Higher = closer to the reference, more flicker.";
 }
 document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>{mode=b.dataset.m;renderNew();});
-$("dn").oninput=renderNew;
+$("dn").oninput=()=>{dnTouched=true;renderNew();};
+$("adv3d").ontoggle=renderNew; $("char").onchange=()=>{renderNew();bmWarn();};
+$("desc").oninput=()=>{descTouched=true;};
 
-function fill(sel, items, keep){ const v=sel.value; sel.innerHTML=items.length?items.map(i=>`<option>${i}</option>`).join(""):`<option value="">(none in B2 yet)</option>`; if(items.includes(v)) sel.value=v; }
-
-async function upload(file, kind, statEl){
-  statEl.textContent=`Uploading ${file.name} (${(file.size/1e6).toFixed(0)} MB)…`;
-  const r=await fetch(`/api/upload?kind=${kind}&name=${encodeURIComponent(file.name)}`,{method:"POST",body:file});
-  const j=await r.json(); statEl.textContent=j.ok?`Saved to B2: ${j.path}`:`Upload failed: ${j.error}`; return j.ok?j.path:"";
+// ---------- uploads: XHR so you see real progress; the page stays quiet while the picker is open ----------
+function upload(file, kind, box){
+  return new Promise(res=>{
+    const bar=box.querySelector("i"), txt=box.querySelector(".mute"); box.classList.remove("hidden");
+    const mb=(file.size/1e6).toFixed(file.size>1e7?0:1);
+    const x=new XMLHttpRequest(); x.open("POST",`/api/upload?kind=${kind}&name=${encodeURIComponent(file.name)}`);
+    x.upload.onprogress=e=>{ if(e.lengthComputable){ const p=e.loaded/e.total*100; bar.style.width=p+"%"; txt.textContent=`Sending ${file.name}: ${p.toFixed(0)}% of ${mb} MB`; } };
+    x.onload=()=>{ let j={}; try{j=JSON.parse(x.responseText)}catch(e){}
+      if(j.ok){ bar.style.width="100%"; txt.textContent="On the portal. Saving to B2 in the background, you can carry on."; box.dataset.key=j.key; res(j.path); }
+      else { txt.innerHTML=`<span class="bad">Upload failed: ${esc(j.error||x.status)}</span>`; res(""); } };
+    x.onerror=()=>{ txt.innerHTML='<span class="bad">Upload failed: is the portal still running?</span>'; res(""); };
+    x.send(file);
+  });
 }
-$("video").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; uploadedVideo=await upload(f,"input",$("vstat"));
-  if(!$("job").value) $("job").value=f.name.replace(/\.[^.]+$/,"").replace(/[^A-Za-z0-9_-]/g,"_"); poll(); };
-$("up-char").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"characters",$("upstat")).then(poll);
-$("up-lora").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"loras",$("upstat")).then(poll);
-$("up-bm").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"bone_maps",$("upstat")).then(poll);
+function openPicker(input){ picking=true; input.value=""; input.click(); setTimeout(()=>picking=false, 60000); }
+$("pick-video").onclick=()=>openPicker($("video"));
+$("video").onchange=async e=>{ picking=false; const f=e.target.files[0]; if(!f) return;
+  $("vname").textContent=f.name;
+  if(!$("job").value) $("job").value=f.name.replace(/\.[^.]+$/,"").replace(/[^A-Za-z0-9_-]/g,"_");
+  uploadedVideo=await upload(f,"input",$("vup")); };
+$("refimg").onchange=async e=>{ picking=false; const f=e.target.files[0]; if(!f) return;
+  const p=await upload(f,"refs",$("rup")); if(p){ selRef=p.split("/").pop(); descTouched=false; $("desc").value=""; $("descstate").textContent="(Claude is looking at it…)"; drawRefs(true); } };
+$("up-char").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"characters",$("rup"));
+$("up-bm").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"bone_maps",$("rup"));
+$("up-lora").onchange=e=>e.target.files[0]&&upload(e.target.files[0],"loras",$("lup"));
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ picking=false; poll(); } });
 $("jobsel").onchange=()=>{$("job").value=$("jobsel").value};
+
+function drawRefs(force){
+  const refs=(ST&&ST.lists&&ST.lists.refs)||[];
+  if(selRef && !refs.includes(selRef)) refs.unshift(selRef);
+  if(!changed("refs",[refs,selRef]) && !force) return;
+  $("refs").innerHTML=`<button class="ref add" type="button" id="addref"><b>＋</b>Add image</button>`+
+    (refs.length?"":`<div class="ref none">Your reference images will show here</div>`)+
+    refs.map(r=>`<button class="ref ${r===selRef?"on":""}" type="button" data-r="${esc(r)}"><img loading="lazy" src="/api/ref?name=${encodeURIComponent(r)}" alt=""></button>`).join("");
+  $("addref").onclick=()=>openPicker($("refimg"));
+  document.querySelectorAll(".ref[data-r]").forEach(b=>b.onclick=()=>{ selRef=b.dataset.r===selRef?"":b.dataset.r; descTouched=false; loadDesc(); drawRefs(true); });
+}
+async function loadDesc(){
+  if(!selRef){ $("descstate").textContent=""; return; }
+  const d=await (await fetch("/api/refdesc?name="+encodeURIComponent(selRef))).json();
+  showDesc(d);
+}
+function showDesc(d){
+  if(!d) return;
+  $("descstate").textContent=d.state==="running"?"(Claude is looking at it…)":d.state==="error"?"":d.state==="done"?"(written by Claude, edit if you like)":"";
+  if(!descTouched && d.text && d.state!=="running") $("desc").value=d.text;
+  if(d.state==="error") $("descstate").innerHTML=`<span class="warn">${esc(d.text)}</span>`;
+}
+function bmWarn(){ const L=(ST&&ST.lists)||{}, ch=$("char").value, bm=ch.replace(/\.[^.]+$/,"")+".json";
+  $("bmwarn").innerHTML= ch && !(L.bone_maps||[]).includes(bm) ? `<span class="warn">No bone map yet (${esc(bm)}). Ask Claude Code: “make the bone map for ${esc(ch)}”.</span>`:""; }
 
 $("go").onclick=async()=>{
   $("goerr").textContent="";
-  const body={mode, job:$("job").value || $("jobsel").value, video:uploadedVideo, character:$("char").value, lora:$("lora").value,
-    prompt:$("prompt").value, style_tag:$("tag").value||"v1", denoise:+$("dn").value, preview_every:mode==="preview"?10:1};
-  if(mode==="full"&&!uploadedVideo) return $("goerr").textContent="Pick a video first.";
-  if(!body.character||!body.lora) return $("goerr").textContent="Pick a character and a LoRA (upload them above if the lists are empty).";
+  const look=$("prompt").value.trim(), desc=$("desc").value.trim();
+  const body={mode, job:$("job").value || $("jobsel").value, video:uploadedVideo, character:usingModel()?$("char").value:"",
+    ref:selRef, lora:$("lora").value, prompt:[look,desc].filter(Boolean).join(", "), style_tag:$("tag").value||"v1",
+    denoise:+$("dn").value, preview_every:mode==="preview"?10:1};
+  if(mode==="full"&&!uploadedVideo) return $("goerr").textContent="Choose a video first.";
+  if(!usingModel()&&!selRef&&!desc) return $("goerr").textContent="Pick a reference image (or describe the character).";
+  if(!body.lora) return $("goerr").textContent="Pick a LoRA (upload one under Look if the list is empty).";
   $("go").disabled=true;
   const r=await fetch("/api/start",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
-  $("go").disabled=false; if(!j.ok) $("goerr").textContent=j.error; poll();
+  $("go").disabled=false; if(!j.ok) $("goerr").textContent=j.error; else { last.run=null; poll(); window.scrollTo(0,0); }
 };
 $("stop").onclick=async()=>{ if(confirm("Stop the run and delete every video2anim pod?")){ await fetch("/api/stop",{method:"POST"}); poll(); } };
 
-function ago(t){ const s=Math.max(0,(ST.now-t)); return s<90?s+"s":Math.round(s/60)+" min"; }
+function fill(sel, items, key, empty){ if(!changed("sel_"+key,items)) return; const v=sel.value;
+  sel.innerHTML=items.length?items.map(i=>`<option>${esc(i)}</option>`).join(""):`<option value="">${empty}</option>`; if(items.includes(v)) sel.value=v; }
+const ago=t=>{ const s=Math.max(0,(ST.now-t)); return s<90?s+"s":Math.round(s/60)+" min"; };
 
 function renderState(){
   const L=ST.lists||{}, led=L.ledger;
-  if(ST.missing_keys&&ST.missing_keys.length){ $("keys").style.display=""; $("keys").innerHTML=`<b class="warn">Keys not found:</b> ${ST.missing_keys.join(", ")}<div class="mute">Start the portal from the Termux shell where your keys load.</div>`; } else $("keys").style.display="none";
-  if(led){ $("b-left").textContent=money(led.remaining); $("b-sub").textContent=`left of ${money(led.total)} · ${money(led.spent)} spent`;
+  if(changed("keys",ST.missing_keys)){ const m=ST.missing_keys||[];
+    $("keys").style.display=m.length?"":"none";
+    $("keys").innerHTML=m.length?`<b class="warn">Keys not found:</b> ${m.join(", ")}<div class="mute">Start the portal from the Termux shell where your keys load.</div>`:""; }
+  if(led && changed("led",led)){ $("b-left").textContent=money(led.remaining); $("b-sub").textContent=`left of ${money(led.total)} · ${money(led.spent)} spent`;
     $("b-bar").style.width=Math.min(100,led.spent/led.total*100)+"%";
     $("b-runs").textContent=`≈ ${Math.floor(led.remaining/estimate("full"))} new videos, or ≈ ${Math.floor(led.remaining/estimate("restyle"))} new looks left`; }
-  fill($("char"),L.characters||[]); fill($("lora"),L.loras||[]); fill($("jobsel"),L.jobs||[]);
-  const ch=$("char").value, bm=ch.replace(/\.[^.]+$/,"")+".json";
-  $("bmwarn").innerHTML= ch && !(L.bone_maps||[]).includes(bm) ? `<span class="warn">No bone map yet (${bm}). Ask Claude Code: “make the bone map for ${ch}”.</span>`:"";
-  if(!$("prompt").value && ST.config) $("prompt").value=ST.config.STYLE_PROMPT||"";
-  // pods
-  const pods=L.pods||[]; $("pods").innerHTML=pods.length?pods.map(p=>`<div class="row"><span>${p.name||p.id}</span><span class="${p.status==="RUNNING"?"warn":""}">${p.status||""} ${p.rate?money(p.rate)+"/hr":""}</span></div>`).join(""):(L.pod_error?`<span class="bad">${L.pod_error}</span>`:"None running — nothing is billing.");
-  // live
+  fill($("char"),L.characters||[],"char","(no rigged models uploaded)"); fill($("lora"),L.loras||[],"lora","(no LoRAs in B2 yet: upload one)");
+  fill($("jobsel"),L.jobs||[],"jobs","(no earlier videos yet)"); bmWarn();
+  if(!$("prompt").value && ST.config && !last.promptSet){ $("prompt").value=(ST.config.STYLE_PROMPT||"").replace(/,?\s*pure white background/,""); last.promptSet=1; }
+  drawRefs(false);
+  if(selRef) showDesc((ST.ref_desc||{})[selRef]);
+  // background B2 upload status
+  for(const [box,key] of [[$("vup"),$("vup").dataset.key],[$("rup"),$("rup").dataset.key],[$("lup"),$("lup").dataset.key]]){
+    const u=key&&(ST.uploads||{})[key]; if(!u) continue; const t=box.querySelector(".mute");
+    if(u.state==="done") t.innerHTML=`<span class="ok">Saved to B2 ✓</span>`; else if(u.state==="error") t.innerHTML=`<span class="bad">B2 upload failed: ${esc(u.error)}</span>`;
+  }
+  const pods=L.pods||[];
+  if(changed("pods",[pods,L.pod_error])) $("pods").innerHTML=pods.length?pods.map(p=>`<div class="row"><span>${esc(p.name||p.id)}</span><span class="${p.status==="RUNNING"?"warn":""}">${esc(p.status||"")} ${p.rate?money(p.rate)+"/hr":""}</span></div>`).join(""):(L.pod_error?`<span class="bad">${esc(L.pod_error)}</span>`:"None running. Nothing is billing.");
   const R=ST.run, S=ST.status||{};
   const active=R&&["prep","mocap","render"].includes(R.phase);
-  $("live").classList.toggle("hidden",!R);
-  $("new").classList.toggle("hidden",!!active);
-  if(R){
+  $("live").classList.toggle("hidden",!R); $("new").classList.toggle("hidden",!!active);
+  if(R && changed("run",[R,S,ST.log,ST.claude])){
     $("l-job").textContent=R.job+" · "+R.mode;
     const failed=R.phase==="failed";
     let cur = R.phase==="prep" ? (R.mode==="full"?"upload":"render_setup") : (S.stage&&S.stage!=="queued"?S.stage:(R.phase==="mocap"?"mocap_setup":"render_setup"));
     if(R.phase==="done") cur="done";
     $("l-plan").innerHTML=planHTML(R.mode,cur,failed);
     $("l-msg").innerHTML = R.phase==="done" ? `<span class="ok">Finished.</span> Your video is in Results.` :
-       failed ? `<span class="bad">Stopped:</span> ${R.error||S.msg||""}` :
-       R.phase==="stopped" ? "Stopped by you." : (S.msg || (R.events.at(-1)||[,""])[1]);
+       failed ? `<span class="bad">Stopped:</span> ${esc(R.error||S.msg||"")}` :
+       R.phase==="stopped" ? "Stopped by you." : esc(S.msg || (R.events.at(-1)||[,""])[1]);
     $("l-pct").style.width=(R.phase==="done"?100:(S.pct||0))+"%";
-    $("l-pod").textContent=R.pod&&active?`pod ${R.pod} · ${money(R.pod_rate||0)}/hr · ~${money(S.pod_spent||0)} so far`:"";
-    $("l-time").textContent=S.ts&&active?`updated ${ago(S.ts)} ago`:"";
-    $("l-events").innerHTML=(R.events||[]).slice().reverse().map(e=>`<div class="ev">${new Date(e[0]*1000).toLocaleTimeString()} · <b>${e[1]}</b></div>`).join("");
+    $("l-events").innerHTML=(R.events||[]).slice().reverse().map(e=>`<div class="ev">${new Date(e[0]*1000).toLocaleTimeString()} · <b>${esc(e[1])}</b></div>`).join("");
     $("l-log").textContent=ST.log||"waiting for the pod…";
     $("stop").classList.toggle("hidden",!active);
     const cl=ST.claude;
-    $("l-claude").innerHTML = failed ? (cl ? `<div class="now"><b>Claude Code:</b><div style="white-space:pre-wrap;margin-top:6px">${cl.text.replace(/</g,"&lt;")}</div></div>${cl.state==="done"?'<button class="btn ghost" onclick="newRun()">Back to new run</button>':''}`
-        : `<button class="btn" onclick="fetch('/api/ask_claude',{method:'POST'}).then(poll)">Ask Claude to find &amp; fix the problem</button><button class="btn ghost" onclick="newRun()">Back to new run</button>`)
-      : (["done","stopped"].includes(R.phase)?'<button class="btn ghost" onclick="newRun()">Start another run</button>':"");
+    $("l-claude").innerHTML = failed ? (cl ? `<div class="now"><b>Claude Code:</b><div style="white-space:pre-wrap;margin-top:6px">${esc(cl.text)}</div></div>`
+        : `<button class="btn" onclick="fetch('/api/ask_claude',{method:'POST'}).then(poll)">Ask Claude to find &amp; fix the problem</button>`) : "";
   }
+  if(R){ $("l-pod").textContent=R.pod&&active?`pod ${R.pod} · ${money(R.pod_rate||0)}/hr · ~${money(S.pod_spent||0)} so far`:"";
+         $("l-time").textContent=S.ts&&active?`updated ${ago(S.ts)} ago`:""; }
   const res=ST.results||[];
-  $("reslist").innerHTML=res.length?res.map(p=>`<div style="margin-top:10px"><div class="row"><b>${p.split("/").pop()}</b><a class="mute" href="/api/file?path=${encodeURIComponent(p)}" download>save</a></div><video controls preload="none" src="/api/file?path=${encodeURIComponent(p)}"></video></div>`).join(""):"Nothing yet.";
+  if(changed("res",res)) $("reslist").innerHTML=res.length?res.map(p=>`<div style="margin-top:10px"><div class="row"><b>${esc(p.split("/").pop())}</b><a class="mute" href="/api/file?path=${encodeURIComponent(p)}" download>save</a></div><video controls preload="none" src="/api/file?path=${encodeURIComponent(p)}"></video></div>`).join(""):"Nothing yet.";
 }
-function newRun(){ $("live").classList.add("hidden"); $("new").classList.remove("hidden"); window.scrollTo(0,0); }
 
+let busy=false;
 async function poll(){
+  if(busy || picking || document.hidden) return;      // never refresh while you're choosing a file
+  busy=true;
   try{ ST=await (await fetch("/api/state")).json(); $("conn").textContent="live"; $("conn").className="ok"; renderState(); }
-  catch(e){ $("conn").textContent="portal offline — is Termux running?"; $("conn").className="bad"; }
+  catch(e){ $("conn").textContent="portal offline: is Termux running?"; $("conn").className="bad"; }
+  finally{ busy=false; }
 }
-renderNew(); poll(); setInterval(poll,5000);
+renderNew(); drawRefs(true); poll(); setInterval(poll,5000);
 if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
 </script>
 </body>

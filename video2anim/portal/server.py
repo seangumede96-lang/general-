@@ -141,7 +141,10 @@ def launch(stage, job_env):
 
 # ---------------- run state ----------------
 lock = threading.Lock()
-S = {"run": None, "status": None, "log": "", "lists": {}, "lists_ts": 0, "claude": None}
+S = {"run": None, "status": None, "log": "", "lists": {}, "lists_ts": 0, "claude": None, "uploads": {}, "ref_desc": {}}
+REF_DIR = os.path.expanduser("~/.v2a_refs"); os.makedirs(REF_DIR, exist_ok=True)
+refresh_lock = threading.Lock()
+IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
 if os.path.exists(STATE_FILE):
     try: S["run"] = json.load(open(STATE_FILE))
     except Exception: pass
@@ -168,12 +171,22 @@ def run_job(p):
     """Background thread: drives one run start to finish."""
     try:
         job = p["job"]
-        job_env = {"JOB_NAME": job, "INPUT_VIDEO": p.get("video", ""), "CHARACTER_FILE": "characters/" + p["character"],
-                   "BONE_MAP": "bone_maps/" + os.path.splitext(p["character"])[0] + ".json",
+        char = p.get("character") or ""
+        job_env = {"JOB_NAME": job, "INPUT_VIDEO": p.get("video", ""),
+                   "CHARACTER_FILE": ("characters/" + char) if char else "",
+                   "BONE_MAP": ("bone_maps/" + os.path.splitext(char)[0] + ".json") if char else "",
+                   "REF_IMAGE": ("refs/" + p["ref"]) if p.get("ref") else "",
                    "LORA_FILE": p["lora"], "STYLE_PROMPT": p["prompt"], "STYLE_TAG": p["style_tag"],
                    "DENOISE": str(p["denoise"]), "PREVIEW_EVERY": str(p["preview_every"]),
                    "RESTYLE_ONLY": "1" if p["mode"] in ("restyle", "preview") else "0",
                    "PERSON_INDEX": str(p.get("person", 0))}
+        for key in [k for k in (p.get("video"), ("refs/" + p["ref"]) if p.get("ref") else None) if k]:
+            while (S["uploads"].get(key) or {}).get("state") == "uploading":
+                if not S["run"]["events"] or "Waiting for" not in S["run"]["events"][-1][1]:
+                    note(f"Waiting for {key.split('/')[-1]} to finish saving to B2", phase="prep")
+                time.sleep(5)
+            if (S["uploads"].get(key) or {}).get("state") == "error":
+                raise RuntimeError(f"{key} didn't reach B2: {S['uploads'][key].get('error')}")
         note("Uploading the latest pipeline code to B2", phase="prep")
         b2("sync", "--no-progress", "--exclude-regex", r"(portal/.*|.*\.zip)", CODE, f"b2://{BUCKET}/code/video2anim")
         b2_write(f"jobs/{job}/status.json", json.dumps({"stage": "queued", "msg": "Waiting for first pod", "ts": int(time.time())}))
@@ -192,6 +205,8 @@ def run_job(p):
         else: note("All done — your video is in Results", phase="done")
     except Exception as e:
         note(f"Problem: {e}", phase="failed", error=str(e))
+    finally:
+        refresh_lists(force=True)
 
 
 def watch(job, stage, pid, rate):
@@ -234,7 +249,15 @@ def kill(pid):
 
 def refresh_lists(force=False):
     if not force and time.time() - S["lists_ts"] < 60: return
-    lists = {"characters": [f for f in b2_ls("characters/") if f.lower().endswith((".fbx", ".glb", ".gltf", ".blend"))],
+    if not refresh_lock.acquire(blocking=False): return          # one refresh at a time
+    try: _refresh()
+    finally: refresh_lock.release()
+
+
+def _refresh():
+    S["lists_ts"] = time.time()
+    lists = {"results": results(S["run"]["job"]) if S["run"] else [],
+             "refs": [f for f in b2_ls("refs/") if f.lower().endswith(IMG_EXT)],"characters": [f for f in b2_ls("characters/") if f.lower().endswith((".fbx", ".glb", ".gltf", ".blend"))],
              "bone_maps": b2_ls("bone_maps/"), "loras": [f for f in b2_ls("loras/") if f.endswith(".safetensors")],
              "videos": b2_ls("input/"), "jobs": b2_ls("jobs/"), "ledger": ledger()}
     try:
@@ -271,6 +294,38 @@ def ask_claude():
         S["claude"] = {"state": "done", "text": f"Couldn't run Claude Code here: {e}"}
 
 
+def describe_ref(name, path):
+    """Claude Code looks at the reference image and writes the character prompt the style step will use."""
+    S["ref_desc"][name] = {"state": "running", "text": ""}
+    prompt = (f"Read the image file at {path}. Write ONE image-generation prompt (under 90 words, plain text, no preamble) "
+              "describing this character so an AI can redraw them the same way every frame: body type and build, skin tone, "
+              "face, hair style and colour, every piece of clothing with colours and materials, accessories, and the art style. "
+              "Output only the prompt.")
+    try:
+        r = subprocess.run(["claude", "-p", prompt, "--allowedTools", "Read"], capture_output=True, text=True, timeout=300)
+        text = (r.stdout or "").strip()
+        if not text: raise RuntimeError((r.stderr or "no answer").strip()[-300:])
+        S["ref_desc"][name] = {"state": "done", "text": text}
+        b2_write(f"refs/{os.path.splitext(name)[0]}.txt", text)
+    except Exception as e:
+        S["ref_desc"][name] = {"state": "error", "text": f"Couldn't describe it automatically ({e}). Type a description instead."}
+
+
+def push_upload(kind, name, tmp):
+    key = f"{kind}/{name}"
+    S["uploads"][key] = {"state": "uploading", "name": name, "kind": kind}
+    try:
+        b2("file", "upload", "--no-progress", "--quiet", BUCKET, tmp, key, timeout=7200)
+        S["uploads"][key]["state"] = "done"
+        if kind == "refs":
+            keep = os.path.join(REF_DIR, name); shutil.copy(tmp, keep); describe_ref(name, keep)
+    except Exception as e:
+        S["uploads"][key].update(state="error", error=str(e)[-200:])
+    finally:
+        os.path.exists(tmp) and os.remove(tmp)
+        refresh_lists(force=True)
+
+
 # ---------------- HTTP ----------------
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -297,9 +352,25 @@ class H(BaseHTTPRequestHandler):
             r = S["run"]
             missing = [k for k, v in KEYS.items() if not v]
             return self.send(200, {"run": r, "status": S["status"], "log": S["log"], "lists": S["lists"],
-                                   "results": results(r["job"]) if r else [], "claude": S["claude"],
+                                   "results": S["lists"].get("results", []), "claude": S["claude"],
+                                   "uploads": S["uploads"], "ref_desc": S["ref_desc"],
                                    "config": {k: C[k] for k in C if not k.startswith("B2_")}, "missing_keys": missing,
                                    "now": int(time.time())})
+        if u.path == "/api/ref":                          # thumbnail of a reference image
+            name = os.path.basename(q.get("name", [""])[0]); local = os.path.join(REF_DIR, name)
+            if not os.path.exists(local):
+                try: b2("file", "download", "--no-progress", f"b2://{BUCKET}/refs/{name}", local, timeout=120)
+                except Exception: return self.send(404, {"error": "missing"})
+            ext = os.path.splitext(name)[1].lower().strip(".")
+            return self.send(200, open(local, "rb").read(), "image/" + ("jpeg" if ext == "jpg" else ext))
+        if u.path == "/api/refdesc":
+            name = os.path.basename(q.get("name", [""])[0])
+            d = S["ref_desc"].get(name)
+            if not d:
+                t = b2_read(f"refs/{os.path.splitext(name)[0]}.txt")
+                d = {"state": "done", "text": t} if t else {"state": "none", "text": ""}
+                if t: S["ref_desc"][name] = d
+            return self.send(200, d)
         if u.path == "/api/file":
             path = q.get("path", [""])[0]
             if not path.startswith("jobs/") or ".." in path: return self.send(400, {"error": "bad path"})
@@ -330,19 +401,18 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = parse_qs(u.query)
         if u.path == "/api/upload":                       # raw file body -> B2 input/ characters/ loras/ bone_maps/
             kind = q.get("kind", ["input"])[0]; name = os.path.basename(q.get("name", ["upload.bin"])[0])
-            if kind not in ("input", "characters", "loras", "bone_maps"): return self.send(400, {"error": "bad kind"})
+            if kind not in ("input", "characters", "loras", "bone_maps", "refs"): return self.send(400, {"error": "bad kind"})
             name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
-            n = int(self.headers.get("Content-Length", 0)); tmp = os.path.join(tempfile.gettempdir(), name)
+            n = int(self.headers.get("Content-Length", 0))
+            tmp = os.path.join(tempfile.gettempdir(), f"up_{int(time.time()*1000)}_{name}")
             with open(tmp, "wb") as f:
                 while n > 0:
-                    chunk = self.rfile.read(min(1 << 20, n)); f.write(chunk); n -= len(chunk)
-            try:
-                b2("file", "upload", "--no-progress", "--quiet", BUCKET, tmp, f"{kind}/{name}", timeout=3600)
-            except Exception as e:
-                return self.send(500, {"error": str(e)})
-            finally: os.remove(tmp)
-            refresh_lists(force=True)
-            return self.send(200, {"ok": True, "path": f"{kind}/{name}"})
+                    chunk = self.rfile.read(min(1 << 20, n))
+                    if not chunk: break
+                    f.write(chunk); n -= len(chunk)
+            # phone -> portal is instant; portal -> B2 carries on in the background
+            threading.Thread(target=push_upload, args=(kind, name, tmp), daemon=True).start()
+            return self.send(200, {"ok": True, "path": f"{kind}/{name}", "key": f"{kind}/{name}"})
         if u.path == "/api/start":
             if S["run"] and S["run"].get("phase") in ("prep", "mocap", "render"):
                 return self.send(409, {"error": "A run is already going"})

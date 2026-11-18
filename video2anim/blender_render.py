@@ -60,14 +60,17 @@ if E("VOID_WHITE", 1):
 
 # ---------- camera: wide lens, slow orbit around the character ----------
 arm = next((o for o in sc.objects if o.type == "ARMATURE"), None)
+root = bpy.data.objects.get("MannequinRoot")              # mannequin mode
 if sc.camera is None:
     bpy.context.view_layer.update()
     target = arm.matrix_world.translation.copy() if arm else Vector((0, 0, 1))
-    height = max((arm.matrix_world @ b.tail_local).z for b in arm.data.bones) if arm else 1.8
+    height = max((arm.matrix_world @ b.tail_local).z for b in arm.data.bones) if arm else float(sc.get("v2a_height", 1.8))
     target.z = height * 0.55
     pivot = bpy.data.objects.new("CamPivot", None); sc.collection.objects.link(pivot); pivot.location = target
     if arm:   # follow the character's travel
         c = pivot.constraints.new("COPY_LOCATION"); c.target = arm; c.subtarget = arm.pose.bones[0].name; c.use_z = False
+    elif root:
+        c = pivot.constraints.new("COPY_LOCATION"); c.target = root; c.use_z = False
     cd = bpy.data.cameras.new("Cam"); cd.lens = E("LENS_MM", 16); cd.clip_start = 0.05
     cam = bpy.data.objects.new("Cam", cd); sc.collection.objects.link(cam); cam.parent = pivot
     cam.location = (0, -height * 0.95, 0)          # close: wide lens fills frame

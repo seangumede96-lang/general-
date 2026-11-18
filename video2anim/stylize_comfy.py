@@ -15,6 +15,8 @@ ap.add_argument("--frames", required=True); ap.add_argument("--comfy", required=
 ap.add_argument("--out", required=True); ap.add_argument("--host", default="http://127.0.0.1:8188")
 ap.add_argument("--bench", type=int, default=6)
 ap.add_argument("--every", type=int, default=1, help="stylize every Nth frame only (cheap preview)")
+ap.add_argument("--ref", default="", help="character reference image (copied into ComfyUI input)")
+ap.add_argument("--template", default="", help="API-format workflow with {{FRAME}} {{REF}} {{PROMPT}} {{PREFIX}} ... placeholders")
 a = ap.parse_args()
 
 def get(path):
@@ -29,7 +31,30 @@ types = get("/object_info/CLIPLoader")["CLIPLoader"]["input"]["required"]["type"
 clip_type = next((t for t in types if "krea" in t.lower()), None) or next((t for t in types if "qwen" in t.lower()), None)
 if not clip_type: sys.exit(f"No Krea/Qwen text-encoder type in this ComfyUI: {types}. Update ComfyUI.")
 
+TEMPLATE = json.load(open(a.template)) if a.template and os.path.exists(a.template) else None
+REF_NAME = ""
+if a.ref and os.path.exists(a.ref):
+    os.makedirs(os.path.join(a.comfy, "input", "v2a"), exist_ok=True)
+    REF_NAME = "v2a/ref" + os.path.splitext(a.ref)[1]
+    shutil.copy(a.ref, os.path.join(a.comfy, "input", REF_NAME))
+print(f"style mode: {'reference-image workflow' if TEMPLATE and REF_NAME else 'img2img'}; reference image: {REF_NAME or 'none'}")
+
+
+def fill_template(img_name, prefix):
+    vals = {"{{FRAME}}": img_name, "{{REF}}": REF_NAME, "{{PROMPT}}": os.environ.get("STYLE_PROMPT", ""),
+            "{{PREFIX}}": prefix, "{{SEED}}": E("SEED", 12345), "{{DENOISE}}": E("DENOISE", 0.4),
+            "{{STEPS}}": E("STEPS", 8), "{{CFG}}": E("CFG", 1.0), "{{LORA}}": os.environ.get("LORA_FILE", ""),
+            "{{LORA_STRENGTH}}": E("LORA_STRENGTH", 0.9), "{{W}}": E("STYLE_W", 1088), "{{H}}": E("STYLE_H", 1920)}
+    def walk(o):
+        if isinstance(o, dict): return {k: walk(v) for k, v in o.items()}
+        if isinstance(o, list): return [walk(v) for v in o]
+        if isinstance(o, str) and o in vals: return vals[o]
+        return o
+    return walk(TEMPLATE)
+
+
 def workflow(img_name, prefix):
+    if TEMPLATE and REF_NAME: return fill_template(img_name, prefix)
     return {
       "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "krea2_turbo_fp8_scaled.safetensors", "weight_dtype": "default"}},
       "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_4b_fp8_scaled.safetensors", "type": clip_type}},
