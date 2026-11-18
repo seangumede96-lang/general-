@@ -10,7 +10,7 @@ JOB="$B2_BUCKET/jobs/$JOB_NAME"
 pip install -q --upgrade b2 huggingface_hub
 source ./status.sh
 selfdestruct () { st done "Finished: $NAME.mp4 — render pod deleted" 100 force; sleep 3
-selfdestruct 2>/dev/null || curl -s -X DELETE "https://rest.runpod.io/v1/pods/$RUNPOD_POD_ID" -H "Authorization: Bearer $RUNPOD_API_KEY"; }
+selfdestruct 2>/dev/null || curl -s -X DELETE "https://api.runpod.io/v2/pods/$RUNPOD_POD_ID" -H "Authorization: Bearer $RUNPOD_API_KEY"; }
 st render_setup "Render pod is up, checking budget" 0 force
 bash ./ledger.sh check "$STAGE2_CAP_USD" || { st failed "Budget would run out — not starting" "" force; selfdestruct; exit 1; }
 nohup bash ./budget_guard.sh "$STAGE2_RATE_USD_HR" "$STAGE2_CAP_USD" $W/final "$JOB/stage2" render-style >/dev/null 2>&1 &

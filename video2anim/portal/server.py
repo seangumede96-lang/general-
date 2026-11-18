@@ -9,7 +9,7 @@ everything (stage, progress, spend, log, results) on one page. Standard library 
 Keys come from the environment you already set up in Termux:
   RUNPOD_API_KEY, B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY, HF_TOKEN
 """
-import json, os, re, shutil, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
+import json, os, re, shutil, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
 import socket
@@ -117,8 +117,15 @@ def b2_write(path, text):
 
 
 # ---------------- RunPod REST ----------------
+RUNPOD_API = "https://api.runpod.io/v2"   # RunPod's pod API (rest.runpod.io/v1 is gone: the name no longer exists)
+
+
+class PodUnavailable(RuntimeError):
+    """This GPU type has no free machine right now (RunPod answers 400/403): try the next type."""
+
+
 def rp(method, path, body=None):
-    req = urllib.request.Request("https://rest.runpod.io/v1" + path, method=method,
+    req = urllib.request.Request(RUNPOD_API + path, method=method,
                                  data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Authorization": f"Bearer {KEYS['RUNPOD_API_KEY']}",
                                           "Content-Type": "application/json"})
@@ -127,7 +134,9 @@ def rp(method, path, body=None):
             with urllib.request.urlopen(req, timeout=60) as r:
                 t = r.read().decode(); return json.loads(t) if t else {}
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"RunPod {e.code}: {e.read().decode()[:300]}")
+            detail = e.read().decode()[:300]
+            if method == "POST" and path == "/pods" and e.code in (400, 403): raise PodUnavailable(f"RunPod {e.code}: {detail}")
+            raise RuntimeError(f"RunPod {e.code}: {detail}")
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             never_sent = isinstance(getattr(e, "reason", None), socket.gaierror)   # name lookup failed: nothing reached RunPod
             if never_sent and attempt < 3:
@@ -141,6 +150,31 @@ def rp(method, path, body=None):
             time.sleep(3 * (attempt + 1))
 
 
+def create_pod(name, image, gpus, disk, env, cmd):
+    """Start a pod on RunPod's own data centres (SECURE), trying the GPU types in order (v2 takes one
+    type per request). cmd runs under bash. Returns the pod (id, cost = $/hr, status ...)."""
+    last = None
+    for g in gpus:
+        try:
+            return rp("POST", "/pods", {"name": name[:60], "image": image, "gpu": {"id": g, "count": 1},
+                                        "cloud": "SECURE", "disk": disk, "env": env,
+                                        "args": json.dumps({"entrypoint": ["bash", "-c"], "cmd": [cmd]})})
+        except PodUnavailable as e:
+            last = e
+    raise RuntimeError(f"No free GPU of these types right now: {', '.join(gpus)} ({last})")
+
+
+def list_pods():
+    """Every pod on the account (the v2 list comes in pages)."""
+    out, cursor = [], None
+    for _ in range(20):
+        r = rp("GET", "/pods" + (f"?cursor={urllib.parse.quote(cursor)}" if cursor else "")) or {}
+        out += r.get("pods", []) if isinstance(r, dict) else r
+        cursor = (r.get("pagination") or {}).get("nextCursor") if isinstance(r, dict) else None
+        if not cursor: break
+    return out
+
+
 def runpod_balance():
     """Real account balance from RunPod (GraphQL `myself`)."""
     req = urllib.request.Request("https://api.runpod.io/graphql", method="POST",
@@ -151,6 +185,10 @@ def runpod_balance():
     me = (d.get("data") or {}).get("myself") or {}
     if "clientBalance" not in me: raise RuntimeError(str(d.get("errors") or d)[:200])
     return {"balance": round(float(me["clientBalance"]), 2), "spend_per_hr": round(float(me.get("currentSpendPerHr") or 0), 2)}
+
+
+# Claude Code's default model (Fable 5.2) needs paid usage credits on the owner's plan; Sonnet is included.
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet")
 
 
 def claude_bin():
@@ -199,19 +237,11 @@ def launch(stage, job_env):
     cmd = (f"pip -q install b2 && b2 sync --no-progress b2://{BUCKET}/code/video2anim /workspace/v2a "
            f"&& bash /workspace/v2a/{s['script']}; sleep 30")
     envs = {**pod_keys(stage, job_env["JOB_NAME"]), **job_env}
-    last = None
     # RunPod's own data centres only: community machines are run by strangers.
-    for cloud in ("SECURE",):
-        try:
-            pod = rp("POST", "/pods", {
-                "name": f"v2a-{stage}-{job_env['JOB_NAME']}"[:60], "imageName": IMAGE,
-                "gpuTypeIds": s["gpus"], "gpuCount": 1, "cloudType": cloud,
-                "containerDiskInGb": s["disk"], "volumeInGb": 0, "env": envs,
-                "dockerStartCmd": ["bash", "-c", cmd]})
-            return pod, cloud
-        except Exception as e:
-            last = e
-    raise RuntimeError(f"Couldn't start a {stage} pod: {last}")
+    try:
+        return create_pod(f"v2a-{stage}-{job_env['JOB_NAME']}", IMAGE, s["gpus"], s["disk"], envs, cmd), "SECURE"
+    except Exception as e:
+        raise RuntimeError(f"Couldn't start a {stage} pod: {e}")
 
 
 # ---------------- run state ----------------
@@ -281,7 +311,7 @@ def run_job(p):
                 raise RuntimeError(f"RunPod balance is ${led['balance']:.2f}, less than this stage's ${cap_usd:.2f} cap. Top up first.")
             note(f"Starting the {stage} pod on RunPod", phase=stage)
             pod, cloud = launch(stage, {**job_env, STAGE_POD[stage]["rate"]: str(C[STAGE_POD[stage]["rate"]])})
-            pid = pod.get("id"); rate = float(pod.get("costPerHr") or C[STAGE_POD[stage]["rate"]])
+            pid = pod.get("id"); rate = float(pod.get("cost") or pod.get("costPerHr") or C[STAGE_POD[stage]["rate"]])
             note(f"{stage} pod {pid} started ({cloud.lower()} cloud, ${rate:.2f}/hr)", pod=pid, pod_rate=rate, pod_start=time.time())
             watch(job, stage, pid, rate)
         if S["run"].get("cancel"): note("Run stopped by you", phase="stopped")
@@ -318,7 +348,7 @@ def watch(job, stage, pid, rate):
             return
         try:
             info = rp("GET", f"/pods/{pid}"); gone = 0
-            if info.get("desiredStatus") in ("EXITED", "TERMINATED"): gone += 3
+            if (info.get("status") or info.get("desiredStatus")) in ("EXITED", "TERMINATED"): gone += 3
         except Exception:
             gone += 1
         if gone >= 3:
@@ -348,8 +378,8 @@ def _refresh():
              "bone_maps": b2_ls("bone_maps/"), "loras": [f for f in b2_ls("loras/") if f.endswith(".safetensors")],
              "videos": b2_ls("input/"), "jobs": b2_ls("jobs/"), "ledger": ledger()}
     try:
-        lists["pods"] = [{"id": x.get("id"), "name": x.get("name"), "status": x.get("desiredStatus"),
-                          "rate": x.get("costPerHr")} for x in (rp("GET", "/pods") or [])]
+        lists["pods"] = [{"id": x.get("id"), "name": x.get("name"), "status": x.get("status") or x.get("desiredStatus"),
+                          "rate": x.get("cost") or x.get("costPerHr")} for x in list_pods()]
     except Exception as e:
         lists["pods"] = []; lists["pod_error"] = str(e)
     with lock: S["lists"], S["lists_ts"] = lists, time.time()
@@ -373,7 +403,7 @@ def ask_claude():
               "Do not start any pods yourself. Never open or view the input video.")
     S["claude"] = {"state": "running", "text": "Claude is looking at the log…"}
     try:
-        res = subprocess.run([claude_bin(), "-p", prompt, "--permission-mode", "acceptEdits",
+        res = subprocess.run([claude_bin(), "-p", "--model", CLAUDE_MODEL, prompt, "--permission-mode", "acceptEdits",
                               "--allowedTools", "Read,Edit,Write,Grep,Glob,Bash(bash -n:*),Bash(python3 -m py_compile:*)"],
                              cwd=CODE, capture_output=True, text=True, timeout=900)
         S["claude"] = {"state": "done", "text": (res.stdout or res.stderr).strip()[-3000:]}
@@ -389,7 +419,7 @@ def describe_ref(name, path):
               "face, hair style and colour, every piece of clothing with colours and materials, accessories, and the art style. "
               "Output only the prompt.")
     try:
-        r = subprocess.run([claude_bin(), "-p", prompt, "--allowedTools", "Read"], capture_output=True, text=True, timeout=300)
+        r = subprocess.run([claude_bin(), "-p", "--model", CLAUDE_MODEL, prompt, "--allowedTools", "Read"], capture_output=True, text=True, timeout=300)
         text = (r.stdout or "").strip()
         if not text: raise RuntimeError((r.stderr or "no answer").strip()[-300:])
         S["ref_desc"][name] = {"state": "done", "text": text}
@@ -426,7 +456,7 @@ def selftest(pod_test=False, log=print):
         miss = [k for k, v in KEYS.items() if not v]
         if miss: raise RuntimeError("missing: " + ", ".join(miss))
     check("Keys loaded", keys)
-    for host in ("rest.runpod.io", "api.runpod.io", "api.backblazeb2.com", "huggingface.co"):
+    for host in ("api.runpod.io", "api.backblazeb2.com", "huggingface.co"):
         def dns(h=host):
             try: _orig_gai(h, 443); return "phone DNS ok"
             except socket.gaierror:
@@ -434,7 +464,7 @@ def selftest(pod_test=False, log=print):
                 if not ips: raise RuntimeError("not found by phone DNS or the DNS-over-HTTPS fallback")
                 return f"phone DNS failed; fallback found {ips[0]} (portal will use it)"
         check(f"Find {host}", dns)
-    check("RunPod key works (list pods)", lambda: f"{len(rp('GET', '/pods') or [])} pods on the account")
+    check("RunPod key works (list pods)", lambda: f"{len(list_pods())} pods on the account")
     check("RunPod balance", lambda: "${balance} left, spending ${spend_per_hr}/hr now".format(**runpod_balance()))
     def b2rw():
         name = f"selftest/{int(time.time())}.txt"; b2_write(name, "hello")
@@ -455,28 +485,27 @@ def selftest(pod_test=False, log=print):
     check("Hugging Face token", hf)
     def cl():
         b = claude_bin()
-        r = subprocess.run([b, "-p", "Reply with exactly: OK"], capture_output=True, text=True, timeout=180)
+        r = subprocess.run([b, "-p", "--model", CLAUDE_MODEL, "Reply with exactly: OK"], capture_output=True, text=True, timeout=180)
         if "OK" not in r.stdout: raise RuntimeError((r.stderr or r.stdout).strip()[-200:] or "no reply")
         return f"{b} answered"
     check("Claude Code runs headless", cl)
     if pod_test:
         def pod():
-            pod = rp("POST", "/pods", {"name": "v2a-selftest", "imageName": "runpod/base:0.6.2-cpu", "gpuTypeIds":
-                     ["NVIDIA RTX A4000", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 3090", "NVIDIA GeForce RTX 4090"],
-                     "gpuCount": 1, "cloudType": "SECURE", "containerDiskInGb": 10, "volumeInGb": 0,
-                     "dockerStartCmd": ["bash", "-c", "sleep 300"]})
+            pod = create_pod("v2a-selftest", "runpod/base:0.6.2-cpu",
+                             ["NVIDIA RTX A4000", "NVIDIA RTX 2000 Ada Generation", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 3090"],
+                             10, {}, "sleep 300")
             pid = pod.get("id"); t0 = time.time()
             try:
                 while time.time() - t0 < 240:
                     info = rp("GET", f"/pods/{pid}")
-                    if info.get("desiredStatus") == "RUNNING" and (info.get("runtime") or info.get("publicIp") or time.time() - t0 > 60):
+                    if (info.get("status") or info.get("desiredStatus")) == "RUNNING" and (info.get("runtime") or info.get("publicIp") or time.time() - t0 > 60):
                         break
                     time.sleep(10)
-                return f"pod {pid} started in {int(time.time()-t0)}s at ${pod.get('costPerHr', '?')}/hr"
+                return f"pod {pid} started in {int(time.time()-t0)}s at ${pod.get('cost', pod.get('costPerHr', '?'))}/hr"
             finally:
                 rp("DELETE", f"/pods/{pid}")
                 time.sleep(5)
-                left = [p for p in (rp("GET", "/pods") or []) if p.get("id") == pid and p.get("desiredStatus") != "TERMINATED"]
+                left = [p for p in list_pods() if p.get("id") == pid and (p.get("status") or p.get("desiredStatus")) != "TERMINATED"]
                 if left: raise RuntimeError(f"pod {pid} may still exist: delete it in the RunPod app!")
         check("Start + delete a real GPU pod (~$0.01)", pod)
     S["selftest"] = {"state": "done", "results": res, "ts": int(time.time())}

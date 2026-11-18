@@ -9,7 +9,7 @@ exec > >(tee -a /tmp/pipeline.log) 2>&1
 DEST="$B2_BUCKET/jobs/$JOB_NAME/stage1"
 pip install -q --upgrade b2 huggingface_hub uv
 source "$HERE/status.sh"
-selfdestruct () { runpodctl remove pod "$RUNPOD_POD_ID" 2>/dev/null || curl -s -X DELETE "https://rest.runpod.io/v1/pods/$RUNPOD_POD_ID" -H "Authorization: Bearer $RUNPOD_API_KEY"; }
+selfdestruct () { runpodctl remove pod "$RUNPOD_POD_ID" 2>/dev/null || curl -s -X DELETE "https://api.runpod.io/v2/pods/$RUNPOD_POD_ID" -H "Authorization: Bearer $RUNPOD_API_KEY"; }
 
 st mocap_setup "Mocap pod is up, checking budget" 0 force
 bash "$HERE/ledger.sh" check "$STAGE1_CAP_USD" || { st failed "Budget would run out — not starting" "" force; selfdestruct; exit 1; }
