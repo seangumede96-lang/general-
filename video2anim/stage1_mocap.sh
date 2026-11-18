@@ -25,11 +25,15 @@ st mocap_setup "Installing SAM-Body4D" 10 force
 cd $W
 [ -d sam-body4d ] || git clone --recursive https://github.com/gaomingqi/sam-body4d.git
 cd sam-body4d
-uv venv -p 3.12 .venv && source .venv/bin/activate
-uv pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu118
-uv pip install 'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' --no-build-isolation --no-deps
-uv pip install -e models/sam3
-uv pip install -e .
+# Into the image's own Python and PyTorch (the recipe that worked on 2026-11-12): a separate env with
+# CUDA 11.8 wheels can't build detectron2 against the image's CUDA 12 compiler.
+export PIP_BREAK_SYSTEM_PACKAGES=1 DEBIAN_FRONTEND=noninteractive
+apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq ffmpeg build-essential libegl1 libgl1 libgles2 libglib2.0-0 libosmesa6 >/dev/null 2>&1 || true
+command -v python >/dev/null || ln -sf "$(command -v python3)" /usr/local/bin/python
+python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available())"
+pip install -q 'git+https://github.com/facebookresearch/detectron2.git@a1ce2f9' --no-build-isolation --no-deps
+pip install -q -e models/sam3
+pip install -q -e .
 
 st mocap_setup "Loading model checkpoints (B2 cache, else Hugging Face)" 30 force
 if b2 ls "b2://$B2_BUCKET/cache/sam-body4d-ckpts/" | grep -q .; then

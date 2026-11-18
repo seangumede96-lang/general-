@@ -209,7 +209,7 @@ def claude_bin():
 
 
 STAGE_POD = {
-    "mocap":  {"script": "stage1_mocap.sh", "gpus": ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB", "NVIDIA H100 PCIe"],
+    "mocap":  {"script": "stage1_mocap.sh", "image": "runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404", "gpus": ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB", "NVIDIA H100 PCIe"],
                "disk": 60, "rate": "STAGE1_RATE_USD_HR", "cap": "STAGE1_CAP_USD"},
     "render": {"script": "stage2_render_style.sh", "gpus": ["NVIDIA GeForce RTX 4090", "NVIDIA RTX A6000", "NVIDIA L40S"],
                "disk": 80, "rate": "STAGE2_RATE_USD_HR", "cap": "STAGE2_CAP_USD"},
@@ -236,10 +236,11 @@ def launch(stage, job_env):
     s = STAGE_POD[stage]
     cmd = (f"pip -q install b2 && b2 sync --no-progress b2://{BUCKET}/code/video2anim /workspace/v2a "
            f"&& bash /workspace/v2a/{s['script']}; sleep 30")
-    envs = {**pod_keys(stage, job_env["JOB_NAME"]), **job_env}
+    # PIP_BREAK_SYSTEM_PACKAGES: newer (Ubuntu 24.04) images refuse system-wide pip installs without it.
+    envs = {**pod_keys(stage, job_env["JOB_NAME"]), **job_env, "PIP_BREAK_SYSTEM_PACKAGES": "1"}
     # RunPod's own data centres only: community machines are run by strangers.
     try:
-        return create_pod(f"v2a-{stage}-{job_env['JOB_NAME']}", IMAGE, s["gpus"], s["disk"], envs, cmd), "SECURE"
+        return create_pod(f"v2a-{stage}-{job_env['JOB_NAME']}", s.get("image", IMAGE), s["gpus"], s["disk"], envs, cmd), "SECURE"
     except Exception as e:
         raise RuntimeError(f"Couldn't start a {stage} pod: {e}")
 
