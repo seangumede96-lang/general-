@@ -25,14 +25,19 @@ b2 file download --no-progress "b2://$B2_BUCKET/$INPUT_VIDEO" $W/in/video.mp4
 b2 file download --no-progress "b2://$B2_BUCKET/jobs/$JOB_NAME/seeds.json" $W/in/seeds.json
 
 st mocap_setup "Installing SAM 2 and 4D-Humans" 10 force
-apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq ffmpeg git >/dev/null 2>&1 || true
+apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq ffmpeg git libegl1 libgl1 libgles2 libglib2.0-0 libosmesa6 >/dev/null 2>&1 || true
+# 4D-Humans imports its (unused) mesh renderer, pyrender, at load time: give it a headless OpenGL.
+export PYOPENGL_PLATFORM=egl
 command -v python >/dev/null || ln -sf "$(command -v python3)" /usr/local/bin/python
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available())"
 SAM2_BUILD_CUDA=0 pip install -q "git+https://github.com/facebookresearch/sam2.git"
 # 4D-Humans without its 'chumpy' dependency (doesn't install on Python 3.12); the SMPL file is converted instead.
 pip install -q --no-deps "git+https://github.com/shubham-goel/4D-Humans.git"
-pip install -q gdown hydra-core pytorch-lightning smplx==0.1.28 yacs einops timm webdataset dill pandas scikit-image opencv-python-headless
-python -c "import sam2, hmr2; print('sam2 + hmr2 import ok')"
+pip install -q gdown hydra-core omegaconf pytorch-lightning smplx==0.1.28 yacs einops timm webdataset braceexpand dill pandas \
+  scikit-image opencv-python-headless pyrender trimesh rich
+pip install -q -U "PyOpenGL>=3.1.7"   # pyrender pins 3.1.0, which predates Python 3.12
+# Load exactly what the run uses now, so a missing piece fails here (minutes in), not after the downloads.
+python -c "import sam2; from sam2.build_sam import build_sam2_video_predictor; from hmr2.models import load_hmr2, download_models; from hmr2.datasets.vitdet_dataset import ViTDetDataset; from hmr2.utils import recursive_to; print('sam2 + hmr2 import ok')"
 
 st mocap_setup "Loading models (B2 cache, else download once)" 25 force
 C4=$(python -c "from hmr2.configs import CACHE_DIR_4DHUMANS as c; print(c)")
