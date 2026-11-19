@@ -6,10 +6,7 @@ termux-wake-lock
 sleep 20                                   # give Wi-Fi a moment after boot
 LOG=$HOME/v2a_boot.log
 echo "boot $(date)" >> "$LOG"
-# ~/.bashrc stops early when not interactive (as at boot), so the keys file is loaded directly too.
-RUN='for f in ~/.profile ~/.bashrc ~/.bash_profile; do [ -f "$f" ] && . "$f" 2>/dev/null; done;
-     set -a; [ -f ~/.cloud-keys/credentials.env ] && . ~/.cloud-keys/credentials.env; set +a;
-     cd ~/general-/video2anim/portal && exec python3 server.py'
+RUN='bash ~/general-/video2anim/portal/control.sh start'   # assistant app + portal + pod guard (keys loaded inside)
 if command -v proot-distro >/dev/null 2>&1 && proot-distro list 2>/dev/null | grep -qi "ubuntu.*installed\|Installed.*ubuntu" \
    || [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu" ]; then
   nohup proot-distro login ubuntu -- bash -c "$RUN" >> "$LOG" 2>&1 &
