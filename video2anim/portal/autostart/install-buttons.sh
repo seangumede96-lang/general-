@@ -9,5 +9,7 @@ TERMUX_HOME=/data/data/com.termux/files/home
 mkdir -p "$TERMUX_HOME/.shortcuts"
 cp "$HERE/start-video2anim.sh" "$TERMUX_HOME/.shortcuts/Start video2anim"
 cp "$HERE/stop-video2anim.sh" "$TERMUX_HOME/.shortcuts/Stop video2anim"
-chmod 700 "$TERMUX_HOME/.shortcuts" "$TERMUX_HOME/.shortcuts/Start video2anim" "$TERMUX_HOME/.shortcuts/Stop video2anim"
+cp "$HERE/claude-remote.sh" "$TERMUX_HOME/.shortcuts/Claude remote"
+cp "$HERE/claude-remote-stop.sh" "$TERMUX_HOME/.shortcuts/Stop Claude remote"
+chmod 700 "$TERMUX_HOME/.shortcuts" "$TERMUX_HOME/.shortcuts/"*
 echo "Buttons installed. Add the Termux:Widget widget to your home screen to see them."
