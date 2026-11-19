@@ -13,6 +13,9 @@
 The frames folder is the pod's temporary copy of the video; this script never writes any image.
 """
 import argparse, glob, json, os, sys, time
+# PyTorch 2.6+ loads checkpoints 'weights only' by default and refuses the official 4D-Humans checkpoint
+# (it stores its settings as omegaconf objects). It's the project's own published file, so load it fully.
+os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
 import numpy as np
 import cv2
 import torch
@@ -46,8 +49,11 @@ with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
     for k, pts in enumerate(people):
         pos = [[x * W, y * H] for x, y in pts]
         neg = [[x * W, y * H] for j, q in enumerate(people) if j != k for x, y in q]
+        box = (seeds.get("boxes") or [None] * P)[k] if k < len(seeds.get("boxes") or []) else None
+        extra = {"box": np.array([box[0] * W, box[1] * H, box[2] * W, box[3] * H], np.float32)} if box else {}
         pred.add_new_points_or_box(state, frame_idx=f0, obj_id=k + 1, points=np.array(pos + neg, np.float32),
-                                   labels=np.array([1] * len(pos) + [0] * len(neg), np.int32))
+                                   labels=np.array([1] * len(pos) + [0] * len(neg), np.int32), **extra)
+        log(f"person {k + 1}: {len(pos)} taps{' + outline box' if box else ''}")
     for reverse in (False, True):
         for fi, obj_ids, logits in pred.propagate_in_video(state, start_frame_idx=f0, reverse=reverse):
             for j, oid in enumerate(obj_ids):
@@ -63,6 +69,12 @@ from hmr2.models import download_models, load_hmr2, DEFAULT_CHECKPOINT
 from hmr2.datasets.vitdet_dataset import ViTDetDataset
 from hmr2.utils import recursive_to
 download_models(CACHE_DIR_4DHUMANS)
+try:  # belt and braces for PyTorch versions that ignore the variable above
+    import omegaconf, typing, collections
+    torch.serialization.add_safe_globals([omegaconf.dictconfig.DictConfig, omegaconf.listconfig.ListConfig, omegaconf.base.ContainerMetadata,
+                                          omegaconf.base.Metadata, omegaconf.nodes.AnyNode, typing.Any, dict, list, int, collections.defaultdict])
+except Exception as e:
+    log("note: couldn't pre-allow checkpoint types:", e)
 model, cfg = load_hmr2(DEFAULT_CHECKPOINT)
 model = model.cuda().eval()
 focal = cfg.EXTRA.FOCAL_LENGTH / cfg.MODEL.IMAGE_SIZE * max(W, H)

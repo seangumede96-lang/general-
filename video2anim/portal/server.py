@@ -293,6 +293,7 @@ def run_job(p):
                    "REF_IMAGE": ("refs/" + p["ref"]) if p.get("ref") else "",
                    "LORA_FILE": p["lora"], "STYLE_PROMPT": p["prompt"], "STYLE_TAG": p["style_tag"],
                    "DENOISE": str(p["denoise"]), "PREVIEW_EVERY": str(p["preview_every"]),
+                   "STYLE_QUALITY": "preview" if p["mode"] == "preview" else (p.get("style_quality") or "full"),
                    "RESTYLE_ONLY": "1" if p["mode"] in ("restyle", "preview") else "0",
                    "PERSON_INDEX": str(p.get("person", 0))}
         for key in [k for k in (p.get("video"), ("refs/" + p["ref"]) if p.get("ref") else None) if k]:
@@ -312,7 +313,7 @@ def run_job(p):
                 raise RuntimeError("4D-Humans needs each person marked: tap each person on the video first.")
             if not [f for f in b2_ls("smpl/") if f.lower().endswith((".zip", ".pkl"))]:
                 raise RuntimeError("Upload the SMPL body file first (Mocap section, 'SMPL file').")
-            b2_write(f"jobs/{job}/seeds.json", json.dumps({"t": float(seeds.get("t", 0)), "people": seeds["people"]}))
+            b2_write(f"jobs/{job}/seeds.json", json.dumps({"t": float(seeds.get("t", 0)), "people": seeds["people"], "boxes": seeds.get("boxes") or []}))
         stages = ([mocap] if p["mode"] == "full" else []) + ["render"]
         for stage in stages:
             if S["run"].get("cancel"): break
@@ -584,6 +585,13 @@ class H(BaseHTTPRequestHandler):
             # the page carries its own version, so an old copy (kept by the phone while the portal was off) reloads itself
             html = open(os.path.join(HERE, "index.html"), "rb").read()
             return self.send(200, html.replace(b"__PAGE_VERSION__", page_version().encode()), "text/html; charset=utf-8")
+        if u.path.startswith("/vendor/mediapipe/"):   # MediaPipe files for tap-to-outline (served only to this phone)
+            rel = u.path[len("/vendor/mediapipe/"):]
+            full = os.path.realpath(os.path.join(HERE, "vendor", "mediapipe", rel))
+            if not full.startswith(os.path.realpath(os.path.join(HERE, "vendor", "mediapipe")) + os.sep) or not os.path.isfile(full):
+                return self.send(404, {"error": "not found"})
+            ctype = {".mjs": "text/javascript", ".js": "text/javascript", ".wasm": "application/wasm"}.get(os.path.splitext(full)[1], "application/octet-stream")
+            return self.send(200, open(full, "rb").read(), ctype)
         static = {"/manifest.json": "application/manifest+json", "/sw.js": "application/javascript",
                   "/icon-192.png": "image/png", "/icon-512.png": "image/png", "/apple-touch-icon.png": "image/png"}
         if u.path in static:

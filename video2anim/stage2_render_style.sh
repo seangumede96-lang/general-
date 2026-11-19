@@ -67,6 +67,29 @@ b2 sync --no-progress $W/frames "b2://$RAW"    # saved so later style changes sk
 ffmpeg -y -loglevel error -framerate $FPS -i $W/frames/f_%04d.png -c:v libx264 -crf 20 -pix_fmt yuv420p $W/final/raw_render.mp4
 fi
 
+# ---- styling choice (portal "Styling"): how many frames Krea repaints, at what size ----
+#   full: every frame, 1088x1920, 8 steps     balanced: every 2nd frame, in-betweens blended by motion
+#   budget: every 4th frame, blended           fast: every frame at half size, 4 steps (softer)
+#   preview: 1 in 10 frames, choppy            none: no AI styling, the plain mannequin video
+STYLE_QUALITY=${STYLE_QUALITY:-full}
+case "$STYLE_QUALITY" in
+  balanced) EVERY=2 ;; budget) EVERY=4 ;; preview) EVERY=${PREVIEW_EVERY:-10} ;;
+  fast) EVERY=1; export STYLE_W=544 STYLE_H=960 STEPS=4 ;;
+  none) EVERY=1 ;;
+  *) EVERY=${PREVIEW_EVERY:-1} ;;
+esac
+if [ "$STYLE_QUALITY" = "none" ]; then
+  st assemble "No styling chosen: saving the plain mannequin video" 50 force
+  NAME="${JOB_NAME}_mannequin"
+  if [ -f $W/final/raw_render.mp4 ]; then cp $W/final/raw_render.mp4 $W/final/$NAME.mp4
+  else ffmpeg -y -loglevel error -framerate $FPS -i $W/frames/f_%04d.png -vf "scale=1080:1920:flags=lanczos" -c:v libx264 -crf 18 -pix_fmt yuv420p $W/final/$NAME.mp4; fi
+  b2 sync --no-progress $W/final "b2://$JOB/stage2"
+  b2 file upload --no-progress "$B2_BUCKET" /tmp/pipeline.log "jobs/$JOB_NAME/stage2/pipeline_${NAME}.log"
+  bash ./ledger.sh add "$(cat /tmp/spent_usd 2>/dev/null || echo 0.05)" "render:$NAME"
+  st done "Finished: $NAME.mp4 (no styling) — render pod deleted" 100 force; sleep 3
+  runpodctl remove pod "$RUNPOD_POD_ID"; exit 0
+fi
+
 st style_setup "Loading ComfyUI, Krea 2 and your LoRA" 0 force
 cd $W
 [ -d ComfyUI ] || git clone -q https://github.com/comfyanonymous/ComfyUI.git
@@ -93,7 +116,6 @@ until curl -s 127.0.0.1:8188/system_stats >/dev/null; do sleep 2; done
 
 st style "Upscaling and applying your LoRA style" 0 force
 cd "$HERE"
-EVERY=${PREVIEW_EVERY:-1}
 REFARGS=()
 if [ -n "${REF_IMAGE:-}" ]; then
   b2 file download --no-progress "b2://$B2_BUCKET/$REF_IMAGE" "$W/job/$(basename $REF_IMAGE)" && REFARGS+=(--ref "$W/job/$(basename $REF_IMAGE)")
@@ -109,9 +131,11 @@ done
 
 st assemble "Making the final 1080x1920 video" 50 force
 OUTFPS=$(python3 -c "print($FPS/$EVERY)")
-NAME="${JOB_NAME}_${STYLE_TAG:-style}$([ "$EVERY" != "1" ] && echo _preview)"
+NAME="${JOB_NAME}_${STYLE_TAG:-style}_${STYLE_QUALITY}"
+# balanced/budget: the frames in between are made by motion-compensated blending; preview stays choppy
+BLEND=""; case "$STYLE_QUALITY" in balanced|budget) BLEND="minterpolate=fps=$FPS:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1," ;; esac
 ffmpeg -y -loglevel error -framerate $OUTFPS -pattern_type glob -i "$W/styled/*.png" \
-  -vf "scale=1080:1920:flags=lanczos,deflicker=size=5:mode=pm" -r $FPS \
+  -vf "${BLEND}scale=1080:1920:flags=lanczos,deflicker=size=5:mode=pm" -r $FPS \
   -c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p -movflags +faststart $W/final/$NAME.mp4
 
 st assemble "Uploading results" 90 force

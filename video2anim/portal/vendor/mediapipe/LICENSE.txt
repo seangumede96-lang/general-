@@ -1,0 +1,5 @@
+MediaPipe Tasks Vision 1.2.3 (npm @mediapipe/tasks-vision), Apache-2.0, Google LLC.
+vision_bundle.mjs and wasm/vision_wasm_internal.{js,wasm} copied unchanged from the npm package.
+magic_touch.tflite (Interactive Segmenter, float32, latest as of 2026-11-19) from
+https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/latest/magic_touch.tflite (Apache-2.0).
+Runs only in the owner's browser: the tap-to-outline preview when marking people for 4D-Humans mocap.
