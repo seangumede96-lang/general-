@@ -559,6 +559,12 @@ def auto_update():
             S["update_error"] = str(e)[:200]
 
 
+def page_version():
+    """Short fingerprint of the portal page as it is on disk now."""
+    import hashlib
+    return hashlib.md5(open(os.path.join(HERE, "index.html"), "rb").read()).hexdigest()[:10]
+
+
 # ---------------- HTTP ----------------
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -575,7 +581,9 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query)
         if u.path == "/":
-            return self.send(200, open(os.path.join(HERE, "index.html"), "rb").read(), "text/html; charset=utf-8")
+            # the page carries its own version, so an old copy (kept by the phone while the portal was off) reloads itself
+            html = open(os.path.join(HERE, "index.html"), "rb").read()
+            return self.send(200, html.replace(b"__PAGE_VERSION__", page_version().encode()), "text/html; charset=utf-8")
         static = {"/manifest.json": "application/manifest+json", "/sw.js": "application/javascript",
                   "/icon-192.png": "image/png", "/icon-512.png": "image/png", "/apple-touch-icon.png": "image/png"}
         if u.path in static:
@@ -584,7 +592,7 @@ class H(BaseHTTPRequestHandler):
             threading.Thread(target=refresh_lists, daemon=True).start()
             r = S["run"]
             missing = [k for k, v in KEYS.items() if not v]
-            return self.send(200, {"run": r, "status": S["status"], "log": S["log"], "lists": S["lists"],
+            return self.send(200, {"page": page_version(), "run": r, "status": S["status"], "log": S["log"], "lists": S["lists"],
                                    "results": S["lists"].get("results", []), "claude": S["claude"],
                                    "uploads": S["uploads"], "ref_desc": S["ref_desc"],
                                    "selftest": S.get("selftest"), "version": S.get("version"),
